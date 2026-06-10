@@ -1,0 +1,1233 @@
+DashGaussian: Optimizing 3D Gaussian Splatting in 200 Seconds
+Youyu Chen1#
+Junjun Jiang1
+Kui Jiang1
+Xiao Tang2
+Zhihao Li2
+Xianming Liu1
+Yinyu Nie2
+1Harbin Institute of Technology
+2Huawei Noah’s Ark Lab
+Figure 1. We propose DashGaussian, a fast 3D Gaussian Splatting (3DGS) optimization method that can be easily plugged into existing
+3DGS backbones. DashGaussian significantly boosts the training speed of various 3DGS backbones by 45.7% on average without trading
+off rendering quality. Equipping DashGaussian to prior-art 3DGS methods, we reduce the optimization time of a 3DGS model with millions
+of primitives to 200 seconds on a consumer-grade GPU. The figures above show the scene “stump” in the Mip-NeRF 360 dataset.
+Abstract
+3D Gaussian Splatting (3DGS) renders pixels by rasteriz-
+ing Gaussian primitives, where the rendering resolution and
+the primitive number, concluded as the optimization com-
+plexity, dominate the time cost in primitive optimization. In
+this paper, we propose DashGaussian, a scheduling scheme
+over the optimization complexity of 3DGS that strips redun-
+dant complexity to accelerate 3DGS optimization. Specifi-
+cally, we formulate 3DGS optimization as progressively fit-
+ting 3DGS to higher levels of frequency components in the
+training views, and propose a dynamic rendering resolution
+scheme that largely reduces the optimization complexity
+based on this formulation. Besides, we argue that a specific
+rendering resolution should cooperate with a proper primi-
+tive number for a better balance between computing redun-
+dancy and fitting quality, where we schedule the growth of
+the primitives to synchronize with the rendering resolution.
+Extensive experiments show that our method accelerates the
+optimization of various 3DGS backbones by 45.7% on av-
+erage while preserving the rendering quality. Project page
+is available at dashgaussian.github.io.
+1. Introduction
+Novel view synthesis has long been investigated as an im-
+portant branch of 3D scene reconstruction. Neural Radi-
+ance Field (NeRF) [32] as a milestone work has largely im-
+proved the visual quality of novel views, but at the cost of
+days to optimize a single scene. Though many efforts [6–
+8, 11, 16, 29, 33, 43] have been made to improve the effi-
+ciency, NeRF-based methods still face challenges in balanc-
+ing the optimization time and rendering quality. In contrast,
+3D Gaussian Splatting (3DGS) [21] utilizes Gaussian prim-
+itives to model a scene, achieving equivalent novel view
+rendering quality as NeRF while reducing the optimization
+time of one scene to tens of minutes. Nevertheless, there
+remains a high demand for further acceleration to enable
+3DGS applications on devices with limited computational
+power or in large-scale, time-intensive scene reconstruction
+tasks [26, 28, 30, 48].
+Given a specific 3DGS backbone, there are multiple
+strategies to accelerate its optimization, which can be col-
+lected into two major categories. From an engineering per-
+#This work was done during he was an intern at Huawei.
+Corresponding author. E-mail: jiangjunjun@hit.edu.cn.
+1
+arXiv:2503.18402v2  [cs.CV]  26 Mar 2025
+
+spective, some works [10, 12, 14, 31, 44] accelerate the op-
+timization by refining the rendering pipeline to enable high-
+efficiency computation. From an algorithmic perspective,
+some works [13, 34] propose to prune redundant Gaussian
+primitives after primitive densification. While these algo-
+rithmic methods perform effectively, the rendering quality
+noticeably declines when a considerable number of param-
+eters are excluded to speed up the optimization.
+Instead of eliminating redundant Gaussian primitives,
+we pursue an effective strategy for allocating computational
+resources, which smartly leverages each Gaussian primitive
+to be more time-efficiently optimized. This is based on three
+key observations. First, in 3DGS optimization, computa-
+tional resources are primarily consumed by three main op-
+erations — forward rendering, gradient back-propagation,
+and primitive update — all of which have their computa-
+tional complexity commonly relying on the rendering res-
+olution and the number of Gaussian primitives. Second,
+rendering high-resolution images at the beginning of opti-
+mization is thriftless because the primitives are sparse at this
+stage. Third, the late stage of the optimization consumes
+a huge portion of time cost because of the large primitive
+number while bringing limited rendering quality improve-
+ment (see the curves of backbones in Fig. 1). These ob-
+servations inspire us to propose a more effective allocation
+of computational resources for current 3DGS methods. For
+simplicity, we refer to the rendering resolution and the num-
+ber of primitives collectively as the ‘optimization complex-
+ity’. By manipulating the optimization complexity on dif-
+ferent optimization stages, one can arbitrarily customize the
+computational resource distribution. Naively reducing op-
+timization complexity can promisingly achieve acceleration
+though, it usually trades off the rendering quality.
+One way to manipulate the optimization complexity is to
+reduce the rendering resolution in the early stage of 3DGS
+optimization. However, simply reducing the resolution in
+training results in 3D aliasing [27, 46], which sacrifices the
+rendering fidelity in the original resolution. Nevertheless,
+according to image processing theory, when comparing two
+images — one downsampled from the other — the key dif-
+ference between them lies in the residual frequency com-
+ponents involved in the high-resolution image but absent
+in the low-resolution one [17]. This indicates that increas-
+ing the rendering resolution during the optimization process
+is equivalent to gradually fitting 3DGS to higher levels of
+frequency components in the training views (see Fig. 2).
+Inspired by this, we propose a scene-adaptive frequency-
+based resolution scheduling scheme that progressively in-
+creases the rendering resolution throughout the entire opti-
+mization process while ensuring its fidelity at the end.
+Given the scheduled rendering resolution, we point out
+that a specific rendering resolution should be paired with
+an appropriate number of Gaussian primitives to better bal-
+ance the computational redundancy and fitting quality of
+3DGS. To this end, we design a primitive number sched-
+uler that tames the primitives to grow simultaneously with
+the rendering resolution by coupling them with a numeri-
+cal constraint. This scheduler produces a concave-up curve
+depicting the growth of the primitive, which spans over the
+entire optimization process (see Fig. 2). Such a concave-up
+growth curve possesses significant advantage over the ones
+in existing works that are either concave-down [21, 31] or
+reach their peak at half of the optimization iterations [5, 21].
+Moreover, we introduce a momentum-based primitive bud-
+geting method to adaptively estimate the maximum num-
+ber of primitives in the growth curve, rather than relying on
+dataset priors as in existing methods [5, 13, 22, 31].
+We integrate the proposed resolution scheduler and the
+primitive scheduler, presenting DashGaussian, which sig-
+nificantly accelerates the optimization process across vari-
+ous 3DGS backbones by 45.7% on average without trading
+off the rendering quality. To summarize our contributions,
+• We speed up the optimization of 3DGS by reasonably dis-
+tributing the computational resources throughout the op-
+timization process.
+• We propose a scheduling method to corporately control
+the growth of rendering resolution and Gaussian primi-
+tives, ensuring that the rendering quality is maintained.
+• We design an adaptive Gaussian primitive budgeting
+method to determine the primitive number demanded by
+the scene, releasing primitive growth scheduling from ap-
+pointing the final primitive number heuristically.
+2. Related Work
+Novel View Synthesis.
+Among the vast amount of inves-
+tigations on novel view synthesis [4, 9, 15, 35, 37], Neu-
+ral Radiance Fields (NeRF) [32] have achieved particu-
+lar success, but at the cost of tens of hours to optimize
+for a single scene [1, 2, 18, 32, 33, 41]. Although there
+have been many works focusing on improving NeRF’s ef-
+ficiency [6, 8, 16, 29, 33, 43, 50], they still struggle with
+balancing the optimization efficiency and rendering quality.
+Alternatively, 3D Gaussian Splatting (3DGS) [21] emerges
+as a solution that possesses comparable rendering quality to
+NeRF together with significant advancement in terms of the
+speed of both optimization and rendering. The efficiency
+of 3DGS benefits from its GPU-friendly rendering pipeline,
+which largely reduces the computational burden for its opti-
+mization. 3DGS has been widely applied in different tasks,
+such as large scene reconstruction [28, 30, 48], digital hu-
+man [25, 45], and 3D segmentation [19, 39]. Improving
+the performance of 3DGS is fundamental and significant to
+benefit the downstream tasks.
+Acceleration for 3DGS Optimization.
+Since the success
+of 3DGS is largely driven by its computational efficiency, it
+2
+
+Figure 2. The pipeline of DashGaussian. DashGaussian determines the rendering resolution for each 3DGS optimization step with our
+resolution scheduling method. The insight of the resolution scheduling is to gradually fit 3DGS to higher level of frequency components
+in the training views throughout the entire optimization process. By directing the downsampling of training views with our scheduler,
+we significantly reduce the time cost for 3DGS optimization while preserving the rendering quality. We further manage the growth of
+Gaussian primitives, which cooperates with the scheduled rendering resolution. It prevents possible over-densification issues during the
+low-resolution optimization phase and further accelerates the optimization with suppressed primitive growth.
+is intuitive to further improve its speed with high-efficiency
+computation. By refining the implementation of forward-
+pass, backward-pass and parameter update of 3DGS, recent
+works [12, 14, 31, 44] accelerate the optimization of 3DGS
+by a large margin. Meanwhile, reducing the parameters of
+3DGS is also a promising option to accelerate the optimiza-
+tion. For example, Fang and Wang [13] propose to reduce
+the number of Gaussian primitives by pruning the crowded
+primitives. Papantonakis et al. [34] further propose to strip
+the redundant appearance descriptors of each primitive to
+reduce the optimized parameters. However, these methods
+inevitably hinder the rendering quality because of their hard
+cropping operation to shrink the size of the original 3DGS
+model. In contrast, DashGaussian ingeniously suppresses
+the optimization complexity and densifies Gaussian prim-
+itives without hard cropping, thus holding the potential to
+preserve the rendering quality.
+Scheduled 3DGS Optimization
+3DGS [21] densifies the
+Gaussian primitives, which results in an unpredictable size
+of the optimized Gaussians. To make the densification con-
+trollable, Mallick et al. [31] propose to mimic the primi-
+tive growth of 3DGS [21] with a constructive densification
+process. Bul`o et al. [5] propose to densify the Gaussian
+primitive by a constant ratio until the predetermined prim-
+itive budget is met. On the other hand, 3DGS with Level
+of Details (LoD) [38, 40] is optimized with multiple render-
+ing resolutions for seamlessly rendering at varying levels of
+details. However, these methods are time-consuming in op-
+timization while their levels of resolution are fixed. Dash-
+Gaussian corporately schedules both rendering resolution
+and primitive growth in an adaptive manner, which signif-
+icantly boosts the optimization of 3DGS without predeter-
+mining the final primitive number heuristically.
+3. Preliminary
+Given a set of posed images capturing a scene and the
+corresponding point cloud derived from the structure-from-
+motion algorithm [36], 3DGS optimizes a set of 3D Gaus-
+sian primitives {Gi(x) = e−1
+2 (x−pi)Σ−1
+i
+(x−pi)}P
+i=1 to rep-
+resent the scene for novel view synthesis. Each 3D Gaus-
+sian primitive Gi is characterized with its center position
+pi ∈R3, covariance matrix defined in the world space
+Σi ∈R3×3, opacity oi ∈(0, 1) and color coefficients ci.
+Here, P is the total number of Gaussian primitives used to
+represent the scene. To render images of camera views,
+3DGS splats these Gaussian primitives onto pixels. The
+color C of a pixel u is calculated as
+C(u) =
+P
+X
+i=1
+Ti(u) · wi(u) · ci, Ti(u) =
+i−1
+Y
+j=1
+(1 −wj(u)),
+(1)
+where wi(u) = oiG2D
+i
+(u), and G2D
+i
+denotes the 2D Gaus-
+sian splatted to the image plane from Gi. As the whole
+3
+
+process is fully differentiable, Gi can be optimized by
+back-propagating the gradients from losses between ren-
+derings and training images. The number of rendered pix-
+els, decided by the rendering resolution, indicates the times
+Eq. (1) is processed, thus directly affecting the optimization
+time. The original 3DGS algorithm [21] further incorpo-
+rates a densification operation during the optimization pro-
+cess, which identifies those Gi in under-reconstructed re-
+gions and then clones or splits them to better represent the
+scene. As the Gaussian primitive number P increases, the
+computational burden in Eq. (1) also grows, which directly
+impacts optimization efficiency. We collectively refer to the
+rendering resolution and the number of primitives as opti-
+mization complexity, and our goal is to reduce the overall
+optimization complexity to accelerate 3DGS optimization.
+4. DashGaussian
+In this section, we introduce how DashGaussian strips the
+optimization complexity to accelerate 3DGS optimization
+without trading off rendering quality. Sec. 4.1 reviews the
+aliasing issue in image downsampling, and proposes to for-
+mulate optimizing 3DGS with increasing rendering resolu-
+tion as fitting to different level of frequency components.
+In Sec. 4.2, we introduce our frequency-guided resolution
+scheduling strategy, which adaptively builds the resolution
+schedule for each scene based on the frequency component
+of training views. In Sec. 4.3, we introduce our resolution-
+guided primitive scheduling scheme, which tames the num-
+ber of Gaussian primitives to grow simultaneously with the
+rendering resolution, establishing a reasonable cooperation
+between the rendering resolution and the primitive number.
+4.1. Problem Formulation
+Optimizing 3DGS with images in different resolutions
+while maintaining high rendering fidelity is non-trivial.
+More concretely, we discuss the case where 3DGS is super-
+vised with downsampled low-resolution (LR) images while
+aiming to render the original high-resolution (HR) ones.
+We investigate this problem as it inevitably leads to 3D
+aliasing [46], making it formidable to accelerate the opti-
+mization with LR supervision while keeping a high fidelity
+in HR rendering. However, viewing 3DGS optimization
+through the lens of 2D image reconstruction, the frequency
+theory in image processing offers a fresh perspective.
+We first review image downsampling, which is applied
+to the training views to decrease their resolution. Given an
+image I ∈RH×W being downsampled to Ir ∈R
+H
+r × W
+r , we
+denote their frequency maps with Discrete Fourier Trans-
+form (DFT) by F = DFT(I) ∈RH×W and Fr
+=
+DFT(Ir)
+∈
+R
+H
+r × W
+r , respectively.
+According to the
+Nyquist Sampling Theorem, one can never recover I from
+Ir if the sampling frequency of Ir is less than two times
+of the maximum frequency contained in F. Meanwhile, a
+simple spatial downsampling could result in aliasing issues
+that disturb the recoverable low-frequency components and
+introduce artifacts in Ir. To address this issue, anti-aliasing
+downsampling methods apply a low-pass filter on F in dif-
+ferent ways before downsampling I. The most straightfor-
+ward way is to center crop F to the size of (H/r, W/r),
+scale its numerical value by 1/r2, then inversely transform
+the cropped F into Ir.
+With the above analysis, we see the key difference be-
+tween I and Ir is the residual high-frequency component
+that F embeds while Fr does not. Based on this observa-
+tion, we reformulate optimizing 3DGS with increasing im-
+age resolutions by gradually fitting 3DGS to higher levels
+of frequency components throughout the entire optimiza-
+tion process (see Fig. 2). In Sec. 4.2, we demonstrate that
+this formulation indicates the extent to which downsampled
+images can be used to optimize a 3DGS model.
+4.2. Frequency Guided Resolution Scheduler
+Based on the discussion in Sec. 4.1, we propose to sched-
+ule the rendering resolution of 3DGS throughout the opti-
+mization process, which adaptively distributes optimization
+steps to different resolutions based on the amount of infor-
+mation contained in the frequency domain of each resolu-
+tion. Since our scheduling covers the entire optimization
+process, we can largely reduce the optimization complex-
+ity and reduce the overall time cost. For simplicity, only
+two different resolutions (H, W) and (H/r, W/r), whose
+related notations are defined the same as Sec. 4.1, are intro-
+duced in the following discussion to optimize 3DGS, where
+r ≥1. The LR rendering (H/r, W/r) is applied in the early
+stage of optimization, which is switched to HR rendering
+(H, W) by the end. Here we suppose the LR training views
+for supervision are aliasing freely downsampled from the
+HR training views.
+The key problem is when to increase the rendering reso-
+lution from low to high, solving which is equivalent to an-
+swering how to distribute the total S optimization steps be-
+tween F and Fr. Since Fr is contained within F because I
+is aliasing freely downsampled to Ir, the frequency compo-
+nent in LR images is always accessible in all the S iterations
+for supervision. The question is to know the ‘significance’
+of the HR images and decide the portion they take in the S
+steps to preserve HR rendering fidelity of 3DGS.
+A reasonable definition of the significance should han-
+dle both 2D and 3D aliasing issue during optimization. Be-
+cause 2D aliasing happens in the frequency domain, it in-
+dicates a significance definition based on a numerical fea-
+ture of the frequency map, e.g., the frequency energy which
+dominates the optimization steps with the LR rendering. On
+the other hand, 3D aliasing has been thoroughly discussed
+4
+
+by Mip-Splatting [46]. Though Mip-Splatting alleviated the
+3D aliasing issue, it still encourages optimization in HR for
+high-fidelity HR rendering.
+To balance these two issues, we define the significance
+of images under a specific resolution (h, w) as
+X(F) = 1
+N
+N
+X
+n=1
+h
+X
+i=1
+w
+X
+j=1
+||Fn(i, j)||2,
+(2)
+where Fn = DFT(In); {In}N
+n=1 are the training views
+sampled with the resolution of (h, w), and N is the num-
+ber of training views. Derived from numerical feature in the
+frequency domain, this definition particular emphasizes the
+high-frequency component. Intuitively, if X(F) −X(Fr)
+is far bigger than X(Fr), the optimization steps should be
+dominated with the HR rendering, and vice versa. Follow-
+ing this intuition, we define a fraction function by
+f(F, Fr) = X(F) −X(Fr)
+X(F)
+,
+(3)
+with which we distribute S · f(F, Fr) iterations to the HR
+rendering. In other words, we should increase the rendering
+resolution from (H/r, W/r) to (H, W) at the sr-th itera-
+tion, where sr = S · (1 −f(F, Fr)) = S · X(Fr)/X(F).
+In practice, we can generalize the above discussion
+and adapt Eq. (3) to the case with multiple intermedi-
+ate resolutions.
+Given a group of downsampling factors
+r1, r2, ..., rm that monotonically increase, indicating down-
+sampled images Irm, ..., Ir1, I are progressively involved
+for supervision throughout the optimization process, we
+increase the rendering resolution from (H/ri, W/ri) to
+(H/ri−1, W/ri−1) at the sri-th iteration.
+We correspond the maximal downsampling factor rm
+with the one whose X(Frm) = 1
+aX(F), where a is a hyper-
+parameter (defaulted by 4).
+We linearly sample the rest
+X(Fr1), ..., X(Frm−1) between X(F) and X(Frm), and
+solve the corresponding resolution factors r1, ..., rm−1. The
+rendering resolution r(k) for iteration k between sri and
+sri−1 is interpolated with the inverse square of ri and ri−1.
+Please refer to the supplementary for more details.
+By programming the rendering resolution throughout the
+optimization process of 3DGS with the scheduling scheme
+above (see the curve in Fig. 2), we significantly reduce the
+optimization time while maintaining or even improving the
+quality of the optimized 3DGS, which is revealed by the
+experiments in Sec. 5.3.
+4.3. Resolution Guided Primitive Scheduler
+Recent works have revealed the fact that over-dense Gaus-
+sian primitives only marginally improves rendering quality,
+but largely slows down the optimization [13, 34]. To fur-
+ther improve the efficiency of DashGaussian, it is vital for
+the growth of primitives to avoid over densification in the
+LR optimization stage and determine a proper number of
+Gaussian primitives in the optimized 3DGS model.
+Resolution Guided Densification.
+Since 3DGS is super-
+vised with images capturing the surface of the scene, which
+the Gaussian primitives majorly describe [13, 20, 47], thus
+the number of primitives should correlate to the level of de-
+tail describing the surface, which can be approximated as
+the number of pixels covering the scene. Specifically, de-
+noting the initial primitive number as Pinit, and the desired
+primitive number in the final 3DGS model as Pfin, we con-
+trol the primitive number of the i-th iteration by
+Pi = Pinit + (Pfin −Pinit) /
+
+r(i)2−i/S
+,
+(4)
+where r(i) denotes the rendering resolution of the i-th iter-
+ation, powered by a factor of 2 −i/S. In practice, we find
+too much growth of primitives by the end of optimization
+will result in poor convergence of the primitives, which sig-
+nificantly hinders the quality of the optimized 3DGS model.
+So we gradually decrease the power factor from 2 to 1 along
+the optimization process to suppress the primitive number in
+the early optimization while encouraging its growth in the
+mid-stage of optimization. Such a scheduling scheme pro-
+duces a concave-up function depicting the relation between
+the primitive number and optimization steps with a small
+area under the curve (see Fig. 2), which largely reduces the
+optimization complexity.
+Momentum-based Primitive Budgeting.
+Recent meth-
+ods obtain Pfin relying on the dataset prior [5, 13, 31], such
+as simply setting Pfin as a multiple of Pinit [31], which is a
+rule of thumb and cannot explain if it is enough for fitting a
+scene. We address this problem alternatively by determin-
+ing Pfin along the optimization process, instead of deter-
+mining it ahead of optimization.
+Specifically, inspired by the momentum optimizer [23],
+which updates the parameters of a learning model with the
+accumulated gradients simulating the physical momentum,
+we regard Pfin as the momentum and the number of prim-
+itives naturally densified in each step as the force (denoted
+as Padd). Then we calculate Pfin as
+P (i)
+fin = max(P (i−1)
+fin
+, γ · P (i−1)
+fin
++ η · P (i)
+add),
+(5)
+where γ, η are hyper-parameters (defaulted by 0.98 and 1
+in this paper), i denotes the i-th optimization step. The
+maximum operator is applied to keep P (i)
+fin monotonously
+increasing along the optimization process. With Eq. (5), we
+dynamically update Pfin in Eq. (4), where P (0)
+fin is initial-
+ized as 5 · Pinit. Experiments show that this momentum-
+based scheme performs effectively across various datasets,
+releasing densification scheduling from the need to specify
+an upper bound for the primitive growth.
+5
+
+Table 1. Quantitative comparisons with existing 3DGS fast optimization methods. With DashGaussian, we finish 3DGS optimization
+within 200 seconds while achieving significantly higher rendering quality compared with the other methods. “Ours” in the table reports
+the performance of equipping DashGaussian to Taming-3DGS1 [31]. Time is reported in minutes.
+Method
+MipNeRF-360 [3]
+Deep Blending [18]
+Tanks and Temples [24]
+NGS ↓PSNR↑SSIM↑LPIPS↓Time↓NGS ↓PSNR↑SSIM↑LPIPS↓Time↓NGS ↓PSNR↑SSIM↑LPIPS↓Time↓
+3DGS [21]
+3.12M
+27.72
+0.826
+0.201
+18.31 2.82M
+29.50
+0.904
+0.244
+17.27 1.83M
+23.62
+0.847
+0.177
+10.59
+Reduced-3DGS [34]
+1.44M
+27.28
+0.813
+0.222
+15.52 0.98M
+29.78
+0.907
+0.245
+13.74 0.65M
+23.59
+0.844
+0.185
+8.31
+Mini-Splatting [13]
+0.49M
+27.22
+0.821
+0.217
+14.72 0.34M
+29.95
+0.907
+0.253
+12.91 0.20M
+23.20
+0.835
+0.201
+8.66
+Taming-3DGS [31]
+2.28M
+27.61
+0.821
+0.210
+5.51 2.32M
+29.69
+0.906
+0.245
+4.52 1.51M
+23.62
+0.849
+0.174
+4.02
+DashGaussian (Ours) 2.04M
+27.92
+0.826
+0.208
+3.23 1.94M
+30.02
+0.907
+0.248
+2.20 1.19M
+23.97
+0.851
+0.180
+2.62
+Figure 3. Qualitative results of Tab. 1. We show the rendering results of the “treehill” scene in the Mip-NeRF 360 dataset [3], the
+“playroom” scene in the Deep Blending dataset [18], and the “truck”scene in the Tanks&Temples dataset [24], respectively.
+5. Experiments
+Datasets.
+We conduct experiments on three real-world
+datasets, Mip-NeRF 360 [3], Deep-Blending [18], and
+Tanks&Temples [24], respectively. For fair comparisons,
+we process these datasets following vanilla 3DGS [21].
+We also perform evaluation on MatrixCity dataset [26] for
+large-scale reconstruction in supplementary.
+Metrics.
+To evaluate novel view rendering quality, we re-
+port average PSNR (peak signal-to-noise ratio) , SSIM [42],
+and LPIPS [49] on each dataset. We also report the average
+total optimization time in minutes to measure the optimiza-
+tion speed. Furthermore, we also report the average primi-
+tive number of the optimized 3DGS model on each dataset,
+which gives an overall evaluation on per-primitive contribu-
+tion to novel view rendering quality.
+Implementation Details.
+The resolution downsampling
+factor r(i) defined in Sec. 4.2 is a continuous scalar (see
+Fig. 2). In practice, we modulate r(i) with r(i) = ⌊r(i)⌋
+(see Fig. 4). Such a modulation encourages the Gaussian
+primitives to grow relatively faster against the case without
+modulation, optimizing each Gaussian primitive more suf-
+ficiently to keep the novel view rendering quality.
+When we plug DashGaussian to backbones, the hyper-
+parameters of each backbone are kept unchanged as their
+official implementations. All experiments are conducted on
+a single GPU with about 80 TFLOPS for FP32. Please refer
+to the supplementary for more implementation details.
+5.1. Comparison with Fast Optimization Methods
+Baselines.
+We report the comparisons with the state-of-
+the-art fast optimization methods, i.e., Reduced-3DGS [34],
+Mini-splatting [13] and Taming-3DGS [31] in Tab. 1.
+Reduced-3DGS and Mini-Splatting achieve acceleration by
+pruning low contribution parameters, and Taming-3DGS
+obtains its speed for efficient back-propagation and Sparse
+Adam optimizer. These three methods are representative for
+algorithmic and engineering fast optimization methods.
+Quantitative Results.
+By plugging DashGaussian to
+Taming-3DGS [31], we accomplish the optimization of
+3DGS within 200 seconds, which is reported in Tab. 1.
+Among all the methods in Tab. 1, DashGaussian shows a
+significant improvement in the optimization speed over ex-
+1Taming-3DGS [31] referred to in this paper only includes efficient
+backward implementation and Sparse Adam optimizer.
+6
+
+Table 2. Quantitative results of accelerating various 3DGS backbones using DashGaussian. Plugging DashGaussian into different back-
+bones, their optimization speed is largely improved by 45.7% on average. Most prominently, DashGaussian achieves acceleration with
+negligible compromise and even improvement in the rendering quality. The results advocate that a reasonable computational resource
+allocation across the optimization process can largely boost the optimization while preserving the rendering quality. “Revising-3DGS*”
+denotes our reproduction of the paper [5] based on the Taming-3DGS [31] codebase. Time is reported in minutes.
+Method
+MipNeRF-360 [3]
+Deep Blending [18]
+Tanks and Temples [24]
+NGS ↓PSNR↑SSIM↑LPIPS↓Time↓NGS ↓PSNR↑SSIM↑LPIPS↓Time↓NGS ↓PSNR↑SSIM↑LPIPS↓Time↓
+3DGS [21]
+3.12M
+27.72
+0.826
+0.201
+18.31 2.82M
+29.50
+0.904
+0.244
+17.27 1.83M
+23.62
+0.847
+0.177
+10.59
++Ours
+2.69M
+27.81
+0.828
+0.203
+10.16 2.18M
+29.29
+0.901
+0.256
+8.16 1.43M
+23.83
+0.844
+0.189
+6.13
+Mip-Splatting [46]
+3.97M
+27.91
+0.838
+0.174
+25.83 3.48M
+29.26
+0.902
+0.239
+23.57 2.36M
+23.75
+0.859
+0.156
+14.23
++Ours
+3.14M
+27.99
+0.835
+0.186
+12.60 2.55M
+29.55
+0.903
+0.248
+9.80 1.62M
+23.96
+0.856
+0.172
+6.13
+Revising-3DGS* [5] 1.94M
+27.65
+0.826
+0.194
+5.73 2.02M
+29.54
+0.906
+0.248
+4.06 1.32M
+23.87
+0.856
+0.168
+4.50
++Ours
+1.94M
+27.85
+0.833
+0.191
+3.46 2.02M
+29.76
+0.907
+0.251
+2.21 1.32M
+23.85
+0.853
+0.176
+3.16
+Taming-3DGS [31]
+2.28M
+27.61
+0.821
+0.210
+5.51 2.32M
+29.69
+0.906
+0.245
+4.52 1.51M
+23.62
+0.849
+0.174
+4.02
++Ours
+2.04M
+27.92
+0.826
+0.208
+3.23 1.94M
+30.02
+0.907
+0.248
+2.20 1.19M
+23.97
+0.851
+0.180
+2.62
+5k
+10k
+15k
+20k
+25k
+30k
+Iteration
+0
+1
+2
+3
+4
+5
+6
+Number of Gaussian Primitives
+stump, 3DGS
+stump, Ours
+bicycle, 3DGS
+bicycle, Ours
+5k
+10k
+15k
+20k
+25k
+30k
+Iteration
+1/5
+1/4
+1/3
+1/2
+1
+Resolution Scale
+stump, modulated
+stump, contiguous
+bicycle, modulated
+bicycle, contiguous
+Figure 4.
+Variation in the optimization complexity.
+The left
+shows that DashGaussian scene-adaptively schedules the render-
+ing resolution for the scenes “bicycle” and “stump” from Mip-
+NeRF 360 dataset.
+Please refer to implementation details (be-
+ginning of Sec. 5) for the definition of ‘contiguous’ and ‘modu-
+lated’. The right shows the comparison on primitive growth be-
+tween 3DGS [21] and 3DGS+DashGaussian on these two scenes.
+isting methods, and most importantly, with the SOTA ren-
+dering quality among these methods, which we attribute to
+the benefit from our reformulation of 3DGS optimization.
+Qualitative Results.
+We visualize the results of Tab. 1 in
+Fig. 3. Our method optimizes 3DGS within 200 seconds,
+while the rendering quality is still comparable to or even
+better than the baselines. The improvement comes from
+that DashGaussian effectively helps 3D Gaussians to bet-
+ter fit the captured observations from low to high frequency
+gradually with more reasonable densification.
+5.2. DashGaussian Enhancing Backbones
+Quantitative Results.
+By equipping various 3DGS back-
+bones with DashGaussian, we demonstrate that DashGaus-
+sian generalize well to 3DGS backbones with different op-
+timizers [31], primitive representations [46], and densifi-
+cation scores [5].
+Results are reported in Tab. 2.
+The
+3DGS
+3DGS+Ours
+Taming-3DGS
+Taming-3DGS+Ours
+0
+5
+10
+15
+20
+25
+Time Elapsed Per Iteration (ms)
+7.7
+4.7
+4.1
+2.8
+19.1
+13.1
+6.9
+4.4
+21.7
+12.6
+2.2
+1.4
+forward
+backward
+optimize
+Figure 5. Profiling of the average optimization time on the Mip-
+NeRF 360 dataset. We can see DashGaussian effectively reduces
+the per-iteration elapsed time of all three major operations. It ver-
+ifies that DashGaussian can effectively save the overall computa-
+tional complexity of 3DGS optimization.
+implementation details for each backbone are provided in
+the supplementary. Backbones enhanced with DashGaus-
+sian show a significant improvement in optimization speed
+compared with the vanilla ones, with an acceleration rate
+of 45.7% on average. Besides, we also notice that Dash-
+Gaussian requires fewer number of Gaussian primitives in
+fitting scenes. Despite of the significant acceleration and
+reduction in primitives, the enhanced backbones preserve
+their rendering quality compared to the vanilla ones. The
+results demonstrate the effectiveness and generalization of
+our method, supporting DashGaussian as a plug-and-play
+optimization strategy that is able to be integrated into any
+other 3DGS baselines rather than a dedicated improvement
+on a specific backbone.
+Visualization of Schedulers.
+We show the resolution
+scheduler and the Gaussian primitive scheduler in two dif-
+7
+
+ferent scenes (“bicycle” and “stump”) from the Mip-NeRF
+360 dataset in Fig. 4. Specifically, on the left of Fig. 4, we
+compare our resolution scheduler in different scenes. Im-
+ages in different scenes manifest diverse frequency infor-
+mation, and our method can scene-adaptively schedule the
+rendering resolution. On the right of Fig. 4, we compare the
+primitive growth between 3DGS [21] and its scheduled ver-
+sion (marked as “Ours”). Noticeably, our method represents
+scenes with fewer primitives. Please check the supplemen-
+tary for more analysis on this phenomenon.
+Profiling of the Optimization Time.
+As we pointed out
+in Sec. 1, the three most time-consuming operations in one
+optimization step of 3DGS are forward-rendering, gradient
+back-propagation, and primitive optimizing, respectively.
+We profile the average time cost of them over the whole op-
+timization process on 3DGS [21] and Taming-3DGS [31]
+to see how DashGaussian affects these two backbones with
+different optimizer. The result is shown in Fig. 5. Dash-
+Gaussian brings significant reduction on all of the three
+components, while the acceleration rate is almost consis-
+tent. It demonstrates that DashGaussian can substantially
+speed up the optimization regard less of different implemen-
+tations of the 3DGS backbone.
+5.3. Ablation Study
+We use Taming-3DGS [31] as the backbone and individu-
+ally add each module in DashGaussian to explore their ef-
+fect on the rendering quality and optimization speed.
+Resolution Scheduler.
+We keep the resolution scheduler
+proposed in Sec. 4.3, and remove the primitive scheduler to
+evaluate the resolution scheduler. The corresponding result
+in Tab. 3 is marked as “+Reso-Sche.”, which exhibits an
+allround improvement over the backbone.
+Primitive Scheduler.
+To evaluate the primitive scheduler
+in Sec. 4.3, we have the primitive schedule depending on the
+resolution schedule while disabling the downsampling oper-
+ation on training views to supervise 3DGS with the original
+resolution. The corresponding result in Tab. 3 is marked as
+“+Prim-Sche.”. Acceleration and quality improvement are
+similarly observed as “+Reso-Sche.”.
+Full Method.
+We present the result of equipping the
+backbone with the full DashGaussian, reported as “Full” in
+Tab. 3. By having the two schedulers cooperating with each
+other, DashGaussian significantly reduces the optimization
+time of Taming-3DGS by 41.3%. Meanwhile, our method
+surpasses the rendering quality of the backbone while using
+fewer Gaussian primitives.
+Hyper-parameters.
+The hyper-parameters of DashGaus-
+sian can influence the optimization time and rendering qual-
+ity. We report the ablation studies on them in the supple-
+Table 3. Ablation studies over the proposed scheduling schemes
+of DashGaussian. Experiments are performed on the Mip-NeRF
+360 dataset [3] with Taming-3DGS [31] as the backbone.
+Method
+NGS ↓
+PSNR↑
+SSIM↑
+LPIPS↓
+Time↓
+Taming-3DGS
+2.28M
+27.61
+0.821
+0.210
+5.51
++Reso-Sche.
+2.46M
+27.99
+0.829
+0.196
+4.43
++Prim-Sche.
+2.23M
+27.85
+0.824
+0.208
+4.60
+Full
+2.04M
+27.92
+0.826
+0.208
+3.23
+Table 4. We report the primitive number N bb
+GS of the backbones,
+the primitive number Pfin predicted by our momentum-based
+budgeting, and the primitive number N ours
+GS
+of DashGaussian-
+scheduled backbones. Conducted on Mip-NeRF 360 dataset.
+Method
+Nbb
+GS
+Pfin
+Nours
+GS
+3DGS [21]
+3.12M
+3.08M
+2.69M
+Mip-Splatting [46]
+3.97M
+3.25M
+3.14M
+Taming-3DGS [31]
+2.28M
+2.39M
+2.04M
+mentary, especially γ and η in the momentum-based primi-
+tive budgeting method that potentially influence Pfin.
+5.4. Primitive Growth Upperbound
+We evaluate how precise our momentum-based primitive
+budget method can estimate the maximum primitive num-
+ber of a naturally densified 3DGS. The results are reported
+in Tab. 4. Our method effectively estimates an approxi-
+mate number of primitives to densify for different back-
+bones, while we have N ours
+GS
+less than Pfin because there
+are no more primitives meeting the densification condition
+of the backbones. Further experiments in the supplemen-
+tary demonstrate that the primitive number in the optimized
+DashGaussian tends to be a constant for the same scene and
+will not increase when Pfin is extremely large, which pre-
+vents DashGaussian from out of memory.
+6. Conclusion
+In this paper, we propose DashGaussian, a computational
+resource allocation method to accelerate the optimization
+of 3DGS. Our method innovatively formulates 3DGS op-
+timization as a frequency component fitting process, allo-
+cates the rendering resolution and primitive number corpo-
+rately, and boosts the optimization by a large margin with-
+out compromise in rendering quality. Our method can be
+easily plugged into various 3DGS backbones, possessing
+the potential as a new optimization paradigm for 3DGS.
+This work can also improve the feasibility of training 3DGS
+on large-scale, time-intensive reconstruction tasks. In the
+future work, we will consider integrating a more insightful
+analysis into the connection between the primitive number
+and rendering resolution as a possible direction.
+8
+
+References
+[1] Kara-Ali Aliev, Artem Sevastopolsky, Maria Kolos, Dmitry
+Ulyanov, and Victor Lempitsky. Neural point-based graph-
+ics.
+In Computer Vision – ECCV 2020, pages 696–712,
+Cham, 2020. Springer International Publishing. 2
+[2] Jonathan T. Barron, Ben Mildenhall, Matthew Tancik, Peter
+Hedman, Ricardo Martin-Brualla, and Pratul P. Srinivasan.
+Mip-nerf: A multiscale representation for anti-aliasing neu-
+ral radiance fields. In Proceedings of the IEEE/CVF Interna-
+tional Conference on Computer Vision (ICCV), pages 5855–
+5864, 2021. 2
+[3] Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P.
+Srinivasan, and Peter Hedman. Mip-nerf 360: Unbounded
+anti-aliased neural radiance fields.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 5470–5479, 2022. 6, 7, 8, 12,
+13
+[4] Chris Buehler, Michael Bosse, Leonard McMillan, Steven
+Gortler, and Michael Cohen. Unstructured lumigraph ren-
+dering.
+In Proceedings of the 28th annual conference on
+Computer graphics and interactive techniques, pages 425–
+432, 2001. 2
+[5] Samuel Rota Bul`o, Lorenzo Porzi, and Peter Kontschieder.
+Revising densification in gaussian splatting, 2024. 2, 3, 5, 7,
+11, 12, 13
+[6] Anpei Chen, Zexiang Xu, Andreas Geiger, Jingyi Yu, and
+Hao Su. Tensorf: Tensorial radiance fields. In Computer
+Vision – ECCV 2022, pages 333–350, Cham, 2022. Springer
+Nature Switzerland. 1, 2
+[7] Yujin Chen, Yinyu Nie, Benjamin Ummenhofer, Reiner
+Birkl, Michael Paulitsch, Matthias M¨uller, and Matthias
+Nießner. Mesh2nerf: Direct mesh supervision for neural ra-
+diance field representation and generation, 2024.
+[8] Zhiqin Chen, Thomas Funkhouser, Peter Hedman, and An-
+drea Tagliasacchi. Mobilenerf: Exploiting the polygon ras-
+terization pipeline for efficient neural field rendering on mo-
+bile architectures. In Proceedings of the IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+pages 16569–16578, 2023. 1, 2
+[9] Paul Debevec. Rendering synthetic objects into real scenes:
+bridging traditional and image-based graphics with global il-
+lumination and high dynamic range photography. In ACM
+SIGGRAPH 2008 Classes, New York, NY, USA, 2008. As-
+sociation for Computing Machinery. 2
+[10] Xiaobin Deng, Changyu Diao, Min Li, Ruohan Yu, and Du-
+anqing Xu. Efficient density control for 3d gaussian splat-
+ting, 2025. 2
+[11] Daniel Duckworth, Peter Hedman, Christian Reiser, Pe-
+ter Zhizhin, Jean-Franc¸ois Thibert, Mario Luˇci´c, Richard
+Szeliski, and Jonathan T. Barron. Smerf: Streamable mem-
+ory efficient radiance fields for real-time large-scene explo-
+ration. 43(4), 2024. 1
+[12] Sankeerth Durvasula, Adrian Zhao, Fan Chen, Ruofan
+Liang, Pawan Kumar Sanjaya, and Nandita Vijaykumar.
+Distwar: Fast differentiable rendering on raster-based ren-
+dering pipelines, 2023. 2, 3
+[13] Guangchi Fang and Bing Wang. Mini-splatting: Represent-
+ing scenes with a constrained number of gaussians, 2024. 2,
+3, 5, 6
+[14] Guofeng Feng, Siyan Chen, Rong Fu, Zimu Liao, Yi Wang,
+Tao Liu, Zhilin Pei, Hengjie Li, Xingcheng Zhang, and Bo
+Dai. Flashgs: Efficient 3d gaussian splatting for large-scale
+and high-resolution rendering, 2024. 2, 3
+[15] Andrew Fitzgibbon, Yonatan Wexler, and Andrew Zisser-
+man. Image-based rendering using image-based priors. In-
+ternational Journal of Computer Vision, 63:141–151, 2005.
+2
+[16] Sara Fridovich-Keil, Alex Yu, Matthew Tancik, Qinhong
+Chen, Benjamin Recht, and Angjoo Kanazawa. Plenoxels:
+Radiance fields without neural networks. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 5501–5510, 2022. 1, 2
+[17] Rafael C. Gonzalez and Richard E. Woods. Digital Image
+Processing (3rd Edition). Prentice-Hall, Inc., USA, 2006. 2
+[18] Peter Hedman, Julien Philip, True Price, Jan-Michael Frahm,
+George Drettakis, and Gabriel Brostow. Deep blending for
+free-viewpoint image-based rendering. 37(6):257:1–257:15,
+2018. 2, 6, 7, 13
+[19] Xu Hu, Yuxi Wang, Lue Fan, Junsong Fan, Junran Peng,
+Zhen Lei, Qing Li, and Zhaoxiang Zhang. Sagd: Boundary-
+enhanced segment anything in 3d gaussian via gaussian de-
+composition, 2024. 2
+[20] Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and
+Shenghua Gao. 2d gaussian splatting for geometrically accu-
+rate radiance fields. In ACM SIGGRAPH 2024 Conference
+Papers, New York, NY, USA, 2024. Association for Com-
+puting Machinery. 5
+[21] Bernhard Kerbl, Georgios Kopanas, Thomas Leimk¨uhler,
+and George Drettakis.
+3d gaussian splatting for real-time
+radiance field rendering. ACM Transactions on Graphics, 42
+(4), 2023. 1, 2, 3, 4, 6, 7, 8, 11, 12, 13
+[22] Shakiba Kheradmand, Daniel Rebain, Gopal Sharma, Wei-
+wei Sun, Yang-Che Tseng, Hossam Isack, Abhishek Kar,
+Andrea Tagliasacchi, and Kwang Moo Yi. 3d gaussian splat-
+ting as markov chain monte carlo. In Advances in Neural
+Information Processing Systems, pages 80965–80986. Cur-
+ran Associates, Inc., 2024. 2
+[23] Diederik Kingma and Jimmy Ba.
+Adam: A method for
+stochastic optimization.
+In International Conference on
+Learning Representations (ICLR), San Diega, CA, USA,
+2015. 5, 11, 12
+[24] Arno Knapitsch, Jaesik Park, Qian-Yi Zhou, and Vladlen
+Koltun. Tanks and temples: Benchmarking large-scale scene
+reconstruction. ACM Transactions on Graphics, 36(4), 2017.
+6, 7, 13
+[25] Jiahe Li, Jiawei Zhang, Xiao Bai, Jin Zheng, Xin Ning, Jun
+Zhou, and Lin Gu. Talkinggaussian: Structure-persistent 3d
+talking head synthesis via gaussian splatting. In Computer
+Vision – ECCV 2024, pages 127–145, Cham, 2025. Springer
+Nature Switzerland. 2
+[26] Yixuan Li, Lihan Jiang, Linning Xu, Yuanbo Xiangli, Zhen-
+zhi Wang, Dahua Lin, and Bo Dai. Matrixcity: A large-scale
+city dataset for city-scale neural rendering and beyond. In
+9
+
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision (ICCV), pages 3205–3215, 2023. 1, 6, 14
+[27] Zhihao Liang, Qi Zhang, Wenbo Hu, Lei Zhu, Ying Feng,
+and Kui Jia.
+Analytic-splatting: Anti-aliased 3d gaussian
+splatting via analytic integration.
+In Computer Vision –
+ECCV 2024, pages 281–297, Cham, 2025. Springer Nature
+Switzerland. 2
+[28] Jiaqi Lin, Zhihao Li, Xiao Tang, Jianzhuang Liu, Shiy-
+ong Liu, Jiayue Liu, Yangdi Lu, Xiaofei Wu, Songcen Xu,
+Youliang Yan, and Wenming Yang. Vastgaussian: Vast 3d
+gaussians for large scene reconstruction. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 5166–5175, 2024. 1, 2, 14
+[29] Lingjie Liu, Jiatao Gu, Kyaw Zaw Lin, Tat-Seng Chua, and
+Christian Theobalt. Neural sparse voxel fields. NeurIPS,
+2020. 1, 2
+[30] Yang Liu, He Guan, Chuanchen Luo, Lue Fan, Junran Peng,
+and Zhaoxiang Zhang. Citygaussian: Real-time high-quality
+large-scale scene rendering with gaussians, 2024. 1, 2
+[31] Saswat Subhajyoti Mallick, Rahul Goel, Bernhard Kerbl,
+Francisco Vicente Carrasco, Markus Steinberger, and Fer-
+nando De La Torre.
+Taming 3dgs: High-quality radiance
+fields with limited resources, 2024. 2, 3, 5, 6, 7, 8, 11, 12,
+13, 14
+[32] Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik,
+Jonathan T. Barron, Ravi Ramamoorthi, and Ren Ng. Nerf:
+representing scenes as neural radiance fields for view synthe-
+sis. Commun. ACM, 65(1):99–106, 2021. 1, 2
+[33] Thomas M¨uller, Alex Evans, Christoph Schied, and Alexan-
+der Keller. Instant neural graphics primitives with a multires-
+olution hash encoding. ACM Trans. Graph., 41(4):102:1–
+102:15, 2022. 1, 2
+[34] Panagiotis Papantonakis,
+Georgios Kopanas,
+Bernhard
+Kerbl, Alexandre Lanvin, and George Drettakis. Reducing
+the memory footprint of 3d gaussian splatting. 7(1), 2024. 2,
+3, 5, 6
+[35] Fabio Remondino and Sabry El-Hakim.
+Image-based 3d
+modelling: a review. The photogrammetric record, 21(115):
+269–291, 2006. 2
+[36] Johannes L. Schonberger and Jan-Michael Frahm. Structure-
+from-motion revisited. In Proceedings of the IEEE Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+2016. 3
+[37] Steven M Seitz and Charles R Dyer. Photorealistic scene
+reconstruction by voxel coloring. International journal of
+computer vision, 35:151–173, 1999. 2
+[38] Yunji Seo,
+Young Sun Choi,
+Hyun Seung Son,
+and
+Youngjung Uh. Flod: Integrating flexible level of detail into
+3d gaussian splatting for customizable rendering, 2024. 3
+[39] Qiuhong Shen, Xingyi Yang, and Xinchao Wang. Flashsplat:
+2d to 3d gaussian splatting segmentation solved optimally.
+In Computer Vision – ECCV 2024, pages 456–472, Cham,
+2025. Springer Nature Switzerland. 2
+[40] Yuang Shi,
+Simone Gasparini,
+G´eraldine Morin,
+and
+Wei Tsang Ooi. Lapisgs: Layered progressive 3d gaussian
+splatting for adaptive streaming, 2024. 3
+[41] A. Tewari, J. Thies, B. Mildenhall, P. Srinivasan, E. Tretschk,
+W. Yifan, C. Lassner, V. Sitzmann, R. Martin-Brualla, S.
+Lombardi, T. Simon, C. Theobalt, M. Nießner, J. T. Bar-
+ron, G. Wetzstein, M. Zollh¨ofer, and V. Golyanik. Advances
+in neural rendering. Computer Graphics Forum, 41(2):703–
+735, 2022. 2
+[42] Zhou Wang, A.C. Bovik, H.R. Sheikh, and E.P. Simoncelli.
+Image quality assessment: from error visibility to structural
+similarity. IEEE Transactions on Image Processing, 13(4):
+600–612, 2004. 6
+[43] Zian Wang, Tianchang Shen, Merlin Nimier-David, Nicholas
+Sharp, Jun Gao, Alexander Keller, Sanja Fidler, Thomas
+M¨uller, and Zan Gojcic. Adaptive shells for efficient neural
+radiance field rendering. ACM Trans. Graph., 42(6), 2023.
+1, 2
+[44] Vickie Ye, Ruilong Li, Justin Kerr, Matias Turkulainen,
+Brent Yi, Zhuoyang Pan, Otto Seiskari, Jianbo Ye, Jeffrey
+Hu, Matthew Tancik, and Angjoo Kanazawa.
+gsplat: An
+open-source library for gaussian splatting, 2024. 2, 3
+[45] Hongyun Yu, Zhan Qu, Qihang Yu, Jianchuan Chen,
+Zhonghua Jiang, Zhiwen Chen, Shengyu Zhang, Jimin Xu,
+Fei Wu, Chengfei Lv, and Gang Yu.
+Gaussiantalker:
+Speaker-specific talking head synthesis via 3d gaussian splat-
+ting. page 3548–3557, New York, NY, USA, 2024. Associa-
+tion for Computing Machinery. 2
+[46] Zehao Yu, Anpei Chen, Binbin Huang, Torsten Sattler, and
+Andreas Geiger. Mip-splatting: Alias-free 3d gaussian splat-
+ting. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition (CVPR), pages 19447–
+19456, 2024. 2, 4, 5, 7, 8, 11, 12, 13
+[47] Zehao Yu, Torsten Sattler, and Andreas Geiger. Gaussian
+opacity fields: Efficient adaptive surface reconstruction in
+unbounded scenes. ACM Transactions on Graphics, 2024. 5
+[48] Gim Hee Lee Yu Chen. Dogs: Distributed-oriented gaus-
+sian splatting for large-scale 3d reconstruction via gaussian
+consensus. In arXiv, 2024. 1, 2
+[49] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman,
+and Oliver Wang. The unreasonable effectiveness of deep
+features as a perceptual metric. In CVPR, 2018. 6
+[50] Yingji Zhong, Lanqing Hong, Zhenguo Li, and Dan Xu. Cvt-
+xrf: Contrastive in-voxel transformer for 3d consistent radi-
+ance fields from sparse inputs, 2024. 2
+10

@@ -1,0 +1,1241 @@
+
+
+==========================================================================================
+### 1512.03385_ResNet_DeepResidualLearning  (pages=12, img=1512.03385_ResNet_DeepResidualLearning_p1.png)
+==========================================================================================
+Deep Residual Learning for Image Recognition
+Kaiming He
+Xiangyu Zhang
+Shaoqing Ren
+Jian Sun
+Microsoft Research
+{kahe, v-xiangz, v-shren, jiansun}@microsoft.com
+Abstract
+Deeper neural networks are more difﬁcult to train. We
+present a residual learning framework to ease the training
+of networks that are substantially deeper than those used
+previously. We explicitly reformulate the layers as learn-
+ing residual functions with reference to the layer inputs, in-
+stead of learning unreferenced functions. We provide com-
+prehensive empirical evidence showing that these residual
+networks are easier to optimize, and can gain accuracy from
+considerably increased depth. On the ImageNet dataset we
+evaluate residual nets with a depth of up to 152 layers—8×
+deeper than VGG nets [41] but still having lower complex-
+ity. An ensemble of these residual nets achieves 3.57% error
+on the ImageNet test set. This result won the 1st place on the
+ILSVRC 2015 classiﬁcation task. We also present analysis
+on CIFAR-10 with 100 and 1000 layers.
+The depth of representations is of central importance
+for many visual recognition tasks. Solely due to our ex-
+tremely deep representations, we obtain a 28% relative im-
+provement on the COCO object detection dataset. Deep
+residual nets are foundations of our submissions to ILSVRC
+& COCO 2015 competitions1, where we also won the 1st
+places on the tasks of ImageNet detection, ImageNet local-
+ization, COCO detection, and COCO segmentation.
+1. Introduction
+Deep convolutional neural networks [22, 21] have led
+to a series of breakthroughs for image classiﬁcation [21,
+50, 40]. Deep networks naturally integrate low/mid/high-
+level features [50] and classiﬁers in an end-to-end multi-
+layer fashion, and the “levels” of features can be enriched
+by the number of stacked layers (depth). Recent evidence
+[41, 44] reveals that network depth is of crucial importance,
+and the leading results [41, 44, 13, 16] on the challenging
+ImageNet dataset [36] all exploit “very deep” [41] models,
+with a depth of sixteen [41] to thirty [16]. Many other non-
+trivial visual recognition tasks [8, 12, 7, 32, 27] have also
+1http://image-net.org/challenges/LSVRC/2015/
+and
+http://mscoco.org/dataset/#detections-challenge2015.
+0
+1
+2
+3
+4
+5
+6
+0 
+10
+20
+iter. (1e4)
+training error (%)
+ 
+ 
+0
+1
+2
+3
+4
+5
+6
+0
+10
+20
+iter. (1e4)
+test error (%)
+ 
+ 
+56-layer
+20-layer
+56-layer
+20-layer
+Figure 1. Training error (left) and test error (right) on CIFAR-10
+with 20-layer and 56-layer “plain” networks. The deeper network
+has higher training error, and thus test error. Similar phenomena
+on ImageNet is presented in Fig. 4.
+greatly beneﬁted from very deep models.
+Driven by the signiﬁcance of depth, a question arises: Is
+learning better networks as easy as stacking more layers?
+An obstacle to answering this question was the notorious
+problem of vanishing/exploding gradients [1, 9], which
+hamper convergence from the beginning.
+This problem,
+however, has been largely addressed by normalized initial-
+ization [23, 9, 37, 13] and intermediate normalization layers
+[16], which enable networks with tens of layers to start con-
+verging for stochastic gradient descent (SGD) with back-
+propagation [22].
+When deeper networks are able to start converging, a
+degradation problem has been exposed: with the network
+depth increasing, accuracy gets saturated (which might be
+unsurprising) and then degrades rapidly.
+Unexpectedly,
+such degradation is not caused by overﬁtting, and adding
+more layers to a suitably deep model leads to higher train-
+ing error, as reported in [11, 42] and thoroughly veriﬁed by
+our experiments. Fig. 1 shows a typical example.
+The degradation (of training accuracy) indicates that not
+all systems are similarly easy to optimize. Let us consider a
+shallower architecture and its deeper counterpart that adds
+more layers onto it. There exists a solution by construction
+to the deeper model: the added layers are identity mapping,
+and the other layers are copied from the learned shallower
+model. The existence of this constructed solution indicates
+that a deeper model should produce no higher training error
+than its shallower counterpart. But experiments show that
+our current solvers on hand are unable to ﬁnd solutions that
+1
+arXiv:1512.03385v1 [cs.CV] 10 Dec 2015
+
+identity
+weight layer
+weight layer
+relu
+relu
+F(x)+x
+x
+F(x)
+x
+Figure 2. Residual learning: a building block.
+are comparably good or better than the constructed solution
+(or unable to do so in feasible time).
+In this paper, we address the degradation problem by
+introducing a deep residual learning framework.
+In-
+stead of hoping each few stacked layers directly ﬁt a
+desired underlying mapping, we explicitly let these lay-
+ers ﬁt a residual mapping. Formally, denoting the desired
+underlying mapping as H(x), we let the stacked nonlinear
+layers ﬁt another mapping of F(x) := H(x)−x. The orig-
+inal mapping is recast into F(x)+x. We hypothesize that it
+is easier to optimize the residual mapping than to optimize
+the original, unreferenced mapping. To the extreme, if an
+identity mapping were optimal, it would be easier to push
+the residual to zero than to ﬁt an identity mapping by a stack
+of nonlinear layers.
+The formulation of F(x)+x can be realized by feedfor-
+ward neural networks with “shortcut connections” (Fig. 2).
+Shortcut connections [2, 34, 49] are those skipping one or
+more layers. In our case, the shortcut connections simply
+perform identity mapping, and their outputs are added to
+the outputs of the stacked layers (Fig. 2). Identity short-
+cut connections add neither extra parameter nor computa-
+tional complexity. The entire network can still be trained
+end-to-end by SGD with backpropagation, and can be eas-
+ily implemented using common libraries (e.g., Caffe [19])
+without modifying the solvers.
+We present comprehensive experiments on ImageNet
+[36] to show the degradation problem and evaluate our
+method. We show that: 1) Our extremely deep residual nets
+are easy to optimize, but the counterpart “plain” nets (that
+simply stack layers) exhibit higher training error when the
+depth increases; 2) Our deep residual nets can easily enjoy
+accuracy gains from greatly increased depth, producing re-
+sults substantially better than previous networks.
+Similar phenomena are also shown on the CIFAR-10 set
+[20], suggesting that the optimization difﬁculties and the
+effects of our method are not just akin to a particular dataset.
+We present successfully trained models on this dataset with
+over 100 layers, and explore models with over 1000 layers.
+On the ImageNet classiﬁcation dataset [36], we obtain
+excellent results by extremely deep residual nets. Our 152-
+layer residual net is the deepest network ever presented on
+ImageNet, while still having lower complexity than VGG
+nets [41].
+Our ensemble has 3.57% top-5 error on the
+ImageNet test set, and won the 1st place in the ILSVRC
+2015 classiﬁcation competition. The extremely deep rep-
+resentations also have excellent generalization performance
+on other recognition tasks, and lead us to further win the
+1st places on: ImageNet detection, ImageNet localization,
+COCO detection, and COCO segmentation in ILSVRC &
+COCO 2015 competitions. This strong evidence shows that
+the residual learning principle is generic, and we expect that
+it is applicable in other vision and non-vision problems.
+2. Related Work
+Residual Representations. In image recognition, VLAD
+[18] is a representation that encodes by the residual vectors
+with respect to a dictionary, and Fisher Vector [30] can be
+formulated as a probabilistic version [18] of VLAD. Both
+of them are powerful shallow representations for image re-
+trieval and classiﬁcation [4, 48]. For vector quantization,
+encoding residual vectors [17] is shown to be more effec-
+tive than encoding original vectors.
+In low-level vision and computer graphics, for solv-
+ing Partial Differential Equations (PDEs), the widely used
+Multigrid method [3] reformulates the system as subprob-
+lems at multiple scales, where each subproblem is respon-
+sible for the residual solution between a coarser and a ﬁner
+scale. An alternative to Multigrid is hierarchical basis pre-
+conditioning [45, 46], which relies on variables that repre-
+sent residual vectors between two scales. It has been shown
+[3, 45, 46] that these solvers converge much faster than stan-
+dard solvers that are unaware of the residual nature of the
+solutions. These methods suggest that a good reformulation
+or preconditioning can simplify the optimization.
+Shortcut Connections. Practices and theories that lead to
+shortcut connections [2, 34, 49] have been studied for a long
+time. An early practice of training multi-layer perceptrons
+(MLPs) is to add a linear layer connected from the network
+input to the output [34, 49]. In [44, 24], a few interme-
+diate layers are directly connected to auxiliary classiﬁers
+for addressing vanishing/exploding gradients. The papers
+of [39, 38, 31, 47] propose methods for centering layer re-
+sponses, gradients, and propagated errors, implemented by
+shortcut connections. In [44], an “inception” layer is com-
+posed of a shortcut branch and a few deeper branches.
+Concurrent with our work, “highway networks” [42, 43]
+present shortcut connections with gating functions [15].
+These gates are data-dependent and have parameters, in
+contrast to our identity shortcuts that are parameter-free.
+When a gated shortcut is “closed” (approaching zero), the
+layers in highway networks represent non-residual func-
+tions.
+On the contrary, our formulation always learns
+residual functions; our identity shortcuts are never closed,
+and all information is always passed through, with addi-
+tional residual functions to be learned. In addition, high-
+2
+
+way networks have not demonstrated accuracy gains with
+extremely increased depth (e.g., over 100 layers).
+3. Deep Residual Learning
+3.1. Residual Learning
+Let us consider H(x) as an underlying mapping to be
+ﬁt by a few stacked layers (not necessarily the entire net),
+with x denoting the inputs to the ﬁrst of these layers. If one
+hypothesizes that multiple nonlinear layers can asymptoti-
+cally approximate complicated functions2, then it is equiv-
+alent to hypothesize that they can asymptotically approxi-
+mate the residual functions, i.e., H(x) −x (assuming that
+the input and output are of the same dimensions).
+So
+rather than expect stacked layers to approximate H(x), we
+explicitly let these layers approximate a residual function
+F(x) := H(x) −x. The original function thus becomes
+F(x)+x. Although both forms should be able to asymptot-
+ically approximate the desired functions (as hypothesized),
+the ease of learning might be different.
+This reformulation is motivated by the counterintuitive
+phenomena about the degradation problem (Fig. 1, left). As
+we discussed in the introduction, if the added layers can
+be constructed as identity mappings, a deeper model should
+have training error no greater than its shallower counter-
+part.
+The degradation problem suggests that the solvers
+might have difﬁculties in approximating identity mappings
+by multiple nonlinear layers. With the residual learning re-
+formulation, if identity mappings are optimal, the solvers
+may simply drive the weights of the multiple nonlinear lay-
+ers toward zero
+
+
+==========================================================================================
+### 1710.04773v2  (pages=14, img=1710.04773v2_p1.png)
+==========================================================================================
+Published as a conference paper at ICLR 2018
+RESIDUAL CONNECTIONS ENCOURAGE ITERATIVE IN-
+FERENCE
+Stanisław Jastrz˛ebski1,2,∗, Devansh Arpit2,∗, Nicolas Ballas3, Vikas Verma5,
+Tong Che2 & Yoshua Bengio2,6
+1 Jagiellonian University, Cracow, Poland
+2 MILA, Université de Montréal, Canada
+3 Facebook, Montreal, Canada
+4 University of Bonn, Bonn, Germany
+5 Aalto University, Finland
+6 CIFAR Senior Fellow
+∗Equal Contribution
+ABSTRACT
+Residual networks (Resnets) have become a prominent architecture in deep learn-
+ing. However, a comprehensive understanding of Resnets is still a topic of ongoing
+research. A recent view argues that Resnets perform iterative reﬁnement of fea-
+tures. We attempt to further expose properties of this aspect. To this end, we study
+Resnets both analytically and empirically. We formalize the notion of iterative re-
+ﬁnement in Resnets by showing that residual connections naturally encourage fea-
+tures of residual blocks to move along the negative gradient of loss as we go from
+one block to the next. In addition, our empirical analysis suggests that Resnets are
+able to perform both representation learning and iterative reﬁnement. In general,
+a Resnet block tends to concentrate representation learning behavior in the ﬁrst
+few layers while higher layers perform iterative reﬁnement of features. Finally
+we observe that sharing residual layers naively leads to representation explosion
+and counterintuitively, overﬁtting, and we show that simple existing strategies can
+help alleviating this problem.
+1
+INTRODUCTION
+Traditionally, deep neural network architectures (e.g. VGG Simonyan & Zisserman (2014), AlexNet
+Krizhevsky et al. (2012), etc.) have been compositional in nature, meaning a hidden layer applies an
+afﬁne transformation followed by non-linearity, with a different transformation at each layer. How-
+ever, a major problem with deep architectures has been that of vanishing and exploding gradients.
+To address this problem, solutions like better activations (ReLU Nair & Hinton (2010)), weight
+initialization methods Glorot & Bengio (2010); He et al. (2015) and normalization methods Ioffe
+& Szegedy (2015); Arpit et al. (2016) have been proposed. Nonetheless, training compositional
+networks deeper than 15 −20 layers remains a challenging task.
+Recently, residual networks (Resnets He et al. (2016a)) were introduced to tackle these issues and
+are considered a breakthrough in deep learning because of their ability to learn very deep networks
+and achieve state-of-the-art performance. Besides this, performance of Resnets are generally found
+to remain largely unaffected by removing individual residual blocks or shufﬂing adjacent blocks
+Veit et al. (2016). These attributes of Resnets stem from the fact that residual blocks transform
+representations additively instead of compositionally (like traditional deep networks). This additive
+framework along with the aforementioned attributes has given rise to two school of thoughts about
+Resnets– the ensemble view where they are thought to learn an exponential ensemble of shallower
+models Veit et al. (2016), and the unrolled iterative estimation view Liao & Poggio (2016); Greff
+et al. (2016), where Resnet layers are thought to iteratively reﬁne representations instead of learning
+new ones. While the success of Resnets may be attributed partly to both these views, our work takes
+1
+arXiv:1710.04773v2 [cs.CV] 8 Mar 2018
+
+Published as a conference paper at ICLR 2018
+steps towards achieving a deeper understanding of Resnets in terms of its iterative feature reﬁnement
+perspective. Our contributions are as follows:
+1. We study Resnets analytically and provide a formal view of iterative feature reﬁnement using
+Taylor’s expansion, showing that for any loss function, a residual block naturally encourages rep-
+resentations to move along the negative gradient of the loss with respect to hidden representations.
+Each residual block is therefore encouraged to take a gradient step in order to minimize the loss in
+the hidden representation space. We empirically conﬁrm this by measuring the cosine between the
+output of a residual block and the gradient of loss with respect to the hidden representations prior to
+the application of the residual block.
+2. We empirically observe that Resnet blocks can perform both hierarchical representation learn-
+ing (where each block discovers a different representation) and iterative feature reﬁnement (where
+each block improves slightly but keeps the semantics of the representation of the previous layer).
+Speciﬁcally in Resnets, lower residual blocks learn to perform representation learning, meaning that
+they change representations signiﬁcantly and removing these blocks can sometimes drastically hurt
+prediction performance. The higher blocks on the other hand essentially learn to perform iterative
+inference– minimizing the loss function by moving the hidden representation along the negative
+gradient direction. In the presence of shortcut connections1, representation learning is dominantly
+performed by the shortcut connection layer and most of residual blocks tend to perform iterative
+feature reﬁnement.
+3. The iterative reﬁnement view suggests that deep networks can potentially leverage intensive
+parameter sharing for the layer performing iterative inference. But sharing large number of residual
+blocks without loss of performance has not been successfully achieved yet. Towards this end we
+study two ways of reusing residual blocks: 1. Sharing residual blocks during training; 2. Unrolling
+a residual block for more steps that it was trained to unroll. We ﬁnd that training Resnet with
+naively shared blocks leads to bad performance. We expose reasons for this failure and investigate a
+preliminary ﬁx for this problem.
+2
+BACKGROUND AND RELATED WORK
+Residual Networks and their analysis:
+Recently, several papers have investigated the behavior of Resnets (He et al., 2016a). In (Veit et al.,
+2016; Littwin & Wolf, 2016), authors argue that Resnets are an ensemble of relatively shallow net-
+works. This is based on the unraveled view of Resnets where there exist an exponential number of
+paths between the input and prediction layer. Further, observations that shufﬂing and dropping of
+residual blocks do not affect performance signiﬁcantly also support this claim. Other works discuss
+the possibility that residual networks are approximating recurrent networks (Liao & Poggio, 2016;
+Greff et al., 2016). This view is in part supported by the observation that the mathematical formu-
+lation of Resnets bares similarity to LSTM (Hochreiter & Schmidhuber, 1997), and that successive
+layers cooperate and preserve the feature identity. Resnets have also been studied from the perspec-
+tive of boosting theory Huang et al. (2017). In this work the authors propose to learn Resnets in a
+layerwise manner using a local classiﬁer.
+Our work has critical differences compared with the aforementioned studies. Most importantly we
+focus on a precise deﬁnition of iterative inference. In particular, we show that a residual block
+approximate a gradient descent step in the activation space. Our work can also be seen as relating
+the gap between the boosting and iterative inference interpretations since having a residual block
+whose output is aligned with negative gradient of loss is similar to how gradient boosting models
+work.
+Iterative reﬁnement and weight sharing:
+Humans frequently perform predictions with iterative reﬁnement based on the level of difﬁculty of
+the task at hand. A leading hypothesis regarding the nature of information processing that happens in
+the visual cortex is that it performs fast feedforward inference (Thorpe et al., 1996) for easy stimuli
+or when quick response time is needed, and performs iterative reﬁnement of prediction for complex
+1A shortcut connection is a convolution layer between residual blocks useful for changing the hidden space
+dimension (see He et al. (2016a) for instance).
+2
+
+Published as a conference paper at ICLR 2018
+stimuli (Vanmarcke et al., 2016). The latter is thought to be done by lateral connections within
+individual layers in the brain that iteratively act upon the current state of the layer to update it. This
+mechanism allows the brain to make ﬁne grained predictions on complex tasks. A characteristic
+attribute of this mechanism is the recursive application of the lateral connections which can be
+thought of as shared weights in a recurrent model. The above views suggest that it is desirable to
+have deep network models that perform parameter sharing in order to make the iterative inference
+view complete.
+3
+ITERATIVE INFERENCE IN RESNETS
+Our goal in this section is to formalize the notion of iterative inference in Resnets. We study the
+properties of representations that residual blocks tend to learn, as a result of being additive in nature,
+in contrast to traditional compositional networks. Speciﬁcally, we consider Resnet architectures (see
+ﬁgure 1) where the ﬁrst hidden layer is a convolution layer, which is followed by L residual blocks
+which may or may not have shortcut connections in between residual blocks.
+Figure 1: A typical residual
+network architecture.
+A residual block applied on a representation hi transforms the rep-
+resentation as,
+hi+1 = hi + Fi(hi)
+(1)
+Consider L such residual blocks stacked on top of each other fol-
+lowed by a loss function. Then, we can Taylor expand any given
+loss function L recursively as,
+L(hL) = L(hL−1 + FL−1(hL−1))
+(2)
+= L(hL−1) + FL−1(hL−1).∂L(hL−1)
+∂hL−1
+(3)
++ O(F 2
+L−1(hL−1))
+Here we have Taylor expanded the loss function around hL−1. We
+can similarly expand the loss function recursively around hL−2 and
+so on until hi and get,
+L(hL) = L(hi) +
+L−1
+X
+j=i
+Fj(hj).∂L(hj)
+∂hj
++ O(F 2
+j (hj))
+(4)
+Notice we have explicitly only written the ﬁrst order terms of each
+expansion. The rest of the terms are absorbed in the higher order
+terms O(.). Further, the ﬁrst order term is a good approximation when the magnitude of Fj is small
+enough. In other cases, the higher order terms come into effect as well.
+Thus in part, the loss equivalently minimizes the dot product between F(hi) and ∂L(hi)
+∂hi , which can
+be achieved by making F(hi) point in the opposite half space to that of ∂L(hi)
+∂hi . In other words,
+hi + F(hi) approximately moves hi in the same half space as that of −∂L(hi)
+∂hi . The overall training
+criteria can then be seen as approximately minimizing the dot product between these 2 terms along
+a path in the h space between hi and hL such that loss gradually reduces as we take steps from
+hi to hL. The above analysis is justiﬁed in practice, as Resnets’ top layers output Fj has small
+magnitude (Greff et al.,
+
+
+==========================================================================================
+### 2006.09661_SIREN  (pages=35, img=2006.09661_SIREN_fig.png)
+==========================================================================================
+Implicit Neural Representations with Periodic
+Activation Functions
+Vincent Sitzmann∗
+sitzmann@cs.stanford.edu
+Julien N. P. Martel∗
+jnmartel@stanford.edu
+Alexander W. Bergman
+awb@stanford.edu
+David B. Lindell
+lindell@stanford.edu
+Gordon Wetzstein
+gordon.wetzstein@stanford.edu
+Stanford University
+vsitzmann.github.io/siren/
+Abstract
+Implicitly deﬁned, continuous, differentiable signal representations parameterized
+by neural networks have emerged as a powerful paradigm, offering many possible
+beneﬁts over conventional representations. However, current network architectures
+for such implicit neural representations are incapable of modeling signals with
+ﬁne detail, and fail to represent a signal’s spatial and temporal derivatives, despite
+the fact that these are essential to many physical signals deﬁned implicitly as the
+solution to partial differential equations. We propose to leverage periodic activation
+functions for implicit neural representations and demonstrate that these networks,
+dubbed sinusoidal representation networks or SIRENs, are ideally suited for repre-
+senting complex natural signals and their derivatives. We analyze SIREN activation
+statistics to propose a principled initialization scheme and demonstrate the represen-
+tation of images, waveﬁelds, video, sound, and their derivatives. Further, we show
+how SIRENs can be leveraged to solve challenging boundary value problems, such
+as particular Eikonal equations (yielding signed distance functions), the Poisson
+equation, and the Helmholtz and wave equations. Lastly, we combine SIRENs with
+hypernetworks to learn priors over the space of SIREN functions. Please see the
+project website for a video overview of the proposed method and all applications.
+1
+Introduction
+We are interested in a class of functions Φ that satisfy equations of the form
+F
+ x, Φ, ∇xΦ, ∇2
+xΦ, . . .
+
+= 0,
+Φ : x 7→Φ(x).
+(1)
+This implicit problem formulation takes as input the spatial or spatio-temporal coordinates x ∈Rm
+and, optionally, derivatives of Φ with respect to these coordinates. Our goal is then to learn a neural
+network that parameterizes Φ to map x to some quantity of interest while satisfying the constraint
+presented in Equation (1). Thus, Φ is implicitly deﬁned by the relation deﬁned by F and we refer to
+neural networks that parameterize such implicitly deﬁned functions as implicit neural representations.
+As we show in this paper, a surprisingly wide variety of problems across scientiﬁc ﬁelds fall into this
+form, such as modeling many different types of discrete signals in image, video, and audio processing
+using a continuous and differentiable representation, learning 3D shape representations via signed
+distance functions [1–4], and, more generally, solving boundary value problems, such as the Poisson,
+Helmholtz, or wave equations.
+∗These authors contributed equally to this work.
+Preprint. Under review.
+arXiv:2006.09661v1 [cs.CV] 17 Jun 2020
+
+A continuous parameterization offers several beneﬁts over alternatives, such as discrete grid-based
+representations. For example, due to the fact that Φ is deﬁned on the continuous domain of x, it can be
+signiﬁcantly more memory efﬁcient than a discrete representation, allowing it to model ﬁne detail that
+is not limited by the grid resolution but by the capacity of the underlying network architecture. Being
+differentiable implies that gradients and higher-order derivatives can be computed analytically, for
+example using automatic differentiation, which again makes these models independent of conventional
+grid resolutions. Finally, with well-behaved derivatives, implicit neural representations may offer a
+new toolbox for solving inverse problems, such as differential equations.
+For these reasons, implicit neural representations have seen signiﬁcant research interest over the
+last year (Sec. 2). Most of these recent representations build on ReLU-based multilayer perceptrons
+(MLPs). While promising, these architectures lack the capacity to represent ﬁne details in the
+underlying signals, and they typically do not represent the derivatives of a target signal well. This
+is partly due to the fact that ReLU networks are piecewise linear, their second derivative is zero
+everywhere, and they are thus incapable of modeling information contained in higher-order derivatives
+of natural signals. While alternative activations, such as tanh or softplus, are capable of representing
+higher-order derivatives, we demonstrate that their derivatives are often not well behaved and also
+fail to represent ﬁne details.
+To address these limitations, we leverage MLPs with periodic activation functions for implicit neural
+representations. We demonstrate that this approach is not only capable of representing details in the
+signals better than ReLU-MLPs, or positional encoding strategies proposed in concurrent work [5],
+but that these properties also uniquely apply to the derivatives, which is critical for many applications
+we explore in this paper.
+To summarize, the contributions of our work include:
+• A continuous implicit neural representation using periodic activation functions that ﬁts
+complicated signals, such as natural images and 3D shapes, and their derivatives robustly.
+• An initialization scheme for training these representations and validation that distributions
+of these representations can be learned using hypernetworks.
+• Demonstration of applications in: image, video, and audio representation; 3D shape re-
+construction; solving ﬁrst-order differential equations that aim at estimating a signal by
+supervising only with its gradients; and solving second-order differential equations.
+2
+Related Work
+Implicit neural representations.
+Recent work has demonstrated the potential of fully connected
+networks as continuous, memory-efﬁcient implicit representations for shape parts [6, 7], objects [1, 4,
+8, 9], or scenes [10–13]. These representations are typically trained from some form of 3D data as
+either signed distance functions [1, 4, 8–12] or occupancy networks [2, 14]. In addition to representing
+shape, some of these models have been extended to also encode object appearance [3, 5, 10, 15, 16],
+which can be trained using (multiview) 2D image data using neural rendering [17]. Temporally aware
+extensions [18] and variants that add part-level semantic segmentation [19] have also been proposed.
+Periodic nonlinearities.
+Periodic nonlinearities have been investigated repeatedly over the past
+decades, but have so far failed to robustly outperform alternative activation functions. Early work
+includes Fourier neural networks, engineered to mimic the Fourier transform via single-hidden-
+layer networks [20, 21]. Other work explores neural networks with periodic activations for simple
+classiﬁcation tasks [22–24] and recurrent neural networks [25–29]. It has been shown that such
+models have universal function approximation properties [30–32]. Compositional pattern producing
+networks [33, 34] also leverage periodic nonlinearities, but rely on a combination of different
+nonlinearities via evolution in a genetic algorithm framework. Motivated by the discrete cosine
+transform, Klocek et al. [35] leverage cosine activation functions for image representation but they
+do not study the derivatives of these representations or other applications explored in our work.
+Inspired by these and other seminal works, we explore MLPs with periodic activation functions for
+applications involving implicit neural representations and their derivatives, and we propose principled
+initialization and generalization schemes.
+2
+
+ 
+Ground Truth
+ReLU
+Tanh
+ReLU P.E.
+RBF-ReLU
+SIREN
++
+0
+5,000
+10,000
+15,000
+Iterations
+0
+10
+20
+30
+40
+50
+60
+PSNR
+ReLU
+Tanh
+ReLU P.E.
+RBF-ReLU
+SIREN
+500
+Iterations
+10
+20
+30
+PSNR
+0
+Figure 1: Comparison of different implicit network architectures ﬁtting a ground truth image (top left).
+The representation is only supervised on the target image but we also show ﬁrst- and second-order
+derivatives of the function ﬁt in rows 2 and 3, respectively.
+Neural DE Solvers.
+Neural networks have long been investigated in the context of solving differ-
+ential equations (DEs) [36], and have previously been introduced as implicit representations for this
+task [37]. Early work on this topic involved simple neural network models, consisting of MLPs or
+radial basis function networks with few hidden layers and hyperbolic tangent or sigmoid nonlinear-
+ities [37–39]. The limited capacity of these shallow networks typically constrained results to 1D
+solutions or simple 2D surfaces. Modern approaches to these techniques leverage recent optimization
+frameworks and auto-differentiation, but use similar architectures based on MLPs. Still, solving more
+sophisticated equations with higher dimensionality, more constraints, or more complex geometries
+is feasible [40–42]. However, we show that the commonly used MLPs with smooth, non-periodic
+activation functions fail to accurately model high-frequency information and higher-order derivatives
+even with dense supervision.
+Neural ODEs [43] are related to this topic, but are very different in nature. Whereas implicit neural
+representations can be used to directly solve ODEs or PDEs from supervision on the system dynamics,
+neural ODEs allow for continuous function modeling by pairing a conventional ODE solver (e.g.,
+implicit Adams or Runge-Kutta) with a network that parameterizes the dynamics of a function. The
+proposed architecture may be complementary to this line of work.
+3
+Formulation
+Our goal is to solve problems of the form presented in
+Equation (1).
+We cast this as
+a feasibility problem, where a function Φ is sought that satisﬁes a set of M constraints
+{Cm(a(x), Φ(x), ∇Φ(x), ...)}M
+m=1, each of which relate the function Φ and/or its derivatives to
+quantities a(x):
+ﬁnd Φ(x)
+subject to Cm
+ a(x), Φ(x), ∇Φ(x), ...
+
+= 0, ∀x ∈Ωm, m = 1, . . . , M
+(2)
+This problem can be cast in a loss function that penalizes deviations from each of the constraints on
+their domain Ωm:
+L =
+Z
+Ω
+M
+X
+m=1
+1Ωm(x) ∥Cm(a(x), Φ(x), ∇Φ(x), ...)∥dx,
+(3)
+with the indicator function 1Ωm(x) = 1 when x ∈Ωm and 0 when x ̸∈Ωm. In practice, the
+loss function is enforced by sampling Ω. A dataset D = {(xi, ai(x))}i is a set of tuples of
+coordinates xi ∈Ωalong with samples from the quantities a(xi) that appear in the constraints.
+Thus, the loss in Equation (3) is enforced on coordinates xi sampled from the dataset, yielding
+the loss ˜L = P
+i∈D
+PM
+m=1 ∥Cm(a(xi), Φ(xi), ∇Φ(xi), ...)∥. In practice, the dataset D is sampled
+dynamically at training time, approximating L better as the number of samples grows, as in Monte
+Carlo integration.
+We parameterize functions Φθ as fully connected neural networks with parameters θ, and solve the
+resulting optimization problem using gradient descent.
+3
+
+3.1
+Periodic Activations for Implicit Neural Representations
+We propose SIREN, a simple neural network architecture for implicit neural representations that uses
+the sine as a periodic activation function:
+Φ (x) = Wn (φn−1 ◦φn−2 ◦. . . ◦φ0) (x) + bn,
+xi 7→φi (xi) = sin (Wixi + bi) .
+(4)
+Here, φi : RMi 7→RNi is the ith layer of the network. It consists of the afﬁne transform deﬁned by
+the weight matrix Wi ∈RNi×Mi and the biases bi ∈RNi applied on the input xi ∈RMi, followed
+by the sine nonlinearity applied to each component of the resulting vector.
+Interestingly, any derivative of a SIREN is itself a SIREN, as the derivative of the sine is a
+
+
+==========================================================================================
+### 2106.09685_LoRA  (pages=26, img=2106.09685_LoRA_p1.png)
+==========================================================================================
+LORA: LOW-RANK ADAPTATION OF LARGE LAN-
+GUAGE MODELS
+Edward Hu∗
+Yelong Shen∗
+Phillip Wallis
+Zeyuan Allen-Zhu
+Yuanzhi Li
+Shean Wang
+Lu Wang
+Weizhu Chen
+Microsoft Corporation
+{edwardhu, yeshe, phwallis, zeyuana,
+yuanzhil, swang, luw, wzchen}@microsoft.com
+yuanzhil@andrew.cmu.edu
+(Version 2)
+ABSTRACT
+An important paradigm of natural language processing consists of large-scale pre-
+training on general domain data and adaptation to particular tasks or domains. As
+we pre-train larger models, full ﬁne-tuning, which retrains all model parameters,
+becomes less feasible. Using GPT-3 175B as an example – deploying indepen-
+dent instances of ﬁne-tuned models, each with 175B parameters, is prohibitively
+expensive. We propose Low-Rank Adaptation, or LoRA, which freezes the pre-
+trained model weights and injects trainable rank decomposition matrices into each
+layer of the Transformer architecture, greatly reducing the number of trainable pa-
+rameters for downstream tasks. Compared to GPT-3 175B ﬁne-tuned with Adam,
+LoRA can reduce the number of trainable parameters by 10,000 times and the
+GPU memory requirement by 3 times. LoRA performs on-par or better than ﬁne-
+tuning in model quality on RoBERTa, DeBERTa, GPT-2, and GPT-3, despite hav-
+ing fewer trainable parameters, a higher training throughput, and, unlike adapters,
+no additional inference latency. We also provide an empirical investigation into
+rank-deﬁciency in language model adaptation, which sheds light on the efﬁcacy of
+LoRA. We release a package that facilitates the integration of LoRA with PyTorch
+models and provide our implementations and model checkpoints for RoBERTa,
+DeBERTa, and GPT-2 at https://github.com/microsoft/LoRA.
+1
+INTRODUCTION
+Pretrained 
+Weights
+𝑊∈ℝ𝑑×𝑑
+x
+h
+𝐵= 0
+𝐴= 𝒩(0, 𝜎2)
+𝑑
+𝑟
+Figure 1: Our reparametriza-
+tion. We only train A and B.
+Many applications in natural language processing rely on adapt-
+ing one large-scale, pre-trained language model to multiple down-
+stream applications. Such adaptation is usually done via ﬁne-tuning,
+which updates all the parameters of the pre-trained model. The ma-
+jor downside of ﬁne-tuning is that the new model contains as many
+parameters as in the original model. As larger models are trained
+every few months, this changes from a mere “inconvenience” for
+GPT-2 (Radford et al., b) or RoBERTa large (Liu et al., 2019) to a
+critical deployment challenge for GPT-3 (Brown et al., 2020) with
+175 billion trainable parameters.1
+Many sought to mitigate this by adapting only some parameters or
+learning external modules for new tasks. This way, we only need
+to store and load a small number of task-speciﬁc parameters in ad-
+dition to the pre-trained model for each task, greatly boosting the
+operational efﬁciency when deployed. However, existing techniques
+∗Equal contribution.
+0Compared to V1, this draft includes better baselines, experiments on GLUE, and more on adapter latency.
+1While GPT-3 175B achieves non-trivial performance with few-shot learning, ﬁne-tuning boosts its perfor-
+mance signiﬁcantly as shown in Appendix A.
+1
+arXiv:2106.09685v2 [cs.CL] 16 Oct 2021
+
+often introduce inference latency (Houlsby et al., 2019; Rebufﬁet al., 2017) by extending model
+depth or reduce the model’s usable sequence length (Li & Liang, 2021; Lester et al., 2021; Ham-
+bardzumyan et al., 2020; Liu et al., 2021) (Section 3). More importantly, these method often fail to
+match the ﬁne-tuning baselines, posing a trade-off between efﬁciency and model quality.
+We take inspiration from Li et al. (2018a); Aghajanyan et al. (2020) which show that the learned
+over-parametrized models in fact reside on a low intrinsic dimension. We hypothesize that the
+change in weights during model adaptation also has a low “intrinsic rank”, leading to our proposed
+Low-Rank Adaptation (LoRA) approach. LoRA allows us to train some dense layers in a neural
+network indirectly by optimizing rank decomposition matrices of the dense layers’ change during
+adaptation instead, while keeping the pre-trained weights frozen, as shown in Figure 1. Using GPT-3
+175B as an example, we show that a very low rank (i.e., r in Figure 1 can be one or two) sufﬁces even
+when the full rank (i.e., d) is as high as 12,288, making LoRA both storage- and compute-efﬁcient.
+LoRA possesses several key advantages.
+• A pre-trained model can be shared and used to build many small LoRA modules for dif-
+ferent tasks. We can freeze the shared model and efﬁciently switch tasks by replacing the
+matrices A and B in Figure 1, reducing the storage requirement and task-switching over-
+head signiﬁcantly.
+• LoRA makes training more efﬁcient and lowers the hardware barrier to entry by up to 3
+times when using adaptive optimizers since we do not need to calculate the gradients or
+maintain the optimizer states for most parameters. Instead, we only optimize the injected,
+much smaller low-rank matrices.
+• Our simple linear design allows us to merge the trainable matrices with the frozen weights
+when deployed, introducing no inference latency compared to a fully ﬁne-tuned model, by
+construction.
+• LoRA is orthogonal to many prior methods and can be combined with many of them, such
+as preﬁx-tuning. We provide an example in Appendix E.
+Terminologies and Conventions
+We make frequent references to the Transformer architecture
+and use the conventional terminologies for its dimensions.
+We call the input and output di-
+mension size of a Transformer layer dmodel.
+We use Wq, Wk, Wv, and Wo to refer to the
+query/key/value/output projection matrices in the self-attention module. W or W0 refers to a pre-
+trained weight matrix and ∆W its accumulated gradient update during adaptation. We use r to
+denote the rank of a LoRA module. We follow the conventions set out by (Vaswani et al., 2017;
+Brown et al., 2020) and use Adam (Loshchilov & Hutter, 2019; Kingma & Ba, 2017) for model
+optimization and use a Transformer MLP feedforward dimension dffn = 4 × dmodel.
+2
+PROBLEM STATEMENT
+While our proposal is agnostic to training objective, we focus on language modeling as our motivat-
+ing use case. Below is a brief description of the language modeling problem and, in particular, the
+maximization of conditional probabilities given a task-speciﬁc prompt.
+Suppose we are given a pre-trained autoregressive language model PΦ(y|x) parametrized by Φ.
+For instance, PΦ(y|x) can be a generic multi-task learner such as GPT (Radford et al., b; Brown
+et al., 2020) based on the Transformer architecture (Vaswani et al., 2017). Consider adapting this
+pre-trained model to downstream conditional text generation tasks, such as summarization, machine
+reading comprehension (MRC), and natural language to SQL (NL2SQL). Each downstream task is
+represented by a training dataset of context-target pairs: Z = {(xi, yi)}i=1,..,N, where both xi and
+yi are sequences of tokens. For example, in NL2SQL, xi is a natural language query and yi its
+corresponding SQL command; for summarization, xi is the content of an article and yi its summary.
+2
+
+During full ﬁne-tuning, the model is initialized to pre-trained weights Φ0 and updated to Φ0 + ∆Φ
+by repeatedly following the gradient to maximize the conditional language modeling objective:
+max
+Φ
+X
+(x,y)∈Z
+|y|
+X
+t=1
+log (PΦ(yt|x, y<t))
+(1)
+One of the main drawbacks for full ﬁne-tuning is that for each downstream task, we learn a different
+set of parameters ∆Φ whose dimension |∆Φ| equals |Φ0|. Thus, if the pre-trained model is large
+(such as GPT-3 with |Φ0| ≈175 Billion), storing and deploying many independent instances of
+ﬁne-tuned models can be challenging, if at all feasible.
+In this paper, we adopt a more parameter-efﬁcient approach, where the task-speciﬁc parameter
+increment ∆Φ = ∆Φ(Θ) is further encoded by a much smaller-sized set of parameters Θ with
+|Θ| ≪|Φ0|. The task of ﬁnding ∆Φ thus becomes optimizing over Θ:
+max
+Θ
+X
+(x,y)∈Z
+|y|
+X
+t=1
+log
+ pΦ0+∆Φ(Θ)(yt|x, y<t)
+
+(2)
+In the subsequent sections, we propose to use a low-rank representation to encode ∆Φ that is both
+compute- and memory-efﬁcient. When the pre-trained model is GPT-3 175B, the number of train-
+able parameters |Θ| can be as small as 0.01% of |Φ0|.
+3
+AREN’T EXISTING SOLUTIONS GOOD ENOUGH?
+The problem we set out to tackle is by no means new. Since the inception of transfer learning, dozens
+of works have sought to make model adaptation more parameter- and compute-efﬁcient. See Sec-
+tion 6 for a survey of some of the well-known works. Using language modeling as an example, there
+are two prominent strategies when it comes to efﬁcient adaptations: adding adapter layers (Houlsby
+et al., 2019; Rebufﬁet al., 2017; Pfeiffer et al., 2021; R¨uckl´e et al., 2020) or optimizing some forms
+of the input layer activations (Li & Liang, 2021; Lester et al., 2021; Hambardzumyan et al., 2020;
+Liu et al., 2021). However, both strategies have their limitations, especially in a large-scale and
+latency-sensitive production scenario.
+Adapter Layers Introduce Inference Latency
+There are many variants of adapters. We focus
+on the original design by Houlsby et al. (2019) which has two adapter layers per Transformer block
+and a more recent one by Lin et al. (2020) which has only one per block but with an additional
+LayerNorm (Ba et al., 2016). While one can reduce the overall latency by pruning layers or exploit-
+ing multi-task settings (R¨uckl´e et al., 2020; Pfeiffer et al., 2021), there is no direct ways to bypass
+the extra compute in adapter layers. This seems like a non-issue since adapter layers are designed
+to have few parameters (sometimes <1% of the original model) by having a small bottleneck di-
+mension, which limits the FLOPs they can add. However, large neural networks rely on hardware
+parallelism to keep the latency low, and adapter layers have to be processed sequentially. This makes
+a difference in the online inference setting where the batch size is typically as small as one. In a
+generic scenario without model parallelism, such as running inference on GPT-2 (Radford et al., b)
+medium on a single GPU, we see a noticeable increase in latency when using adapters, even with a
+very small bottleneck dimension (Table 1).
+This problem gets worse when we need to shard the model as done in Shoeybi et al. (2020); Lep-
+ikhin et al. (2020), because the additional depth requires more synchronous GPU operations such as
+AllReduce and Broadcast, unless we store the adapter parameters redundantly many times.
+Directly Optimizing the Prompt is Hard
+The other direction, as exempliﬁed by preﬁx tuning (Li
+&
+
+
+==========================================================================================
+### 2409.19606v3  (pages=37, img=2409.19606v3_p1.png)
+==========================================================================================
+Published as a conference paper at ICLR 2025
+HYPER-CONNECTIONS
+Defa Zhu, Hongzhi Huang, Zihao Huang, Yutao Zeng, Yunyao Mao, Banggu Wu,
+Qiyang Min, Xun Zhou
+Seed-Foundation-Model Team, ByteDance
+{zhudefa,huanghongzhi.51,huangzihao.notabot,yutao.zeng,
+maoyunyao.myy,wubanggu,minqiyang,zhouxun}@bytedance.com
+ABSTRACT
+We present hyper-connections, a simple yet effective method that can serve as an
+alternative to residual connections. This approach specifically addresses common
+drawbacks observed in residual connection variants, such as the seesaw effect
+between gradient vanishing and representation collapse. Theoretically, hyper-
+connections allow the network to adjust the strength of connections between fea-
+tures at different depths and dynamically rearrange layers. We conduct experiments
+focusing on the pre-training of large language models, including dense and sparse
+models, where hyper-connections show significant performance improvements
+over residual connections. Additional experiments conducted on vision tasks also
+demonstrate similar improvements. We anticipate that this method will be broadly
+applicable and beneficial across a wide range of AI problems.
+1
+INTRODUCTION
+100
+200
+300
+400
+500
+Tokens (Billions)
+2.275
+2.300
+2.325
+2.350
+2.375
+2.400
+Loss
+x1.8 0.027
+Training Loss
+OLMoE-1B-7B
+OLMoE-1B-7B-DHCx4
+100
+200
+300
+400
+500
+Tokens (Billions)
+2.65
+2.70
+2.75
+2.80
+2.85
+Loss
+x1.8 0.028
+C4 en val. loss
+OLMoE-1B-7B
+OLMoE-1B-7B-DHCx4
+100
+200
+300
+400
+500
+Tokens (Billions)
+57.5
+60.0
+62.5
+65.0
+67.5
+70.0
+Accuracy (%)
+HellaSwag Acc.
+OLMoE-1B-7B
+OLMoE-1B-7B-DHCx4
+100
+200
+300
+400
+500
+Tokens (Billions)
+32.5
+35.0
+37.5
+40.0
+42.5
+45.0
+47.5
+Accuracy (%)
+ARC Challenge Acc.
+OLMoE-1B-7B
+OLMoE-1B-7B-DHCx4
+Figure 1: The performance of the baseline model OLMoE-1B-7B and the model with hyper-
+connections, OLMoE-1B-7B-DHC×4. (1) and (2) show the training loss (0.99 EMA smoothed)
+and the C4-en validation loss, respectively. Our method converges 1.8 times faster compared to the
+baseline and maintains a significant advantage at the 500B tokens. (3) and (4) show the accuracy
+curves on HellaSwag and ARC-Challenge, demonstrating the superior performance of the
+OLMoE-1B-7B-DHC×4 model.
+Deep learning has achieved tremendous success across various domains, where residual connections
+(He et al., 2016) have been instrumental in contemporary neural network architectures, including
+transformers and CNNs. Residual connections help mitigate the problem of gradient vanishing,
+enabling the effective training of very deep networks. However, it is important to acknowledge that
+residual connections are not infallible solutions and still present limitations that remain unresolved.
+The two main variants of residual connections, Pre-Norm and Post-Norm, each make distinct
+trade-offs between gradient vanishing and representation collapse. Pre-Norm applies normalization
+operations to the input before each residual block, effectively addressing the problem of gradient
+vanishing (Bengio et al., 1994; Glorot & Bengio, 2010). However, it can also lead to the issue of
+collapse in deep representations (Liu et al., 2020), where hidden features in deeper layers become
+highly similar, diminishing the contribution of additional layers as their number increases. In contrast,
+Post-Norm applies normalization after the output of each residual block, reducing the influence of a
+hidden state on subsequent layers. This approach can alleviate the issue of representation collapse but
+1
+arXiv:2409.19606v3 [cs.LG] 18 Mar 2025
+
+Published as a conference paper at ICLR 2025
+layer
++
++
+(c) Depth-connections
+(b) Hyper-connections
+𝛽!
+𝛼!,!
+𝛼#,#
+𝛽#
+h#
+h!
+layer
++
+(d) Width-connections
+𝛼#,$
+𝛼!,!
+𝛼#,#
+𝛼#,!
+𝛼!,#
+𝛼!,$
+h#
+h!
+layer
++
+𝛼#,$
+𝛼!,!
+𝛼#,#
+𝛼#,!
+𝛼!,#
+𝛼!,$
+h#
+h!
++
++
+𝛽!
+𝛽#
+: scalar, weights of hyper-connections
+: hidden vectors
+layer
+: attention or FFN
++
++
+ℎ
++
+layer
+(a) Residual connections
+Figure 2: Hyper-connections (HC) with an expansion rate of n = 2. (a) Residual connections.
+(b) Hyper-connections: β1, β2, α0,0, α0,1, α1,0, α1,1, α2,1, and α2,2 are learnable scalars or scalars
+predicted by the network , depending on the specific HC version. These connections enable lateral
+information exchange and vertical integration of features across depths. The Transformer with HC
+is shown in Fig. 17. They can be decoupled into depth-connections and width-connections. (c)
+Depth-connections perform a weighted sum between the layer output and the hidden vector h1. (d)
+Width-connections allow information exchange between the hidden vectors h1 and h2.
+also reintroduces the problem of vanishing gradients. The vanishing gradient and the representation
+collapse are like two ends of a seesaw, with these two variants making respective trade-offs between
+these issues. The key issue is that residual connections, including both Pre-Norm and Post-Norm
+variants, predefine the strength of connections between the output and input within a layer.
+0
+5
+10
+15
+20
+25
+30
+ 
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+ 
+Pre-Norm
+Hyper-Connection
+cos(hi
+0, hi+1
+0
+)
+Layer Index i
+Figure 3:
+Cosine similarity be-
+tween the input of the current
+and the previous layers for the
+OLMo-1B
+models
+(Groeneveld
+et al., 2024). The curve represents
+the median of similarity, while the
+shaded area indicates the range be-
+tween the 5th and 95th percentiles.
+The red curve shows the model
+with Pre-Norm, and the blue curve
+shows that with hyper-connections.
+Driven by the limitations of residual connections, an important
+question arises: Can neural networks autonomously learn the
+optimal strength of connections to improve performance? To
+address this, we propose hyper-connections (HC), which lead to
+significantly improved performance with a negligible increase
+in computation and parameters. We will show that both Post-
+Norm and Pre-Norm variants can be expressed as specific non-
+trainable forms of hyper-connections, as discussed in § 3.1.
+The core idea of hyper-connections (HC) is to propose learnable
+depth-connections and width-connections, as depicted in Fig.2
+(b). These connections flexibly integrate features vertically
+across depths, compared to the residual connections shown in
+Fig.2 (a). Depth-connections can be considered as a general-
+ized residual connections, assigning weights to the connections
+between the inputs and outputs of each layer. To enable the
+network to model different depth-connections simultaneously,
+we expand the network’s input into n copies, each having its
+own depth connection, as shown in Fig. 2 (b). This design
+allows multiple hidden vectors to reserve multiple patterns con-
+necting preceding layers, as shown in § 4.5. Moreover, we
+establish width connections between the n hidden vectors, al-
+lowing information exchange between hidden vectors within
+the same layer, as shown in Fig. 2 (b). We argue that n (> 1)
+hidden states are necessary. As analyzed in Appendix F, the
+seesaw effect persists when n = 1, and experiments show that it
+does not improve performance, as shown in Fig. 5. In contrast,
+when n > 1, hyper-connections can not only learn to adjust the
+strength of residuals but also rearrange layers, either sequentially or in parallel, as discussed in § 3.2.
+To further enhance flexibility, we introduce dynamic hyper-connections (DHC), enabling the network
+to adjust connection weights according to the input. Notably, although HC seem to increase the
+network’s width by n times, the additional parameters and computational cost are almost negligible,
+as analyzed in Appendix B. The Transformer with HC is shown in Fig. 17.
+Our research, primarily centered on large language models (LLMs) pre-training, also extends to visual
+generation and classification tasks. Using Pre-Norm as a baseline, we demonstrate the significant
+benefits of hyper-connections, including 1B and 7B dense models as well as 7B MoE models, as
+2
+
+Published as a conference paper at ICLR 2025
+detailed in § 4. The benefits are particularly prominent for OLMoE (Muennighoff et al., 2024) as
+presented in Fig.1. The model utilizing DHC converges 1.8 times faster and shows an improvement
+of 6 points on ARC-Challenge compared to the baseline trained with 500 B tokens. According to our
+visualization analysis, as shown in Fig.3, the baseline model tends toward representation collapse,
+characterized by high similarity between features of adjacent layers. In contrast, models with HC
+exhibit significantly lower similarity between features across adjacent layers and a wider range of
+similarities. This suggests that HC enhance the impact of each layer. Further discussion is provided
+in §4.5 and in Appendix F. These compelling pieces of evidence demonstrate the generality of the
+hyper-connections principle, and we anticipate their applicability in numerous other AI challenges.
+2
+METHOD
+2.1
+STATIC HYPER-CONNECTIONS
+Consider the hidden vector hk−1 ∈Rd (or hk−1 ∈Rd×1) as the input to the k-th layer, with
+the initial input h0 to the network. Initially, h0 ∈Rd is replicated n times to form the initial
+hyper hidden matrix H0 =
+ h0
+h0
+. . .
+h0⊺∈Rn×d. Here, n is the expansion rate. For
+the k-th layer, the input consists of the hyper hidden matrix from the previous layer Hk−1 =
+ hk−1
+1
+hk−1
+2
+. . .
+hk−1
+n
+⊺∈Rn×d. Finally, we sum the last hyper hidden matrix row-wise to
+obtain the required hidden vector, which is then passed through a final projector to produce the
+final output of the network (i.e., a normalization layer and an unembedding layer in transformers).
+To simplify the notation in subsequent analysis, we omit the layer index and simply denote the
+hyper-hidden matrix as H = (h1
+h2
+. . .
+hn)⊺.
+The hyper-connections (HC) can be represented by a matrix HC, where each element defines the
+connection weight. The matrix is structured as follows:
+HC =
+
+01×1
+B
+Am
+Ar
+
+=
+
+
+
+
+
+
+0
+β1
+β2
+· · ·
+βn
+α1,0
+α1,1
+α1,2
+· · ·
+α1,n
+α2,0
+α2,1
+α2,2
+· · ·
+α2,n
+...
+...
+...
+...
+...
+αn,0
+αn,1
+αn,2
+· · ·
+αn,n
+
+
+
+
+
+
+∈R(n+1)×(n+1).
+(1)
+Consider a network layer T , it integrates self-attention layers and feed-forward networks within
+transformers. The output of the HC, denoted by ˆH, can be simply formulated as follows:
+ˆH = HC(T , H) = B⊺T (H⊺Am)⊺+ Ar
+⊺H.
+(2)
+We use Am as weights to perform a weighted sum on the input H = (h1
+h2
+. . .
+hn)⊺to obtain
+the input h0 of the current layer T , which is given by:
+h⊺
+0 = Am
+⊺H,
+(3)
+While Ar is used to connect H and map it to a hyper hidden matrix H′, as shown below:
+H′ = Ar
+⊺H.
+(4)
+Subsequently, the output is given by:
+ˆH = B⊺(T h0)⊺+ H′.
+(5)
+The depth-connections can be decoupled as the following matrix, which is shown at Fig 2 (a):
+DC =
+
+B
+diag(Ar)
+
+=
+
+β1
+β2
+· · ·
+βn
+α1,1
+α2,2
+· · ·
+αn,n
+
+∈R2×n,
+(6)
+where the first row B represents the weights of the output of the current layer T , and the last row
+diag(Ar) represents the weights of the input. We use diag(Ar) to represent the flatten vector of the
+diagonal entries of Ar.
+3
+
+Published as a conference paper at ICLR 2025
+The width-connections matrix can be defined as follows, which is shown at Fig 2 (b):
+WC = (Am
+Ar) ∈Rn×(n+1).
+(7)
+The algorithm that employs hyper-connections is presented in Algorithm 1.
+2.2
+DYNAMIC HYPER-CONNECTIONS
+The entries of HC can dynamically depend on the input H, which the matrix representation of
+dynamic hyper-connections (DHC) is defined as follows:
+HC(H) =
+
+01×1
+B(H)
+Am(H)
+Ar(H)
+
+(8)
+Similarly, given a layer T and input H, we obtain the output of the DHC as follows:
+ˆH = HC(H)(T , H).
+(9)
+In practice, we combine the dynamic and static matrices to achieve DHC. The dynamic parameters are
+obtained through a linear transformation. To stabilize the training process, we introduce normalization
+before the linear transformation and apply the tanh activation function after it, scaling it by a small
+initial learnable factor. The following equations detail how these dynamic parameters are computed:
+H =

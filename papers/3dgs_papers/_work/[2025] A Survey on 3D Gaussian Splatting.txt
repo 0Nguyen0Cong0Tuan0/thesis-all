@@ -1,0 +1,1093 @@
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+1
+A Survey on 3D Gaussian Splatting
+Guikun Chen, and Wenguan Wang, Senior Member, IEEE
+Abstract—3D Gaussian splatting (GS) has emerged as a transformative technique in explicit radiance field and computer graphics.
+This innovative approach, characterized by the use of millions of learnable 3D Gaussians, represents a significant departure from
+mainstream neural radiance field approaches, which predominantly use implicit, coordinate-based models to map spatial coordinates
+to pixel values. 3D GS, with its explicit scene representation and differentiable rendering algorithm, not only promises real-time
+rendering capability but also introduces unprecedented levels of editability. This positions 3D GS as a potential game-changer for the
+next generation of 3D reconstruction and representation. In the present paper, we provide the first systematic overview of the recent
+developments and critical contributions in the domain of 3D GS. We begin with a detailed exploration of the underlying principles and
+the driving forces behind the emergence of 3D GS, laying the groundwork for understanding its significance. A focal point of our
+discussion is the practical applicability of 3D GS. By enabling unprecedented rendering speed, 3D GS opens up a plethora of
+applications, ranging from virtual reality to interactive media and beyond. This is complemented by a comparative analysis of leading
+3D GS models, evaluated across various benchmark tasks to highlight their performance and practical utility. The survey concludes by
+identifying current challenges and suggesting potential avenues for future research. Through this survey, we aim to provide a valuable
+resource for both newcomers and seasoned researchers, fostering further exploration and advancement in explicit radiance field.
+Index Terms—3D Gaussian Splatting, Explicit Radiance Field, Real-time Rendering, Scene Understanding
+✦
+1
+INTRODUCTION
+T
+HE objective of image based 3D scene reconstruction
+is to convert a collection of views or videos capturing
+a scene into a digital 3D model that can be computa-
+tionally processed, analyzed, and manipulated. This hard
+and long-standing problem is fundamental for machines
+to comprehend the complexity of real-world environments,
+facilitating a wide array of applications such as 3D modeling
+and animation, robot navigation, historical preservation,
+augmented/virtual reality, and autonomous driving.
+The journey of 3D scene reconstruction began long
+before the surge of deep learning, with early endeavors
+focusing on light fields and basic scene reconstruction meth-
+ods [1]–[3]. These early attempts, however, were limited by
+their reliance on dense sampling and structured capture,
+leading to significant challenges in handling complex scenes
+and lighting conditions. The emergence of structure-from-
+motion [4] and subsequent advancements in multi-view
+stereo [5] algorithms provided a more robust framework for
+3D scene reconstruction. Despite these advancements, such
+methods struggled with novel-view synthesis and texture
+loss. NeRF represents a quantum leap in this progression.
+By leveraging deep neural networks, NeRF enabled the
+direct mapping of spatial coordinates to color and density.
+The success of NeRF hinged on its ability to create contin-
+uous, volumetric scene functions, producing results with
+unprecedented fidelity. However, as with any burgeoning
+technology, this implementation came at a cost: i) Computa-
+tional Intensity. NeRF based methods are computationally
+intensive [6]–[9], often requiring extensive training times
+•
+G. Chen and W. Wang are with College of Computer Science and
+Technology, Zhejiang University (Email: guikunchen@gmail.com, wen-
+guanwang.ai@gmail.com)
+•
+Corresponding Author: Wenguan Wang
+•
+Paper List: https://github.com/guikunchen/Awesome3DGS
+•
+Benchmarks: https://github.com/guikunchen/3DGS-Benchmarks
+ICLR’24
+ICML’24
+MICCAI’24
+ACM MM’24
+BMVC’24
+SIGGRAPH’24
+NeurIPS’24
+CVPR’24
+ECCV’24
+0
+10
+20
+30
+40
+50
+60
+70
+80
+# Papers
+# GitHub Stars
+0
+2K
+4K
+6K
+8K
+10K
+12K
+14K
+2
+4
+7
+8
+8
+23
+65
+67
+83
+Fig. 1. The number of published papers and official GitHub stars on 3D
+GS. The set of statistics is sourced from # Papers and # GitHub Stars.
+and substantial resources for rendering, especially for high-
+resolution outputs. ii) Editability. Manipulating scenes rep-
+resented implicitly is challenging, since direct modifications
+to the neural network’s weights are not intuitively related to
+changes in geometric or appearance properties of the scene.
+It is in this context that 3D Gaussian splatting (GS) [10]
+emerges, not merely as an incremental improvement but as
+a paradigm-shifting approach that redefines the boundaries
+of scene representation and rendering. While NeRF excelled
+in creating photorealistic images, the need for faster, more
+efficient rendering methods was becoming increasingly ap-
+parent, especially for applications (e.g., virtual reality and
+autonomous driving) that are highly sensitive to latency.
+3D GS addressed this need by introducing an advanced,
+explicit scene representation that models a scene using
+arXiv:2401.03890v6  [cs.CV]  7 Mar 2025
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+2
+millions of learnable 3D Gaussians in space. Unlike the im-
+plicit, coordinate-based models [11], [12], 3D GS employs an
+explicit representation and highly parallelized workflows,
+facilitating more efficient computation and rendering. The
+innovation of 3D GS lies in its unique blend of the ben-
+efits of differentiable pipelines and point-based rendering
+techniques [13]–[17]. By representing scenes with learnable
+3D Gaussians, it preserves the strong fitting capability of
+continuous volumetric radiance fields, essential for high-
+quality image synthesis, while simultaneously avoiding
+the computational overhead associated with NeRF based
+methods (e.g., computationally expensive ray-marching, and
+unnecessary calculations in empty space).
+The introduction of 3D GS is not just a technical advance-
+ment; it represents a fundamental shift in how we approach
+scene representation and rendering in computer vision and
+graphics. By enabling real-time rendering capabilities with-
+out compromising on visual quality, 3D GS opens up a
+plethora of possibilities for applications ranging from vir-
+tual reality and augmented reality to real-time cinematic
+rendering and beyond [18]–[21]. This technology holds the
+promise of not only enhancing existing applications but
+also enabling new ones that were previously unfeasible
+due to computational constraints. Furthermore, 3D GS’s
+explicit scene representation offers unprecedented flexibility
+to control the objects and scene dynamics, a crucial factor in
+complex scenarios involving intricate geometries and vary-
+ing lighting conditions [22]–[24]. This level of editability,
+combined with the efficiency of the training and rendering
+process, positions 3D GS as a transformative force in shap-
+ing future developments in relevant fields.
+In an effort to assist readers in keeping pace with the
+swift evolution of 3D GS, we provide the first survey on 3D
+GS, which presents a systematic and timely collection of the
+most significant literature on the topic. Given that 3D GS
+is a very recent innovation (Fig. 1), this survey focuses in
+particular on its principles, and the diverse developments
+and contributions that have emerged since its introduction.
+The selected follow-up works are primarily sourced from
+top-tier conferences, to provide a thorough and up-to-date
+(Dec. 2024) analysis of the theoretical foundations, remark-
+able developments, and burgeoning applications of 3D GS.
+Acknowledging the nascent yet rapidly evolving nature of
+3D GS, this survey is inevitably a biased view, but we strive
+to offer a balanced perspective that reflects both the current
+state and the future potential of this field. Our aim is to
+encapsulate the primary research trends and serve as a valu-
+able resource for both researchers and practitioners eager to
+understand and contribute to this rapidly evolving domain.
+The distinctions of this survey from existing literature [25]–
+[28] are evident in the following aspects:
+• We provide the first systematic and comprehensive review
+that examines 3D GS from a macro-level perspective by
+establishing clear taxonomies and frameworks. This high-
+level systematization helps researchers identify trends and
+potential directions that might not be apparent from paper-
+specific reviews. Our organizational structure serves as a
+roadmap for understanding how different approaches relate
+to and build upon each other within the 3D GS ecosystem.
+• This paper is the first and only survey to thoroughly delve
+into the theoretical background and fundamental principles
+3D GS
+Introduction (     )
+Background
+(     )
+Radiance Field (        )
+Context and 
+Terminology (        )
+Principles
+(     )
+Rendering with Learned 3D 
+Gaussians (        )
+Optimization of 3D GS (        )
+Directions
+(     )
+3D GS for Sparse Input(        )
+Memory-efficient 3D GS (        )
+Photorealistic 3D GS (        )
+Improved Optimization 
+Algorithms (        )
+3D Gaussian with More 
+Properties (        )
+Hybrid Representation (        )
+New Rendering Algorithm (        )
+Application 
+Areas & Tasks
+(     )
+Robotics (        )
+Dynamic Scene 
+Reconstruction (        )
+Generation and Editing (        )
+Avatar (        )
+Endoscopic Scene 
+Reconstruction (        )
+Large-scale Scene
+Reconstruction (        )
+Physics (        )
+Performance
+Comparison
+(     )
+Localization (        )
+Static Scenes (        )
+Dynamic Scenes (        )
+Human Avatar (        )
+Surgical Scenes (        )
+Research
+Directions (     )
+Conclusions (     )
+§2.1
+§2.2
+§3.1
+§3.2
+§4.1
+§4.2
+§4.3
+§4.4
+§4.5
+§4.6
+§4.7
+§5.1
+§5.2
+§5.3
+§5.4
+§5.5
+§5.6
+§5.7
+§6.1
+§6.2
+§6.3
+§6.4
+§6.5
+§1
+§2
+§3
+§4
+§5
+§6
+§7
+§8
+Fig. 2. Structure of the overall review.
+of 3D GS. The comprehensive coverage makes the field more
+approachable for newcomers while providing valuable in-
+sights for experienced researchers.
+• To ensure our survey remains relevant and offer long-
+term value in this rapidly evolving field, we maintain two
+dynamic GitHub repositories: one that follows our survey’s
+organizational structure and another that includes compre-
+hensive performance comparisons with analysis data.
+A summary of the structure of this article can be found
+in Fig. 2, which is presented as follows: Sec. 2 provides
+a brief background on problem formulation, terminology,
+and related research domains. Sec. 3 introduces the essential
+insights of 3D GS, encompassing the rendering process with
+learned 3D Gaussians and the optimization details (i.e., how
+to learn 3D Gaussians) of 3D GS. Sec. 4 presents several
+fruitful directions that aim to improve the capabilities of
+the original 3D GS. Sec. 5 unveils the diverse application
+areas and tasks where 3D GS has made significant impacts,
+showcasing its versatility. Sec. 6 conducts performance com-
+parison and analysis. Finally, Sec. 7 and 8 highlight the open
+questions for further research and conclude the survey.
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+3
+2
+BACKGROUND
+In this section, we first provide a brief formulation of
+radiance fields (Sec. 2.1), including both implicit and explicit
+ones. Sec. 2.2 further establishes linkages with relevant ren-
+dering algorithms and terminologies. For a comprehensive
+overview of radiance fields, scene reconstruction and repre-
+sentation, and rendering methods, please see the excellent
+surveys [29]–[33] for more insights.
+2.1
+Radiance Field
+• Implicit Radiance Field. An implicit radiance field repre-
+sents light distribution in a scene without explicitly defining
+the geometry of the scene. In the deep learning era, neural
+networks are often used to learn a continuous volumetric
+scene representation [34], [35]. The most prominent example
+is NeRF [12]. In NeRF (Fig. 3a), one or more MLPs are used
+to map a set of spatial coordinates (x, y, z) and viewing
+directions (θ, ϕ) to color c and volume density σ:
+(c, σ) ←MLP(x, y, z, θ, ϕ).
+(1)
+This format allows for a differentiable and compact repre-
+sentation of complex scenes, albeit often at the cost of high
+computational load due to volumetric ray marching. Note
+that typically, the color c is direction-dependent, whereas
+the volume density σ is not [12].
+• Explicit Radiance Field. An explicit radiance field directly
+represents the distribution of light in a discrete spatial struc-
+ture, such as a voxel grid or a set of points [36], [37]. Each
+element in this structure stores the radiance information
+for its respective location. This allows for direct and often
+faster access to radiance data but at the cost of higher
+memory usage and potentially lower resolution. Similar to
+the implicit radiance field, the explicit one is written as:
+(c, σ) ←DataStructure(x, y, z, θ, ϕ),
+(2)
+where DataStructure could be in the format of volumes,
+point clouds, etc. DataStructure encodes directional color
+in two main ways. One is encoding high-dimensional fea-
+tures that are subsequently decoded by a lightweight MLP.
+Another one is directly storing coefficients of directional
+basis functions, such as spherical harmonics or spherical
+Gaussians, where the final color is computed as a function
+of these coefficients and the viewing direction.
+• 3D Gaussian Splatting: Best-of-Both Worlds. 3D GS [10]
+is an explicit radiance field with the advantages of implicit
+radiance fields. Concretely, it leverages the strengths of both
+paradigms by utilizing learnable 3D Gaussians as the basis
+elements of DataStructure. Note that 3D GS encodes the
+opacity α directly for each Gaussian, as opposed to ap-
+proaches of first establishing density σ and then computing
+opacity based on that density. As in previous reconstruction
+work, 3D Gaussians are optimized under the supervision of
+multi-view images to represent the scene. Such a 3D Gaus-
+sian based differentiable pipeline combines the benefits of
+neural network based optimization and explicit, structured
+data storage. This hybrid approach aims to achieve real-
+time, high-quality rendering and requires less training time,
+particularly for complex scenes and high-resolution outputs.
+2.2
+Context and Terminology
+• Volumetric rendering aims to transform a 3D volumetric
+representation into an image by integrating radiance along
+camera rays. A camera ray r(t) can be parameterized as:
+r(t)=o+td, t∈[tnear, tfar], where o represents the ray origin
+(camera center), d is the ray direction, and t indicates the
+distance along the ray between near and far clipping planes.
+The pixel color C(r) is computed through a line integral
+along the ray r(t), mathematically expressed as [12]:
+C(r) =
+Z tfar
+tnear
+T(t) σ(r(t)) c(r(t), d) dt,
+(3)
+where σ(r(t)) is the volume density at point r(t), c(r(t), d)
+is the color at that point, and T(t) is the transmittance. Ray-
+marching directly approximates the volumetric rendering
+integral by systematically “stepping” along a ray and sam-
+pling the scene’s properties at discrete intervals. NeRF [12]
+shares the same spirit of ray-marching and introduces
+importance sampling and positional encoding to improve
+the quality of synthesized images. While providing high-
+quality results, ray-marching is computationally expensive,
+especially for high-resolution images.
+• Point-based rendering represents another class of render-
+ing algorithms, of which 3D GS introduces a notable im-
+plementation. Its simplest form [38] rasterizes point clouds
+with a fixed size, which introduces drawbacks such as holes
+and rendering artifacts. Seminal works addressed these
+limitations through various methods, including: i) splatting
+point primitives with a spatial extent [14], [15], [39], [40],
+and ii) more recently, embedding neural features directly
+into points for subsequent network-based rendering [41],
+[42]. 3D GS uses 3D Gaussian as the point primitive that
+contains explicit attributes (e.g., color and opacity) instead of
+implicit neural features. The rendering approach, i.e., point-
+based α-blending (exemplified in Eq. 5), shares the same
+image formation model as NeRF-style volumetric rendering
+(Eq. 3) [10], but demonstrates substantial speed advantages.
+This advantage originates from fundamental algorithmic
+differences. NeRFs approximate a line integral along a ray
+for each pixel, requiring expensive sampling. Point-based
+methods render point clouds using rasterization, which in-
+herently benefits from parallel computational strategies [43].
+3
+3D GAUSSIAN SPLATTING: PRINCIPLES
+3D GS offers a breakthrough in real-time, high-resolution
+image rendering, without relying on deep neural networks.
+This section aims to provide essential insights of 3D GS. We
+first elaborate on how 3D GS synthesizes an image given
+well-constructed 3D Gaussians in Sec. 3.1, i.e., the forward
+process of 3D GS. Then, we introduce how to obtain well-
+constructed 3D Gaussians for a given scene in Sec. 3.2, i.e.,
+the optimization process of 3D GS.
+3.1
+Rendering with Learned 3D Gaussians
+Consider a scene represented by (millions of) optimized
+3D Gaussians. The objective is to generate an image from
+a specified camera pose. Recall that NeRFs approach this
+task through computationally demanding volumetric ray-
+marching, sampling 3D space points per pixel. Such a
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+4
+(a) NeRF
+MLP
+(b) 3D GS
+Image Space
+Splatting
+x, y, z, θ, ϕ
+c & σ
+Fig. 3. NeRFs vs. 3D GS. (a) NeRF samples along the ray and then
+queries the MLP to obtain corresponding colors and densities, which
+can be seen as a backward mapping (ray tracing). (b) In contrast, 3D GS
+projects all 3D Gaussians into the image space (i.e., splatting) and then
+performs parallel rendering, which can be viewed as a forward mapping
+(rasterization). Best viewed in color.
+paradigm struggles with high-resolution image synthesis,
+failing to achieve real-time rendering, especially for plat-
+forms with limited computing resources [10]. By contrast,
+3D GS begins by projecting these 3D Gaussians onto a pixel-
+based image plane, a process termed “splatting” [39], [40]
+(see Fig. 3b). Afterwards, 3D GS sorts these Gaussians and
+computes the value for each pixel. As shown in Fig. 3, the
+rendering of NeRFs and 3D GS can be viewed as an inverse
+process of each other. In what follows, we begin with the
+definition of a 3D Gaussian, which is the minimal element
+of the scene representation in 3D GS. Next, we describe how
+these 3D Gaussians can be used for differentiable rendering.
+Finally, we introduce the acceleration technique used in 3D
+GS, which is the key to fast rendering.
+• Properties of 3D Gaussian. A 3D Gaussian is character-
+ized by its center (position) µ, opacity α, 3D covariance
+matrix Σ, and color c. c is represented by spherical har-
+monics for view-dependent appearance. All the properties
+are learnable and optimized through back-propagation.
+• Frustum Culling. Given a specified camera pose, this step
+determines which 3D Gaussians are outside the camera’s
+frustum. By doing so, 3D Gaussians outside the given view
+will not be involved in the subsequent computation.
+• Splatting. In this step, 3D Gaussians (ellipsoids) in 3D
+space are projected into 2D image space (ellipses). The pro-
+jection proceeds through two transformations: first, trans-
+forming 3D Gaussians from world coordinates to camera
+coordinates using the viewing transformation, and subse-
+quently splatting these Gaussians into 2D image space via
+an approximation of the projective transformation. Mathe-
+matically, given the 3D covariance matrix Σ describing a 3D
+Gaussian’s spatial distribution, and the viewing transforma-
+tion matrix W , the 2D covariance matrix Σ′ characterizing
+the projected 2D Gaussian is computed through:
+Σ′ = JW ΣW ⊤J⊤,
+(4)
+where J is the Jacobian of the affine approximation of the
+projective transformation [10], [39]. One might wonder why
+the standard camera intrinsics based projective transforma-
+tion is not used here. This is because its mappings are not
+affine and therefore cannot directly project Σ. 3D GS adopts
+an affine one proposed in [39] which approximates the pro-
+jective transformation using the first two terms (including
+J) of the Taylor expansion (see Sec. 4.4 in [39]).
+• Rendering by Pixels. Before delving into the final version
+of 3D GS which utilizes several techniques to boost parallel
+computation, we first elaborate on its simpler form to offer
+insights into its basic working mechanism. Given the posi-
+tion of a pixel x, its distance to all overlapping Gaussians,
+i.e., the depths of these Gaussians, can be computed through
+the viewing transformation matrix W , forming a sorted list
+of Gaussians N . Then, α-blending is adopted to compute
+the final color of this pixel:
+C =
+|N |
+X
+n=1
+cnα′
+n
+n−1
+Y
+j=1
+ 1 −α′
+j
+ ,
+(5)
+where cn is the learned color. The final opacity α′
+n is the
+multiplication result of the learned opacity αn and the
+Gaussian, defined as follows:
+α′
+n = αn × exp
+  −1
+2(x′ −µ′
+n)⊤Σ′−1
+n
+(x′ −µ′
+n)
+,
+(6)
+where x′ and µ′
+n are coordinates in the projected space. It
+is a reasonable concern that the rendering process described
+could be slower compared to NeRFs, given that generating
+the required sorted list is hard to parallelize. Indeed, this
+concern is justified; rendering speeds can be significantly
+impacted when utilizing such a simplistic, pixel-by-pixel
+approach. To achieve real-time rendering, 3D GS makes
+several concessions to accommodate parallel computation.
+• Tiles (Patches). To avoid the cost computation of deriving
+Gaussians for each pixel, 3D GS shifts the precision from
+pixel-level to patch-level detail, which is inspired by tile-
+based rasterization [43]. Concretely, 3D GS initially divides
+the image into multiple non-overlapping patches (tiles).
+Fig. 4b provides an illustration of tiles. Each tile comprises
+16×16 pixels as suggested in [10]. 3D GS further determines
+which tiles intersect with these projected Gaussians. Given
+that a projected Gaussian may cover several tiles, a logical
+method involves replicating the Gaussian, assigning each
+copy an identifier (i.e., a tile ID) for the relevant tile.
+• Parallel Rendering. After replication, 3D GS combines
+the respective tile ID with the depth value obtained from
+the view transformation for each Gaussian. This results in
+an unsorted list of bytes where the upper bits represent
+the tile ID and the lower bits signify depth. By doing so,
+the sorted list can be directly utilized for rendering (i.e.,
+alpha compositing). Fig. 4c and Fig. 4d provide the visual
+demonstration of such concepts. It’s worth highlighting that
+rendering each tile and pixel occurs independently, making
+this process highly suitable for parallel computations. An
+additional benefit is that each tile’s pixels can access a
+common shared memory and maintain an uniform read
+sequence (Fig. 5), enabling parallel execution of alpha com-
+positing with increased efficiency. In the official implemen-
+tation of the original paper [10], the framework regards the
+processing of tiles and pixels as analogous to the blocks and
+threads, respectively, in CUDA programming architecture.
+In a nutshell, 3D GS introduces several approximations
+during rendering to enhance computational efficiency while
+maintaining a high standard of image synthesis quality.
+3.2
+Optimization of 3D Gaussian Splatting
+At the heart of 3D GS lies an optimization procedure de-
+vised to construct a copious collection of 3D Gaussians that
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+5
+Splatting
+(a)
+(b)
+Depth
+Depth
+Depth
+Depth
+Depth
+Depth
+2D Gaussians
+(c)
+3D Gaussians
+Image Space
+(d)
+Tile3
+Tile4
+Tile1
+Tile2
+Tile1
+Depth
+Tile 1
+Depth
+Tile 2
+Depth
+Tile 1
+Depth
+Tile 2
+Depth
+Tile 3
+Depth
+Tile 4
+Depth
+Tile 3
+Sorted 2D Gaussians
+Depth
+Tile 1
+Depth
+Tile 1
+Depth
+Tile 2
+Depth
+Tile 2
+Depth
+Tile 1
+Depth
+Tile 2
+Depth
+Tile 3
+Depth
+Tile 4
+Depth
+Tile 3
+Replication
+Parallel Rendering
+C1 C2
+C3 C4
+C1 =α′
+1c1 + α′
+1c2(1 −α′
+1)
+C2 =α′
+2c1 + α′
+2c2(1 −α′
+2)
+C3 =α′
+3c1 + α′
+3c2(1 −α′
+3)
+C4 =α′
+4c1 + α′
+4c2(1 −α′
+4)
+Fig. 4. An illustration of the forward process of 3D GS (see Sec. 3.1). (a) The splatting step projects 3D Gaussians into image space. (b) 3D GS
+divides the image into multiple non-overlapping patches, i.e., tiles. (c) 3D GS replicates the Gaussians which cover several tiles, assigning each
+copy an identifier, i.e., a tile ID. (d) By rendering the sorted Gaussians, we can obtain all pixels within the tile. Note that the computational workflows
+for pixels and tiles are independent and can be done in parallel. Best viewed in color.
+Depth
+Tile 1
+Depth
+Tile 1
+Sorted 2D Gaussians
+Tile1
+Depth
+Tile 1
+Depth
+Tile 1
+Shared
+…… 
+Depth
+Tile 1
+Depth
+Tile 1
+Uniform Read
+Sequence
+Overlap
+Non-overlap
+Parallel Access
+Pass
+Eq. 
+Pass
+Pass
+5
+Fig. 5. An illustration of the tile based parallel (at the pixel-level) ren-
+dering. All the pixels within a tile (Tile1 here) access the same ordered
+Gaussian list stored in a shared memory for rendering. As the system
+processes each Gaussian sequentially, every pixel in the tile evaluates
+the Gaussian’s contribution according to the distance (i.e., the exp term
+in Eq. 6). Therefore, the rendering for a tile can be completed by iterating
+through the list of Gaussians just once. The computation for the red
+Gaussian follows a similar way and is omitted here for simplicity.
+accurately captures the scene’s essence, thereby facilitating
+free-viewpoint rendering. On the one hand, the properties
+of 3D Gaussians should be optimized via differentiable
+rasterization to fit the textures of a given scene. On the
+other hand, the number of 3D Gaussians that can represent a
+given scene well is unknown in advance. We will introduce
+how to optimize the properties of each Gaussian in Sec. 3.2.1
+and how to adaptively control the density of the Gaussians
+in Sec. 3.2.2. The two procedures are interleaved within the
+optimization workflow. Since there are many manually set
+hyperparameters in the optimization process, we omit the
+notations of most hyperparameters for clarity.
+3.2.1
+Parameter Optimization
+• Loss Function. Once the synthesis of the image is com-
+pleted, the difference between the rendered image and
+ground truth can be measured. All the learnable parameters
+are optimized by stochastic gradient descent using the ℓ1
+and D-SSIM loss functions:
+L = (1 −λ)L1 + λLD-SSIM,
+(7)
+where λ ∈[0, 1] is a weighting factor.
+• Parameter Update. Most properties of a 3D Gaussian
+can be optimized directly through back-propagation. It is
+essential to note that directly optimizing the covariance
+matrix Σ can result in a non-positive semi-definite matrix,
+which would not adhere to the physical interpretation typ-
+ically associated with covariance matrices. To circumvent
+this issue, 3D GS chooses to optimize a quaternion q and
+a 3D vector s. Here q and s represent rotation and scale,
+respectively. This approach allows the covariance matrix Σ
+to be reconstructed as follows:
+Σ = RSS⊤R⊤,
+(8)
+where R is the rotation matrix derived from the quaternion
+q, and S is the scaling matrix given by diag(s). As seen,
+there is a complex computational graph to obtain the opacity
+α, i.e., q and s 7→Σ, Σ 7→Σ′, and Σ′ 7→α. To avoid the cost
+of automatic differentiation, 3D GS derives the gradients for
+q and s so as to compute them directly during optimization.
+3.2.2
+Density Control
+• Initialization. 3D GS starts with the initial set of sparse
+points from SfM or random initialization. Note that a good
+initialization is essential to convergence and reconstruction
+quality [44]. Afterwards, point densification and pruning are
+adopted to control the density of 3D Gaussians.
+• Point Densification. In the point densification phase, 3D
+GS adaptively increases the density of Gaussians to better
+capture the details of a scene. This process focuses on areas
+with missing geometric features or regions where Gaussians
+are too spread out. The densification procedure will be
+performed at regular intervals (i.e., after a certain number of
+training iterations), focusing on those Gaussians with large
+view-space positional gradients (i.e., above a specific thresh-
+old). It involves either cloning small Gaussians in under-
+reconstructed areas or splitting large Gaussians in over-
+reconstructed regions. For cloning, a copy of the Gaussian
+is created and moved towards the positional gradient. For
+splitting, a large Gaussian is replaced with two smaller ones,
+reducing their scale by a specific factor. This step seeks an
+optimal distribution and representation of Gaussians in 3D
+space, enhancing the overall quality of the reconstruction.
+• Point Pruning. The point pruning stage involves the
+removal of superfluous or less impactful Gaussians, which
+can be viewed as a regularization process. It is executed by
+eliminating Gaussians that are virtually transparent (with α
+below a specified threshold) and those that are excessively
+large in either world-space or view-space. In addition, to
+prevent unjustified increases in Gaussian density near input
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+6
+cameras, the alpha value of the Gaussians is set close to
+zero after a certain number of iterations. This allows for a
+controlled increase in the density of necessary Gaussians
+while enabling the culling of redundant ones. The process
+not only helps in conserving computational resources but
+also ensures that the Gaussians in the model remain precise
+and effective for the representation of the scene.
+4
+3D GAUSSIAN SPLATTING: DIRECTIONS
+Though 3D GS has achieved impressive milestones, signifi-
+cant room for improvement remains, e.g., data and hardware
+requirement, rendering and optimization algorithm, and ap-
+plications in downstream tasks. In the subsequent sections,
+we seek to elaborate on select extended versions. These are:
+i) 3D GS for Sparse Input [45]–[55] (Sec. 4.1), ii) Memory-
+efficient 3D GS [56]–[64] (Sec. 4.2), iii) Photorealistic 3D
+GS [65]–[80] (Sec. 4.3), iv) Improved Optimization Algo-
+rithms [22], [77], [81]–[86] (Sec. 4.4), v) 3D Gaussian with
+More Properties [87]–[93] (Sec. 4.5), vi) Hybrid Representa-
+tion [94]–[96] (Sec. 4.6), and vii) New Rendering Algorithm
+(Sec. 4.7). While we have carefully selected several key
+directions, we acknowledge that it is inevitably a biased
+view. A more comprehensive collection is given in Github.
+4.1
+3D GS for Sparse Input
+A notable issue of 3D GS is the emergence of artifacts in
+areas with insufficient observational data. This challenge is
+a prevalent limitation in radiance field rendering, where
+sparse data often leads to inaccuracies in reconstruction.
+From a practical perspective, reconstructing scenes from
+limited viewpoints is of significant interest, particularly for
+the potential to enhance functionality with minimal input.
+Existing methods can be categorized into two primary
+groups. i) Regularization based methods introduce addi-
+tional constraints such as depth information to enhance
+the detail and global consistency [46], [49], [51], [55]. For
+example, DNGaussian [49] introduced a depth-regularized
+approach to address the challenge of geometry degradation
+in sparse input. FSGS [46] devised a Gaussian Unpooling
+process for initialization and also introduced depth regular-
+ization. MVSplat [51] proposed a cost volume representa-
+tion so as to provide geometry cues. Unfortunately, when
+dealing with a limited number of views, or even just one,
+the efficacy of regularization techniques tends to diminish,
+which leads to ii) generalizability based methods that use
+learned priors [47], [48], [53], [97]. One approach involves
+synthesizing additional views through generative models,
+which can be seamlessly integrated into existing reconstruc-
+tion pipelines [98]. However, this augmentation strategy is
+computationally intensive and inherently bounded by the
+capabilities of the used generative model. Another well-
+known paradigm employs feed-forward Gaussian model to
+directly generates the properties of a set of 3D Gaussians.
+This paradigm typically requires multiple views for training
+but can reconstruct 3D scenes with only one input image.
+For instance, PixelSplat [47] proposed to sample Gaussians
+from dense probability distributions. Splatter Image [48] in-
+troduced a 2D image-to-image network that maps an input
+image to a 3D Gaussian per pixel. However, as the generated
+pixel-aligned Gaussians are distributed nearly evenly in the
+space, they struggle to represent high-frequency details and
+smoother regions with an appropriate number of Gaussians.
+The challenge of 3D GS for sparse inputs centers on
+the modeling of priors, whether through depth information,
+generative models, or feed-forward Gaussian models. The
+fundamental trade-off lies between overfitting to available
+views and using learned priors for generalization. Future
+research could explore adaptive mechanisms for controlling
+this trade-off, potentially through learned confidence mea-
+sures, context-aware prior selection, user preferences, etc. In
+addition, while current methods focus on static scenes, ex-
+tending these approaches to dynamic scenarios presents an
+exciting frontier for investigation, particularly in handling
+temporal consistency and motion-induced artifacts.
+4.2
+Memory-efficient 3D GS
+While 3D GS demonstrates remarkable capabilities, its scal-
+ability poses significant challenges, particularly when juxta-
+posed with NeRF-based methods. The latter benefits from
+the simplicity of storing merely the parameters of a learned
+MLP. This scalability issue becomes increasingly acute in
+the context of large-scale scene management, where the
+computational and memory demands escalate substantially.
+Consequently, there is an urgent need to optimize memory
+usage in both model training and storage.
+Recent research has pursued two primary directions to
+address memory efficiency. First, several approaches focus
+on reducing the number of 3D Gaussians [58], [62], [63].
+These methods either employ strategic pruning of low-
+impact Gaussians, such as the volume-based masking [58],
+or represent neighboring Gaussians using the same prop-
+erties stored within a “local anchor” obtained by cluster-
+ing [22], hash-grid [62], etc. Second, researchers have devel-
+oped methods for compressing Gaussian’s properties [58],
+[61], [62]. For instance, Niedermayr et al. [61] compressed
+color and Gaussian parameters into compact codebooks,
+using sensitivity measures for effective quantization and
+fine-tuning. HAC [62] predicted the probability of each
+quantized attribute using Gaussian distributions and then
+devise an adaptive quantization module. These directions
+are not mutually exclusive; instead, one framework might
+use a hybrid approach combining multiple strategies.
+While current compression techniques have achieved
+significant storage reduction ratios (often by factors of 10-
+20×), several challenges remain. The field particularly needs
+advances in memory efficiency during the training phase,
+potentially through quantization-aware training protocols,
+the development of scene-agnostic, reusable codebooks, etc.
+Furthermore, optimizing the trade-off between compression
+efficiency and visual fidelity remains an open problem.
+4.3
+Photorealistic 3D GS
+The current rendering pipeline of 3D GS (Sec. 3.1) is straight-
+forward and involves several drawbacks. For instance, the
+simple visibility algorithm may lead to a drastic switch
+in the depth/blending order of Gaussians [10]. The visual
+fidelity of rendered images, including aspects such as alias-
+ing, reflections, and artifacts, can be further optimized.
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+7
+Recent research has focused on addressing three main
+aspects of visual quality, with aliasing being specific to 3D
+GS’s rendering algorithm, while reflection and blur han-
+dling represent broader challenges in 3D reconstruction. i)
+Aliasing. Due to the discrete sampling paradigm (viewing
+each pixel as a single point instead of an area), 3D GS is
+susceptible to aliasing when dealing with varying resolu-
+tions, which leads to blurring or jagged edges. Solutions
+emerged at both training and inference stages. Researchers
+developed training-time improvements from the sampling
+rate perspective and introduced schemes such as multi-scale
+Gaussians [67], 2D Mip filter [65], and conditioned logistic
+function [78]. Inference-time solutions, such as 2D scale-
+adaptive filtering [80], offer enhanced fidelity that can be
+integrated into any existing 3D GS frameworks. ii) Reflec-
+tion. Achieving realistic rendering of reflective materials is
+a hard, long-standing problem in 3D scene reconstruction.
+Recent works have introduced various approaches to model
+reflective materials [68], [73], [99] and enable relightable
+Gaussian representation [23], though achieving physically
+accurate specular effects remains challenging. iii) Blur.
+While 3D GS excels on carefully curated datasets, real-
+world captures often suffer from blurs such as motion blur
+and defocus blur. Recent approaches explicitly incorporated
+blur modeling during training, employing techniques such
+as coarse-to-fine kernel optimization [74] and photometric
+bundle adjustment [75] to address this challenge.
+While the approximations made in 3D GS (Sec. 3.1)
+contribute to its computational efficiency, they also lead to
+aliasing, difficulties in illumination estimation, etc. Current
+solutions, though impressive, typically address individual
+problems rather than providing a universal solution. A prac-
+tical intermediate approach involves first detecting specific
+issues (e.g., aliasing, blur) and then applying targeted opti-
+mization strategies. The ultimate goal remains developing
+an advanced reconstruction system that overcomes these
+limitations, either through fundamental improvements to
+3D GS or through brand-new architectures.
+4.4
+Improved Optimization Algorithms
+The optimization of 3D GS presents several challenges that
+affect the quality of reconstruction. These include issues
+with convergence speed, visual artifacts from improper
+Gaussians, and the need for better regularization during
+optimization. The raw optimization method (Sec. 3.2) might
+lead to overreconstruction in some regions while underrep-
+resenting others, resulting in blur and visual inconsistencies.
+Three main directions stand out for improving the op-
+timization of 3D GS. i) Additional Regularization (e.g.,
+frequency [84] and geometry [22], [77]). Geometry-aware
+approaches have been particularly successful, preserving
+scene structure through the incorporation of local anchor
+points [22], depth and surface constraints [100]–[102], Gaus-
+sian volumes [103], etc. ii) Optimization Procedure En-
+hancement [44], [101], [104]. While the original strategy of
+density control (Sec. 3.2.2) has proven valuable, consider-
+able room for improvement remains. For example, Gaus-
+sianPro [44] addresses the challenge of dense initialization
+in texture-less surfaces and large-scale scenes through an
+advanced Gaussian densification strategy. iii) Constraint
+Relaxation. Reliance on external tools/algorithms can intro-
+duce errors and cap the system’s performance potential. For
+instance, SfM, commonly used in the initialization process,
+is error-prone and struggle with complex scenes. Recent
+works have begun exploring COLMAP-free approaches
+utilizing stream continuity [81], [105], potentially enabling
+learning from internet-scale unposed video datasets.
+Though impressive, existing methods primarily concen-
+trate on optimizing Gaussians to accurately reconstruct
+scenes from scratch, neglecting a challenging yet promising
+solution which reconstructs scenes in a few-shot manner
+through established “meta representations”. Such solution
+could enable adaptive meta-learning strategies that combine
+scene-specific and general knowledge. See “learning physi-
+cal priors from large-scale data” in Sec. 7 for further insights.
+4.5
+3D Gaussian with More Properties
+Despite impressive, the properties of 3D Gaussian (Sec. 3.1)
+are designed to be used for novel-view synthesis only. By
+augmenting 3D Gaussian with additional properties, such as
+linguistic [87]–[89], semantic/instance [90]–[92], and spatial-
+temporal [93] properties, 3D GS demonstrates its consider-
+able potential to revolutionize various domains.
+Here we list several interesting applications using 3D
+Gaussians with specially designed properties. i) Language
+Embedded Scene Representation [87]–[89]. Due to the high
+computational and memory demands of current language-
+embedded scene representations, Shi et al. [87] proposed
+a quantization scheme that augments 3D Gaussian with
+streamlined language embeddings instead of the origi-
+nal high-dimensional embeddings. This method also mit-
+igated semantic ambiguity and enhanced the precision of
+open-vocabulary querying by smoothing out semantic fea-
+tures across different views, guided by uncertainty values.
+ii) Scene Understanding and Editing [90]–[92]. Feature
+3DGS [90] integrated 3D GS with feature field distilla-
+tion from 2D foundation models. By learning a lower-
+dimensional feature field and applying a lightweight con-
+volutional decoder for upsampling, Feature 3DGS achieved
+faster training and rendering speeds while enabling high-
+quality feature field distillation, supporting applications
+like semantic segmentation and language-guided editing.
+iii) Spatiotemporal Modeling [93], [106]. To capture the
+complex spatial and temporal dynamics of 3D scenes, Yang
+et al. [93] conceptualized spacetime as a unified entity and
+approximates the spatiotemporal volume of dynamic scenes
+using a collection of 4D Gaussians. The proposed 4D Gaus-
+sian representation and corresponding rendering pipeline
+are capable of modeling arbitrary rotations in space and
+time and allow for end-to-end training.
+4.6
+Hybrid Representation
+Rather than augmenting 3D Gaussian with additional prop-
+erties, another promising avenue of adapting to down-
+stream tasks is to introduce structured information (e.g.,
+spatial MLPs and grids) tailored for specific applications.
+Next we showcase various fascinating uses of 3D GS
+with specially devised structured information. i) Facial Ex-
+pression Modeling. Considering the challenge of creating
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+8
+high-fidelity 3D head avatars under sparse view condi-
+tions, Gaussian Head Avatar [96] introduced controllable 3D
+Gaussians and an MLP-based deformation field. Concretely,
+it captured detailed facial expressions and dynamics by
+optimizing neutral 3D Gaussians alongside the deforma-
+tion field, thus ensuring both detail fidelity and expression
+accuracy. ii) Spatiotemporal Modeling. Yang et al. [94]
+proposed to reconstruct dynamic scenes with deformable
+3D Gaussians. The deformable 3D Gaussians are learned in a
+canonical space, coupled with a deformation field (i.e., a spa-
+tial MLP) that models the spatial-temporal dynamics. The
+proposed method also incorporated an annealing smooth-
+ing training mechanism to enhance temporal smoothness
+without additional computational costs. iii) Style Transfer.
+Saroha et al. [107] proposed GS in style, an advanced ap-
+proach for real-time neural scene stylization. To maintain a
+cohesive stylized appearance across multiple views without
+compromising on rendering speed, they used pre-trained 3D
+Gaussians coupled with a multi-resolution hash grid and a
+small MLP to produce stylized views. In a nutshell, incorpo-
+rating structured information can serve as a complementary
+part for adapting to tasks that are incompatible with the
+sparsity and disorder of 3D Gaussians.
+4.7
+New Rendering Algorithm for 3D Gaussians
+While the rasterization-based pipeline of 3D GS offers im-
+pressive real-time performance, it still suffers from the in-
+herent limitations, including inefficient handling of highly-
+distorted cameras (crucial for robotics), secondary rays (for
+optical effects like reflections and shadows), and stochastic
+ray sampling (needed in various existing pipelines). In
+addition, the assumptions that Gaussians do not overlap
+and can be sorted accurately using only centers are often
+violated in practice, leading to temporal artifacts when
+camera movement changes sorting order.
+Recent works [108]–[110] explored ray tracing based
+rendering algorithms as an alternative. For instance, Gaus-
+sianTracer [108] introduced a new ray tracing implementa-
+tion for Gaussian primitives, and devised several acceler-
+ating strategies according to the uneven density and inter-
+leaved nature of Gaussians. EVER [109] deivsed a physically
+accurate, constant density ellipsoid representation that al-
+lows for the exact computation of the volume rendering in-
+tegral, rather than relying on somewhat satisfactory approx-
+imations. This advancement eliminates popping artifacts.
+Thanks to the fundamental paradigm shift, several excit-
+ing possibilities might emerge, including advanced optical
+effects (reflection, refraction, shadows, global illumination,
+etc.), support for complex camera models (highly-distorted
+lenses, rolling shutter effects, etc.), physically accurate ren-
+dering with true directional appearance evaluation (vs. tile
+based approximation), and more. While these capabilities
+currently come with additional computational costs, they
+provide essential building blocks for future research in
+inverse rendering, physical material modeling, relighting,
+and complex scene reconstruction.
+5
+APPLICATION AREAS AND TASKS
+Building on the rapid advancements in 3D GS, a wide range
+of innovative applications has emerged across multiple do-
+mains (Fig. 6) such as robotics (Sec. 5.1), dynamic scene
+reconstruction and representation (Sec. 5.2), generation and
+editing (Sec. 5.3), avatar (Sec. 5.4), medical systems (Sec. 5.5),
+large-scale scene reconstruction (Sec. 5.6), physics (Sec. 5.7),
+and even other scientific disciplines [24], [174]–[176]. Here,
+we highlight key examples that underscore the transfor-
+mative impact and potential of 3D GS and offer a more
+comprehensive collection in Github.
+5.1
+Robotics
+The evolution of scene representation in robotics has been
+profoundly shaped by the emergence of NeRF, which rev-
+olutionized dense mapping and environmental interaction
+through implicit neural models. However, NeRF’s compu-
+tational cost poses a critical bottleneck for real-time robotic
+applications. The shift from implicit to explicit represen-
+tation not only accelerates optimization but also unlocks
+direct access to spatial and structural scene data, making 3D
+GS a transformative tool for robotics. Its ability to balance
+high-fidelity reconstruction with computational efficiency
+positions 3D GS as a cornerstone for advancing robotic
+perception, manipulation, and navigation in dynamic, real-
+world environments.
+The integration of GS into robotic systems has yielded
+significant advancements across three core domains. In
+SLAM, GS-based methods [111]–[117], [123], [124], [177]–
+[182] excel in real-time dense mapping but face inherent
+trade-offs. Visual SLAM frameworks, particularly RGB-
+D variants [112], [114], [178], leverage depth supervision
+for geometric fidelity but falter in low-texture or motion-
+degraded environments. RGB-only approaches [113], [115],
+[183] circumvent depth sensors but grapple with scale am-
+biguity and drift. Multi-sensor fusion strategies, such as
+LiDAR integration [159], [177], [182], enhance robustness in
+unstructured settings at the cost of calibration complexity.
+Semantic SLAM [116], [117], [123] extends scene under-
+standing through object-level semantics but struggles with
+scalability due to lighting sensitivity in color-based methods
+or computational overhead in feature-based methods. 3D
+GS based manipulation [118]–[122] bypasses the need for
+auxiliary pose estimation in NeRF-based methods, enabling
+rapid single-stage tasks like grasping in static environments
+via geometric and semantic attributes encoded in Gaus-
+sian properties. Multi-stage manipulation [118], [120], where
+environmental dynamics demand real-time map updates,
+requires explicit modeling of dynamic adjustments (e.g.,
+object motions and interactions), material compliance, etc.
+The advancement of 3D GS in robotics faces three pivotal
+challenges. First, adaptability in dynamic and unstructured
+environments remains critical: real-world scenes are rarely
+static, requiring systems to continuously update representa-
+tions amid motion, occlusions, and sensor noise without sac-
+rificing accuracy. Second, current semantic mapping meth-
+ods rely on costly, scene-specific optimization processes,
+limiting generalizability and scalability for real-world de-
+ployment. Third, unlike NeRF based systems which can
+use MLP parameters as input features for downstream
+decision-making, 3D Gaussians’ inherent lack of spatial
+order complicates feature aggregation, with no standardized
+framework yet established. Bridging the gap between high-

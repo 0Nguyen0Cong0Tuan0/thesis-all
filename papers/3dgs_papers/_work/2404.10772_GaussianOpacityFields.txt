@@ -1,0 +1,1149 @@
+Gaussian Opacity Fields: Efficient Adaptive Surface Reconstruction in
+Unbounded Scenes
+ZEHAO YU, University of Tübingen, Tübingen AI Center, Germany
+TORSTEN SATTLER, Czech Technical University in Prague, Czech Republic
+ANDREAS GEIGER, University of Tübingen, Tübingen AI Center, Germany
+https://niujinshuchong.github.io/gaussian-opacity-fields
+Fig. 1. Applying TSDF fusion with rendered depth maps from the state-of-the-art Mip-Splatting [Yu et al. 2024a] models results in noisy and incomplete
+meshes, while meshes extracted with our method are complete, smooth, and detailed. This is achieved by establishing Gaussian opacity fields from 3D
+Gaussians, which enables geometry extraction by directly identifying its level-set. Moreover, we generate tetrahedral meshes from 3D Gaussians and utilize
+Marching Tetrahedra to extract adaptive and compact meshes.
+Recently, 3D Gaussian Splatting (3DGS) has demonstrated impressive novel
+view synthesis results, while allowing the rendering of high-resolution im-
+ages in real-time. However, leveraging 3D Gaussians for surface reconstruc-
+tion poses significant challenges due to the explicit and disconnected nature
+of 3D Gaussians. In this work, we present Gaussian Opacity Fields (GOF),
+a novel approach for efficient, high-quality, and adaptive surface recon-
+struction in unbounded scenes. Our GOF is derived from ray-tracing-based
+volume rendering of 3D Gaussians, enabling direct geometry extraction
+from 3D Gaussians by identifying its levelset, without resorting to Poisson
+reconstruction or TSDF fusion as in previous work. We approximate the
+surface normal of Gaussians as the normal of the ray-Gaussian intersection
+plane, enabling the application of regularization that significantly enhances
+geometry. Furthermore, we develop an efficient geometry extraction method
+utilizing Marching Tetrahedra, where the tetrahedral grids are induced from
+3D Gaussians and thus adapt to the scene’s complexity. Our evaluations
+reveal that GOF surpasses existing 3DGS-based methods in surface recon-
+struction and novel view synthesis. Further, it compares favorably to or even
+outperforms, neural implicit methods in both quality and speed.
+CCS Concepts: • Computing methodologies →Reconstruction; Render-
+ing; Machine learning approaches.
+Additional Key Words and Phrases: Novel View Synthesis, Differentiable
+Rendering, Gaussian Splatting, Surface Reconstruction, Multi-view-to-3D
+Authors’ addresses: Zehao Yu, University of Tübingen, Tübingen AI Center, Germany;
+Torsten Sattler, Czech Technical University in Prague, Czech Republic; Andreas Geiger,
+University of Tübingen, Tübingen AI Center, Germany.
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for components of this work owned by others than the
+author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+republish, to post on servers or to redistribute to lists, requires prior specific permission
+and/or a fee. Request permissions from permissions@acm.org.
+© 2024 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+0730-0301/2024/12-ART $15.00
+https://doi.org/10.1145/3687937
+ACM Reference Format:
+Zehao Yu, Torsten Sattler, and Andreas Geiger. 2024. Gaussian Opacity Fields:
+Efficient Adaptive Surface Reconstruction in Unbounded Scenes. ACM Trans.
+Graph. 43, 6 (December 2024), 15 pages. https://doi.org/10.1145/3687937
+1
+INTRODUCTION
+3D Reconstruction from multi-view images has been a long-standing
+goal in computer vision, with various applications in robotics, graph-
+ics, animation, virtual reality, and more. Since Neural Radiance Field
+(NeRF) [Mildenhall et al. 2020] demonstrated impressive novel view
+synthesis (NVS) results with implicit representations [Mescheder
+et al. 2019; Park et al. 2019] and volume rendering [Drebin et al.
+1988; Kajiya and Von Herzen 1984; Levoy 1990], it has been extended
+to surface reconstruction with occupancy networks [Oechsle et al.
+2021] and Signed Distance Functions (SDF) [Wang et al. 2021; Yariv
+et al. 2021]. While recent advancements [Li et al. 2023; Yariv et al.
+2023; Yu et al. 2022a,b] have shown impressive reconstruction re-
+sults, these methods are mostly limited to reconstructing foreground
+objects [Rosu and Behnke 2023] and computationally expensive to
+optimize [Yariv et al. 2023]. For instance, Neuralangelo [Li et al.
+2023] models the background separately with NeRFs and necessi-
+tates approximately 128 GPU hours to reconstruct a single scene.
+Another research avenue focuses on directly extracting surfaces
+from NeRF’s opacity field for real-time rendering [Chen et al. 2023a;
+Rakotosaona et al. 2024; Reiser et al. 2024; Tang et al. 2022]. These
+methods employ a modular workflow including opacity field train-
+ing, mesh extraction, simplification, and refinement. Particularly
+noteworthy is Binary Opacity Grids (BOG)[Reiser et al. 2024], which
+excels at capturing intricate details in unbounded scenes through
+super-sampling. To extract detailed surfaces, it renders depth maps
+ACM Trans. Graph., Vol. 43, No. 6, Article . Publication date: December 2024.
+arXiv:2404.10772v2  [cs.CV]  11 Sep 2024
+
+2
+•
+Zehao Yu, Torsten Sattler, and Andreas Geiger
+to generate a sparse high-resolution voxel grid and applies a heuris-
+tic fusion technique to label the voxels as inside or outside. March-
+ing cube algorithm [Lorensen and Cline 1998] is applied to extract
+a high-resolution mesh with hundreds of millions of points and
+thousands of millions of triangles, which is then simplified using
+slow post-processing techniques [Garland and Heckbert 1997]. No-
+tably, as it focuses on NVS rather than surface reconstruction, the
+extracted meshes are noisy and contain fewer details in the back-
+ground region, probably due to lack of regularization and contracted
+space [Barron et al. 2022a] fusion.
+More recently, 3D Gaussian Splatting (3DGS) [Kerbl et al. 2023]
+represents complex scenes as a set of 3D Gaussians, demonstrating
+photorealistic NVS results while trained efficiently and rendered
+in real-time. It has been quickly extended to surface reconstruc-
+tion [Chen et al. 2023b; Guédon and Lepetit 2023; Huang et al. 2024;
+Yu et al. 2024b]. Notably, SuGaR [Guédon and Lepetit 2023] regular-
+izes the 3D Gaussians to align with surfaces and employs Poisson
+surface reconstruction [Kazhdan and Hoppe 2013] to extract a mesh
+from rendered depth maps. 2D Gaussian Splatting (2DGS) [Huang
+et al. 2024] uses 2D Gaussians instead of 3D Gaussians as a scene
+representation for better surface representation and utilizes TSDF
+fusion to reconstruct a mesh. While these methods have shown
+improved reconstruction, they struggle with extracting fine-grained
+geometry [Guédon and Lepetit 2023] and reconstructing background
+regions [Huang et al. 2024]. A primary challenge is the inconsistency
+between mesh extraction and volume rendering during training.
+Specifically, Poisson reconstruction ignores the opacity and scale of
+Gaussian primitives and rendered depth maps are not sufficiently
+reliable. Moreover, TSDF fusion struggles to accurately model thin
+structures and to reconstruct unbounded scenes. Resorting to high-
+resolution voxel grids for TSDF leads to the creation of large meshes,
+similar to BOG [Reiser et al. 2024], due to the lack of adaptivity in
+the grid resolution relative to the scene’s geometric complexity.
+Contributions: In this paper, we propose Gaussian Opacity Fields
+(GOF), a novel approach to achieve efficient, high-quality, and adap-
+tive surface reconstruction from 3D Gaussians directly. Our key
+insights are threefold: First, we establish a Gaussian opacity field
+from a set of 3D Gaussians. Specifically, unlike projection-based
+volume rendering, our method leverages an explicit ray-Gaussian
+intersection to determine a Gaussian’s contribution during volume
+rendering. Our ray-tracing-inspired formula facilitates the evalua-
+tion of opacity values for any point along a ray. We then define the
+opacity of any 3D point as the minimal opacity among all training
+views that observed the point. Taking the minimum opacity across
+all views achieves view independence, making the opacity field
+solely a function of position. Our GOF is consistent with volume
+rendering during training and enables surface extraction from 3D
+Gaussians by directly identifying a level set, without resorting to
+Poisson reconstruction or TSDF fusion. Second, we approximate
+the surface normals of 3D Gaussians as the normals of intersec-
+tion planes between the ray and Gaussians. This technique allows
+for the incorporation of regularizations [Huang et al. 2024] during
+training, thus enhancing the fidelity of geometry reconstruction.
+Third, we propose an efficient surface extraction technique based
+on tetrahedra-grids. Recognizing that 3D Gaussians effectively in-
+dicate potential surface locations, we focus opacity evaluations on
+these areas. In particular, we use the center and corners of 3D bound-
+ing boxes around the 3D Gaussian primitives as vertex sets for the
+tetrahedral mesh. Upon assessing the opacity at tetrahedral points,
+we utilize the Marching Tetrahedra algorithm for triangle mesh ex-
+traction. Given that our opacity fields challenge the assumption that
+opacity changes linearly, we further implement a binary search algo-
+rithm to accurately identify the opacity field’s level set, substantially
+enhancing the quality of the resulting surfaces.
+To demonstrate the effectiveness and efficiency of GOF, we carry
+out extensive experiments across three challenging datasets [Barron
+et al. 2022a; Jensen et al. 2014; Knapitsch et al. 2017]. Our results
+indicate that GOF not only matches but, in some cases, surpasses
+the performance of existing SDF-based methods, while being much
+faster. Moreover, GOF outperforms all other 3DGS-based methods
+in both surface reconstruction and novel view synthesis.
+2
+RELATED WORK
+2.1
+Novel view synthesis
+NeRF [Mildenhall et al. 2020] utilizes a multi-layer perception (MLP)
+for scene representation, including geometry and view-dependent
+appearances. The MLP is optimized via a photometric loss through
+volume rendering [Drebin et al. 1988; Kajiya and Von Herzen 1984;
+Levoy 1990; Max 1995]. Subsequent enhancements have focused on
+optimizing NeRF’s training using feature-grid representations [Chen
+et al. 2022; Fridovich-Keil et al. 2022; Kulhanek and Sattler 2023;
+Müller et al. 2022; Sun et al. 2022] and improving rendering speed
+via baking [Hedman et al. 2021; Reiser et al. 2021, 2023; Yariv et al.
+2023]. Moreover, NeRF has been adapted to address challenges in
+anti-aliasing [Barron et al. 2022b, 2023] and unbounded scene mod-
+eling [Barron et al. 2022a; Zhang et al. 2020]. More recently, 3D
+Gaussian splatting [Kerbl et al. 2023] represents complex scenes
+with 3D Gaussians. It demonstrated impressive NVS results while
+being optimized efficiently and rendering high-resolution images
+in real-time. Subsequent works improved its rendering quality via
+anti-aliasing [Yu et al. 2024a] or extended it to dynamic scenes
+modeling [Zhou et al. 2024], and more [Chen and Wang 2024]. In
+this work, we extend 3DGS for high-quality surface reconstruction
+through the development of Gaussian Opacity Fields. We further
+introduce an efficient tetrahedron grid-based mesh extraction algo-
+rithm to extract scene adaptive and compact meshes.
+2.2
+3D reconstruction
+3D Reconstruction from multi-view images is a fundamental prob-
+lem in computer vision. Multi-view stereo methods [Schönberger
+et al. 2016; Yao et al. 2018; Yu and Gao 2020] often employ complex
+multi-stage pipelines that include feature matching, depth estima-
+tion, point clouds fusion, and ultimately, surface reconstruction
+from aggregated point clouds [Kazhdan and Hoppe 2013]. In con-
+trast, neural implicit methods [Oechsle et al. 2021; Wang et al. 2021;
+Yariv et al. 2021] significantly simplify the pipeline by optimiz-
+ing an implicit surface representation via volume rendering. After
+optimization, triangle meshes can be extracted easily with March-
+ing Cubes [Lorensen and Cline 1998] at any resolution. Notable
+ACM Trans. Graph., Vol. 43, No. 6, Article . Publication date: December 2024.
+
+Gaussian Opacity Fields: Efficient Adaptive Surface Reconstruction in Unbounded Scenes
+•
+3
+advancements have been made through the adoption of more ex-
+pressive scene representations [Li et al. 2023], advanced training
+strategies [Li et al. 2023], and the integration of monocular priors [Yu
+et al. 2022b]. Despite these advances, these methods are mostly lim-
+ited in reconstructing foreground objects [Rosu and Behnke 2023]
+and are computationally expensive to optimize [Li et al. 2023; Yariv
+et al. 2023]. Furthermore, the use of high-resolution grids for captur-
+ing fine details often results in excessively large meshes. By contrast,
+we establish Gaussian Opacity Fields using 3DGS [Kerbl et al. 2023],
+which facilitates fast training. We utilize Marching Tetrahedra [Doi
+and Koide 1991; Shen et al. 2021] to extract adaptive, compact, and
+detailed meshes in unbounded scenes.
+2.3
+Surface Reconstruction with Gaussians
+Inspired by the impressive NVS performance of 3D Gaussian Splat-
+ting (3DGS) [Kerbl et al. 2023], researchers have proposed to utilize
+3D Gaussians for surface reconstruction. Recent efforts [Chen et al.
+2023b; Yu et al. 2024b] have integrated 3D Gaussians with neu-
+ral implicit surfaces, optimizing a Signed Distance Function (SDF)
+network and 3D Gaussians jointly. While these approaches mark
+some advancements, they also inherit the shortcomings associated
+with implicit surfaces as previously discussed. Other studies have
+focused on surface extraction from optimized Gaussian primitives
+through post-processing techniques [Dai et al. 2024; Guédon and
+Lepetit 2023; Huang et al. 2024; Turkulainen et al. 2024]. Notably,
+SuGaR [Guédon and Lepetit 2023] and GaussianSurfels [Dai et al.
+2024] adopt Poisson surface reconstruction [Kazhdan and Hoppe
+2013] to extract meshes from rendered depth maps. Meanwhile, 2D
+Gaussian Splatting (2DGS) [Huang et al. 2024] employs TSDF fusion
+for this purpose. Though these methods achieve improved recon-
+structions, they face challenges in capturing fine-grained geometry
+and adequately reconstructing background areas. In this work, we
+derive Gaussian Opacity Fields directly from 3D Gaussians. Our GOF
+is consistent with the volume rendering process for rendering RGB
+images. It enables direct surface extraction by identifying a level
+set, without resorting to Poisson reconstruction and TSDF fusion.
+Additionally, we propose a tetrahedron grid-based technique for
+mesh extraction, resulting in adaptive and detailed meshes.
+3
+METHOD
+Given multiple posed and calibrated images, our goal is to recon-
+struct the 3D scene efficiently while allowing detailed and compact
+surface extraction and photorealistic novel view synthesis. To this
+end, we first construct Gaussian Opacity Fields (GOF) from 3D Gaus-
+sians, enabling geometry extraction directly by identifying a level
+set, eliminating the need for Poisson reconstruction or TSDF fusion.
+Next, we extend two effective regularizers from 2DGS [Huang et al.
+2024] to our 3D Gaussians, improving reconstruction quality. Finally,
+we propose a novel tetrahedra-based method to extract detailed and
+compact meshes from GOFs with marching tetrahedra.
+3.1
+Modeling
+Similar to prior works [Kerbl et al. 2023; Zwicker et al. 2001], we
+represent the scene with a set of 3D Gaussian primitives {G𝑘|𝑘=
+1, · · · , 𝐾}. The geometry of each 3D Gaussian G𝑘is parameterized
+by center p𝑘∈R3, scaling matrix S𝑘∈R3×3, and rotation R𝑘∈
+R3×3 parameterized by a quaternion:
+G𝑘(x) = 𝑒−1
+2 (x−p𝑘)𝑇𝚺−1
+𝑘(x−p𝑘)
+(1)
+where 𝚺𝑘∈R3×3 is a covariance matrix defined as 𝚺𝑘= R𝑘S𝑘S𝑇
+𝑘R𝑇
+𝑘.
+Ray Gaussian Intersection: Instead of projecting 3D Gaussians
+to 2D screen space and evaluating the Gaussian in 2D, we evaluate
+the contribution of a Gaussian to a ray with explicit ray-Gaussian
+intersection [Gao et al. 2023; Keselman and Hebert 2022]. As we will
+see in Section 3.2, this crucially enables evaluation of opacity values
+of arbitrary 3D points in contrast to the projection-based Gaussian
+splatting mechanism of [Kerbl et al. 2023] where 3D information
+is lost during the 3D-to-2D projection step. The ray-Gaussian in-
+tersection is defined as the point where the Gaussian reaches its
+maximum value along the ray. Specifically, given a camera center
+at o ∈R3 and a ray direction r ∈R3, any point x ∈R3 along the
+ray can be written as x = o + 𝑡r, where 𝑡is depth of the ray. We
+first transform the point x to the local coordinate system of the 3D
+Gaussian and normalize the point by its scale:
+o𝑔= S−1
+𝑘R𝑘(o −p𝑘)
+(2)
+r𝑔= S−1
+𝑘R𝑘r
+(3)
+x𝑔= o𝑔+ 𝑡r𝑔
+(4)
+In this local coordinate system, the Gaussian value at any point
+along the ray becomes a 1D Gaussian, which is described by:
+G1𝐷
+𝑘
+(𝑡) = 𝑒−1
+2 x𝑇
+𝑔x𝑔= 𝑒−1
+2 (r𝑇
+𝑔r𝑔𝑡2+2o𝑇
+𝑔r𝑔𝑡+o𝑇
+𝑔o𝑔)
+(5)
+The maximum of Eq. 5 is achieved when the quadratic term reaches
+maximum. Therefore, the closed-form solution for Eq. 5 is
+𝑡∗= −𝐵
+𝐴
+(6)
+where 𝐴= r𝑇𝑔r𝑔and 𝐵= o𝑇𝑔r𝑔. Note that our formula is equivalent
+to the one presented in [Keselman and Hebert 2022], where the ray-
+Gaussian intersection is computed directly in world space. However,
+using the normalized Gaussian coordinate by transforming the ray
+offers a clearer geometric interpretation and simplifies defining the
+normal of the intersection plane, as we will show in Sec. 3.3.
+Now, we define the contribution E of a Gaussian G𝑘for a given
+camera center o and ray direction r as:
+E(G𝑘, o, r) = G1𝐷
+𝑘
+(𝑡∗)
+(7)
+Volume Rendering: Similar to 3DGS [Kerbl et al. 2023], the color
+of a camera ray is rendered via alpha blending according to the
+primitive’s depth order 1, . . . , 𝐾:
+c(o, r) =
+𝐾
+∑︁
+𝑘=1
+c𝑘𝛼𝑘E(G𝑘, o, r)
+𝑘−1
+Ö
+𝑗=1
+(1 −𝛼𝑗E(G𝑗, o, r))
+(8)
+where c𝑘is the view-dependent color, modeled with spherical har-
+monics, and 𝛼𝑘∈[0, 1] is an additional parameter that influences
+the opacity of Gaussian 𝑘. To efficiently render an image, we utilize
+the same tile-based rendering process as in 3DGS [Kerbl et al. 2023].
+ACM Trans. Graph., Vol. 43, No. 6, Article . Publication date: December 2024.
+
+4
+•
+Zehao Yu, Torsten Sattler, and Andreas Geiger
+Fig. 2. Illustration of ray tracing volume rendering. Evaluating a 3D
+Gaussian along a ray results in a 1D Gaussian, which has a closed-form
+solution for when it reaches maximal value. We define the opacity along
+the ray as monotonously increasing until it reaches the maximal value and
+constant afterward.
+3.2
+Gaussian Opacity Fields
+One significant benefit of using explicit ray-Gaussian intersection
+instead of projection is that it allows evaluating the opacity value or
+transmittance of any 3D point x along the ray. Let’s first consider
+the case when there is only a single Gaussian G𝑘along the ray. In
+this case, we define the opacity of any 3D point along the ray as
+O𝑘(G𝑘, o, r,𝑡) =
+(
+G1𝐷
+𝑘
+(𝑡)
+if 𝑡≤𝑡∗
+G1𝐷
+𝑘
+(𝑡∗)
+if 𝑡> 𝑡∗
+where x = o + 𝑡r. Intuitively, the opacity (reverse of transmittance)
+increases until it reaches its maximal value, and remains constant
+afterwards as illustrated in Figure 2. Therefore, the opacity at any
+point along a ray given a set of Gaussians can be defined similar to
+the volume rendering process in Eq. 8 as:
+O(o, r,𝑡) =
+𝐾
+∑︁
+𝑘=1
+𝛼𝑘O𝑘(G𝑘, o, r,𝑡)
+𝑘−1
+Ö
+𝑗=1
+(1 −𝛼𝑗O𝑗(G𝑗, o, r,𝑡))
+(9)
+As a 3D point might be visible by any training view, we define the
+opacity of a 3D point x as the minimal opacity value among all
+training views or viewing directions:
+O(x) = min
+(o,r) O(o, r,𝑡)
+(10)
+We refer to O(x) as the Gaussian Opacity Field (GOF) since it is an
+opacity field derived from 3D Gaussians. Our GOF shares similarities
+to the visual hull [Laurentini 1994] or space carving [Kutulakos and
+Seitz 2000]. But instead of using a silhouette where the opacity value
+of a ray (all points on the ray) is either 1 or 0, GOF uses volume
+rendering to evaluate opacity for each point from 3D Gaussians.
+Our GOF is consistent with the volume rendering process for
+RGB rendering during training. With GOF, we can extract surfaces
+directly by identifying their level sets, similar to UNISURF [Oechsle
+et al. 2021], without resorting to Poisson reconstruction [Guédon
+and Lepetit 2023] or TSDF fusion [Huang et al. 2024]. We will discuss
+our method for efficient and adaptive mesh extraction in Section 3.4.
+We also note that GOFs are a general formula as long as the scene
+representation is a set of 3D Gaussians. For example, we can use it
+to extract a mesh from a pre-trained 3DGS [Kerbl et al. 2023] or Mip-
+Splatting [Yu et al. 2024a] model, where projection-based volume
+rendering is used for training, as we will show in the experiments.
+Fig. 3. Definition of Gaussian’s normal. We approximate the Gaussian’s
+normal as the normal of the ray-Gaussian intersection plane. First, we
+transform the ray into the Gaussian coordinate system and normalize it
+using the Gaussian’s scales. In this normalized coordinate system, the ray-
+Gaussian intersection plane is perpendicular to the ray, making the normal
+the inverse of the ray direction. Finally, we transform the intersection plane
+back to world space by reversing the normalization process.
+3.3
+Optimization
+Optimizing 3D Gaussians with pure photometric loss leads to noisy
+results as 3D reconstruction from multi-views is an underconstrained
+problem [Barron et al. 2022a; Zhang et al. 2020]. Therefore, we ex-
+tend the regularization terms in 2DGS [Huang et al. 2024] to op-
+timize our 3D Gaussians, including a depth distortion loss and a
+normal consistency loss.
+Depth Distortion: We apply the depth distortion loss [Huang et al.
+2024], which is originally proposed in Mip-NeRF 360 [Barron et al.
+2022a], to the ray-Gaussian intersection to concentrate Gaussians
+along the ray:
+L𝑑=
+∑︁
+𝑖,𝑗
+𝜔𝑖𝜔𝑗|𝑡𝑖−𝑡𝑗|
+(11)
+where 𝑖, 𝑗index over Gaussians contributed to the ray and 𝜔𝑖=
+𝛼𝑘E(G𝑘, o, r) Î𝑘−1
+𝑗=1 (1−𝛼𝑗E(G𝑗, o, r)) is the blending weight of the
+𝑖−th Gaussian and 𝑡𝑖is the depth of the intersection point in Eq. 6.
+However, the distortion loss minimizes both the distance between
+Gaussians and the weights of each Gaussian whereas minimizing the
+weights of the Gaussians could lead to an increase in alpha values
+for Gaussians that are blended first, which results in exaggerated
+Gaussians, resulting in floaters. Therefore, we detach the gradient
+of weights 𝜔𝑖and only minimize the distance between Gaussians.
+Normal Consistency: A key challenge of applying 2DGS’s normal
+consistency regularization [Huang et al. 2024] to 3D Gaussians is
+that the gradient of 3D Gaussians always points outwards from the
+centers. Consider a simple case when we render a single isotropic
+3D Gaussian to image space. The rendered result is a 2D Gauss-
+ian in the image plane. The gradient of this 2D Gaussian always
+points outward from the projected 2D center, meaning the rendered
+normals at two different pixels will differ as long as the directions
+from the projected 2D Gaussian center to the pixel coordinates vary.
+Moreover, the normal at the projected 2D center is not well-defined.
+This ambiguity makes the optimization difficult.
+To mitigate this issue, we define the normal of a 3D Gaussian
+as the normal of the intersection plane given a ray direction. An
+illustration is shown in Figure 3. Specifically, we begin by transform-
+ing the ray into the Gaussian coordinate system and normalizing it
+using the Gaussian’s scales, as described in Eq. 3. In the normalized
+coordinate system, the ray-Gaussian intersection plane is perpen-
+dicular to the ray. Therefore, the normal is the inverse ray direction
+ACM Trans. Graph., Vol. 43, No. 6, Article . Publication date: December 2024.
+
+Gaussian Opacity Fields: Efficient Adaptive Surface Reconstruction in Unbounded Scenes
+•
+5
+3DGS [Kerbl et al. 2023]
+3DGS + Our Densification
+Mip-Splatting [Yu et al. 2024a]
+Mip-Splatting + Our Densification
+Fig. 4. Comparison of densification strategy on the Mip-NeRF 360 Dataset [Barron et al. 2022a]. Applying our densification to 3DGS [Kerbl et al.
+2023] and Mip-Splatting [Yu et al. 2024a] significant improves the NVS results. Please note that the glass regions are blur in both 3DGS and Mip-Splatting,
+while our method renders the image faithfully.
+−r𝑔. Next, we reverse the normalization to transform the intersec-
+tion plane back to world space, where the plane’s normal is given
+by −S−1
+𝑘r𝑔. Finally, we apply the inverse of the world-to-Gaussian
+rotation to transform the normal back to world space, yielding the
+normal direction of the intersection plane as n𝑖= −R𝑇
+𝑘S−1
+𝑘r𝑔, which
+should then be normalized to ensure it is a valid unit vector. It
+is important to note that in world space, the intersection plane is
+not necessarily perpendicular to the ray direction, but the plane’s
+normal is always perpendicular to the intersection plane.
+After defining the normal of a Gaussian, we apply the depth-
+normal consistency regularisation:
+L𝑛=
+∑︁
+𝑖
+𝜔𝑖(1 −n⊤
+𝑖N)
+(12)
+where 𝑖indexes over intersected Gaussians along the ray, 𝜔denotes
+the blending weight, and N is the normal estimated by the gradient
+of the depth map [Huang et al. 2024].
+Final Loss: Finally, we optimize our model from an initial sparse
+point cloud using multiple posed images with the following loss:
+L = L𝑐+ 𝛼L𝑑+ 𝛽L𝑛
+(13)
+where L𝑐is an RGB reconstruction loss combining L1 with the
+D-SSIM term from [Kerbl et al. 2023], while L𝑑and L𝑛are regu-
+larization terms. Note that, we utilize the decoupled appearance
+modeling proposed in VastGaussian [Lin et al. 2024] to model the
+uneven illumination for the Tanks and Temples dataset [Knapitsch
+et al. 2017], where a small convolutional neural network is used
+to predict image-dependent colors such that the model will not
+fake inconsistent illumination with geometry. While other variants
+could also be applicable, we use VastGaussian’s solution due to its
+demonstrated improvements in large-scale scenarios and its ease of
+reimplementation.
+Improved Densification: As the optimization starts from a sparse
+point cloud, it is necessary to increase the number of 3D Gaussians to
+better reconstruct the scene. We follow the densification strategy in
+3DGS [Kerbl et al. 2023]. Specifically, the densification of a Gaussian
+(either by cloning or splitting) is guided by the magnitude of the
+view-space position gradient 𝑑𝐿
+𝑑x , where x is the center of projected
+Gaussian. Mathematically, 𝑑𝐿
+𝑑x sums over pixels p𝑖that the Gaussian
+contributed to:
+𝑑𝐿
+𝑑x =
+∑︁
+𝑖
+𝑑𝐿
+𝑑p𝑖
+𝑑p𝑖
+𝑑x
+(14)
+If the norm of the gradient ∥𝑑𝐿
+𝑑x ∥2 is above a predefined threshold
+𝜏x, the Gaussian is chosen as the candidate for densification.
+However, we found that this metric is not effective in identifying
+overly blurred areas, due to its inability to distinguish between
+well-reconstructed regions and those where the gradient signals
+from different pixels negate each other, leading to minimal overall
+gradient magnitudes. Therefore, we propose a simple modification
+to the metric that accumulates the norms of the individual pixel
+gradients instead:
+𝑀=
+∑︁
+𝑖
+∥𝑑𝐿
+𝑑p𝑖
+𝑑p𝑖
+𝑑x ∥
+(15)
+Our metric 𝑀better indicates regions with significant reconstruc-
+tion errors, resulting in better reconstruction and novel view syn-
+thesis results, as shown in Figure 4.
+3.4
+Surface Extraction
+Post-training, the conventional step towards surface or triangle
+mesh extraction involves densely evaluating the opacity values
+within regions of interest, a technique well-suited to simple scenar-
+ios like the DTU Dataset [Jensen et al. 2014], as done in previous
+work [Oechsle et al. 2021; Wang et al. 2021; Yariv et al. 2021]. For a
+large-scale unbounded scene, some have adopted dense evaluation
+in a contracted space [Yariv et al. 2023]. However, dense evaluation
+for grids incurs substantial computational costs due to the cubic
+growth of complexity with grid resolution. Unfortunately, capturing
+fine details necessitates high-resolution grids, leading to significant
+overhead. Alternative sparse grids may reduce dense evaluation but
+still result in huge meshes, often comprising hundreds of millions
+of points and billions of faces. Simplifying such large and complex
+meshes typically requires a slow post-processing step. For instance,
+mesh simplification in BOG [Reiser et al. 2024] requires approx-
+imately 4 hours. To circumvent these challenges, we introduce a
+novel method for extracting adaptive and compact meshes using
+tetrahedral grids and marching tetrahedra.
+Tetrahedral Grids Generation: Our primary insight is that the
+position and scale of 3D Gaussian primitives serve as reliable indi-
+cators for the presence of surfaces. To capitalize on this, we define a
+3D bounding box around each Gaussian primitive, where the extent
+of the 3D box is 3 times the Gaussian scales. The 3D box’s center has
+the highest opacity and its corners have the smallest opacity. Note
+that we do not consider the opacity 𝛼of Gaussian primitives but
+it could be used to filter out Gaussians with low opacity value. We
+ACM Trans. Graph., Vol. 43, No. 6, Article . Publication date: December 2024.
+
+6
+•
+Zehao Yu, Torsten Sattler, and Andreas Geiger
+(a) Marching Cubes
+(b) Marching Cubes with Binary Search
+Fig. 5. Comparison of applying binary search to Marching cubes.
+Strong step artifacts can be observed in Marching cubes results since the
+linear assumption does not hold in our GOF. Applying our binary search
+algorithm eliminates this artifact.
+create tetrahedral grids with the center and corners of 3D bound-
+ing boxes. Inspired by Tetra-NeRF [Kulhanek and Sattler 2023], we
+employ the CGAL Library [Jamin et al. 2024] for Delaunay trian-
+gulation to construct tetrahedral cells. The generated tetrahedral
+cell might connect points across significant distances. Therefore,
+we employ a filtering step for the tetrahedral cells, removing any
+cell whose edges connect non-overlapping Gaussians. Gaussians are
+considered non-overlapping when the length of the edge connect-
+ing them exceeds the sum of their maximum scales, i.e., maximum
+3-sigma extent dimension.
+Efficient Opacity Evaluation: To efficiently evaluate the opacity of
+the vertices of the tetrahedral grid, we design a tile-based evaluation
+algorithm, inspired by 3DGS [Kerbl et al. 2023]. Specifically, we first
+project the vertices to image space and identify the corresponding
+tiles for these projections. These points are then organized according
+to their tile ID. For each tile, we retrieve the list of points that are
+projected within it, project these points again to identify the pixel
+that it falls inside and identify the Gaussians that contribute to
+this pixel. Finally, we enumerate all points to evaluate their opacity
+based on the pre-filtered list of Gaussians. Note that this process
+is iterated over all training images. Then we take the minimum
+opacity over all training images as the opacity for the vertices of
+the tetrahedral grid. An overview of the algorithm is provided in
+the supplementary material.
+Binary Search of Level Set: Upon determining the opacity values
+for the tetrahedral grid, we proceed to extract triangle meshes using
+the Marching Tetrahedra method [Shen et al. 2021]. Traditional
+algorithms, including Marching Cubes [Lorensen and Cline 1998]
+and Marching Tetrahedra, typically rely on linear interpolation to
+approximate the level set, presuming the underlying field’s linear-
+ity. This assumption, however, misaligns with the characteristics
+of our Gaussian Opacity Field, leading to artifacts due to linear in-
+terpolation, as shown in Figure 5 (a). To overcome this discrepancy
+and accurately identify the level set within our non-linear opacity
+field, we relax the linear assumption to a monotonically increasing
+assumption. This adjustment allows for the implementation of a bi-
+nary search algorithm to precisely identify the level set. In practice,
+we found that conducting 8 iterations of binary search—effectively
+simulating 256 dense evaluations—yields consistent and reliable
+outcomes. A comparison highlighting the improvements of binary
+search is shown in Figure 5.
+Table
+1. Quantitative
+results
+on
+the
+Tanks
+and
+Temples
+Dataset [Knapitsch et al. 2017]. Reconstructions are evaluated
+with the official evaluation scripts and we report F1-score and average
+optimization time. The results of implicit methods are taken from
+Neuralangelo [Li et al. 2023] and the results of explicit methods are taken
+from 2DGS [Huang et al. 2024], where the mesh of 3DGS [Kerbl et al. 2023]
+and 2DGS [Huang et al. 2024] are extracted with TSDF fusion and SuGaR
+uses Poisson reconstruction. GOF outperforms all 3DGS-based surface
+reconstruction methods by a large margin and performs comparably with
+the SOTA neural implicit methods while optimizing significantly faster.
+Implicit
+Explicit
+NeuS
+Geo-Neus
+Neuralangelo
+SuGaR
+3DGS
+2DGS
+Ours
+Barn
+0.29
+0.33
+0.70
+0.14
+0.13
+0.41
+0.51
+Caterpillar
+0.29
+0.26
+0.36
+0.16
+0.08
+0.23
+0.41
+Courthouse
+0.17
+0.12
+0.28
+0.08
+0.09
+0.16
+0.28
+Ignatius
+0.83
+0.72
+0.89
+0.33
+0.04
+0.51
+0.68
+Meetingroom
+0.24
+0.20
+0.32
+0.15
+0.01
+0.17
+0.28
+Truck
+0.45
+0.45
+0.48
+0.26
+0.19
+0.45
+0.59
+Mean
+0.38
+0.35
+0.50
+0.19
+0.09
+0.32
+0.46
+Time
+>24h
+>24h
+>24h
+>1h
+14.3 m
+15.5 m
+24.2 m
+4
+EXPERIMENTS
+We conduct a thorough evaluation of our Gaussian Opacity Fields
+(GOF), comparing its surface reconstruction and novel view synthe-
+sis against leading methods. We further validate the effectiveness
+of its key components through ablation studies.
+4.1
+Implementation Details
+We build GOF upon the open-source 3DGS code base [Kerbl et al.
+2023] and implement custom CUDA kernels for ray-tracing-based
+volume rendering, regularizations, and opacity evaluation. Reg-
+ularization parameters are set to 𝛼= 1000 for bounded scenes,
+𝛼= 100 for unbounded scenes, and 𝛽= 0.05 for all scenes, fol-
+lowing 2DGS [Huang et al. 2024]. As our improved densification
+strategy increases the number of primitives for the same hyperpa-
+rameters, we use a higher opacity threshold 0.05 instead of 0.005
+for Gaussian pruning, resulting in a similar number of primitives
+post-training for a fair comparison. Similar to 3DGS, we stop den-
+sification at 15k iterations and optimize all of our models for 30k
+iterations. For mesh extraction, we adapt the Marching Tetrahedra
+algorithm [Shen et al. 2021] from the Kaolin library [Fuji Tsang et al.
+2022] with our binary search algorithm and extract the mesh for
+the 0.5 level-set. All experiments are conducted on an NVIDIA A100
+GPU.
+4.2
+Geometry Evaluation
+We first compare against both SOTA implicit and explicit surface
+reconstruction methods on the Tanks and Temples Dataset. Recon-
+structions are evaluated only for the foreground objects since the
+ground truth point clouds do not contain background regions. As
+shown in Table 1, our method is competitive with the leading im-
+plicit approaches [Li et al. 2023] while being much more efficient
+to be optimized. Note that most implicit approaches [Li et al. 2023;
+Wang et al. 2021] only reconstruct the foreground objects, while our
+method can reconstruct detailed meshes also for the background
+regions, which is of great importance for mesh-based real-time
+rendering [Reiser et al. 2024]. Furthermore, while our method is
+slightly slower than 3DGS [Kerbl et al. 2023] and 2DGS [Huang et al.
+ACM Trans. Graph., Vol. 43, No. 6, Article . Publication date: December 2024.
+
+Gaussian Opacity Fields: Efficient Adaptive Surface Reconstruction in Unbounded Scenes
+•
+7
+Neuralangelo [Li et al. 2023]
+SuGar [Guédon and Lepetit 2023]
+2DGS [Huang et al. 2024]
+Ours
+GT
+Fig. 6. Surface Reconstruction on the Tanks and Temples Dataset [Knapitsch et al. 2017]. We show the rendered normal maps from extract meshes
+and GT images for reference. Neural implicit methods, such as Neuralangelo [Li et al. 2023], model the foreground with SDF and the background with
+NeRF. Therefore, only the foreground mesh is extracted. SuGaR’s mesh is noisy [Guédon and Lepetit 2023] and 2DGS fails at reconstructing background
+regions [Huang et al. 2024]. In contrast, our method can reconstruct detailed surfaces for both foreground objects and background regions.
+Table 2. Quantitative comparison on the DTU Dataset [Jensen et al. 2014]. We report the Chamfer distance and average optimization time. The results
+of 3DGS [Kerbl et al. 2023] and SuGaR [Guédon and Lepetit 2023] are taken from 2DGS [Huang et al. 2024]. Our method achieves the highest reconstruction
+accuracy among other explicit methods.
+24
+37
+40
+55
+63
+65
+69
+83
+97
+105
+106
+110
+114
+118
+122
+Mean
+Time
+implicit
+NeRF [Mildenhall et al. 2021]
+1.90
+1.60
+1.85
+0.58
+2.28
+1.27
+1.47
+1.67
+2.05
+1.07
+0.88
+2.53
+1.06
+1.15
+0.96
+1.49
+> 12h
+VolSDF [Yariv et al. 2021]
+1.14
+1.26
+0.81
+0.49
+1.25
+0.70
+0.72
+1.29
+1.18
+0.70
+0.66
+1.08
+0.42
+0.61
+0.55
+0.86
+>12h
+NeuS [Wang et al. 2021]
+1.00
+1.37
+0.93
+0.43
+1.10
+0.65
+0.57
+1.48
+1.09
+0.83
+0.52
+1.20
+0.35
+0.49
+0.54
+0.84
+>12h
+Neuralangelo [Li et al. 2023]
+0.37
+0.72
+0.35
+0.35
+0.87
+0.54
+0.53
+1.29
+0.97
+0.73
+0.47
+0.74
+0.32
+0.41
+0.43
+0.61
+> 12h
+explicit
+3DGS [Kerbl et al. 2023]
+2.14
+1.53
+2.08
+1.68
+3.49
+2.21
+1.43
+2.07
+2.22
+1.75
+1.79
+2.55
+1.53
+1.52
+1.50
+1.96
+11.2 m
+SuGaR [Guédon and Lepetit 2023]
+1.47
+1.33
+1.13
+0.61
+2.25
+1.71
+1.15
+1.63
+1.62
+1.07
+0.79
+2.45
+0.98
+0.88
+0.79
+1.33
+∼1h
+GaussianSurfels [Dai et al. 2024]
+0.66
+0.93
+0.54
+0.41
+1.06
+1.14
+0.85
+1.29
+1.53
+0.79
+0.82
+1.58
+0.45
+0.66
+0.53
+0.88
+6.7 m
+2DGS [Huang et al. 2024]
+0.48
+0.91
+0.39
+0.39
+1.01
+0.83
+0.81
+1.36
+1.27
+0.76
+0.70
+1.40
+0.40
+0.76
+0.52
+0.80
+10.9 m
+Ours
+0.50
+0.82
+0.37
+0.37
+1.12
+0.74
+0.73
+1.18
+1.29
+0.68
+0.77
+0.90
+0.42
+0.66
+0.49
+0.74
+18.4 m
+2024] due to the ray-Gaussian intersection computation, it signifi-
+cantly outperforms all SOTA 3DGS-based methods in terms of re-
+construction quality. A qualitative comparison is shown in Figure 6.
+GOF reconstructs fine-detailed surfaces for both foreground objects
+and the background regions. By contrast, meshes extracted from
+SuGaR [Guédon and Lepetit 2023] are noisy, while 2DGS [Huang
+et al. 2024] fails to extract geometry for the background regions.
+We further compare against SOTA surface reconstruction meth-
+ods on the DTU dataset [Jensen et al. 2014]. As shown in Table 2, our
+method outperforms all other 3DGS-based methods [Dai et al. 2024;
+Guédon and Lepetit 2023; Huang et al. 2024]. Despite a performance
+gap with the leading implicit reconstruction method [Li et al. 2023],
+GOF’s optimization is much faster. This performance disparity is
+attributed to the DTU dataset’s strong view-dependent appearance.
+Utilizing a better view-dependent appearance modeling [Verbin
+et al. 2022] or a coarse-to-fine training strategy [Li et al. 2023] could
+potentially improve the reconstructions.
+4.3
+Novel view Synthesis
+To evaluate the NVS results of GOF, we further compare against
+SOTA NVS methods on the Mip-NeRF 360 dataset [Barron et al.
+Table 3. Quantitative results on Mip-NeRF 360 [Barron et al. 2022b]
+dataset. All results of the baseline methods are taken from their papers
+whenever available and we rerun SuGaR [Guédon and Lepetit 2023] with
+the same setting as ours. Our method achieved SOTA NVS results, especially
+in the outdoor scenes in terms of LPIPS.
+Outdoor Scene
+Indoor scene
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+NeRF
+21.46
+0.458
+0.515
+26.84
+0.790
+0.370
+Deep Blending
+21.54
+0.524
+0.364
+26.40
+0.844
+0.261
+Instant NGP
+22.90
+0.566
+0.371
+29.15
+0.880
+0.216
+MERF
+23.19
+0.616
+0.343
+27.80
+0.855
+0.271
+MipNeRF360
+24.47
+0.691
+0.283
+31.72
+0.917
+0.180
+Mobile-NeRF
+21.95
+0.470
+0.470
+-
+-
+-
+BakedSDF
+22.47
+0.585
+0.349
+27.06
+0.836
+0.258
+SuGaR
+22.93
+0.629
+0.356
+29.43
+0.906
+0.225
+BOG
+23.94
+0.680
+0.263
+27.71
+0873
+0.227
+3DGS
+24.64
+0.731
+0.234
+30.41
+0.920
+0.189
+Mip-Splatting
+24.65
+0.729
+0.245
+30.90
+0.921
+0.194
+2DGS
+24.34
+0.717
+0.246
+30.40
+0.916
+0.195
+Ours
+24.82
+0.750
+0.202
+30.79
+0.924
+0.184
+2022a]. The quantitative results are shown in Table 3. GOF not
+ACM Trans. Graph., Vol. 43, No. 6, Article . Publication date: December 2024.
+
+8
+•
+Zehao Yu, Torsten Sattler, and Andreas Geiger
+SuGaR [Guédon and Lepetit 2023]
+2DGS [Huang et al. 2024]
+Ours
+GT
+Fig. 7. Reconstructions on the Mip-NeRF 360 Dataset [Barron et al. 2022a]. We show the rendered normal maps from extract meshes together with GT
+images for reference. Our method can reconstruct detailed surfaces for both foreground objects and background regions while meshes from previous work are
+noisy [Guédon and Lepetit 2023] or fail to reconstruct background regions and thin structures, such as the spokes in the bicycle scene [Huang et al. 2024].
+Mip-Splatting + TSDF Fusion
+Mip-Splatting + GOF
+GT Image
+Fig. 8. Comparison of mesh extraction methods. Applying GOF to SOTA Mip-Splatting [Yu et al. 2024a] yields significant improvements over TSDF,
+enabling complete mesh extraction for background regions.
+only performs slightly better than all other 3DGS-based methods in
+terms of PSNR, but also outperforms all other methods significantly
+in terms of LPIPS [Zhang et al. 2018] in the outdoor scenes. The
+main improvements come from our improved densification strategy.
+In the ablation, we show that adding our densification strategy to
+3DGS [Kerbl et al. 2023] and Mip-Splatting [Yu et al. 2024a] im-
+proves the NVS results by a large margin. For the indoor scenes,
+our results are similar to Mip-Splatting [Yu et al. 2024a], with less
+than 0.1 PSNR difference, which we attribute to our regularizations
+that trade-off NVS and surface reconstruction. Our method also
+outperforms Sugar [Guédon and Lepetit 2023] and 2DGS [Huang
+et al. 2024] in all metrics. We show a qualitative comparison of
+extracted meshes in Figure 7. Similar to our observations on the
+Tanks and Temples dataset [Knapitsch et al. 2017], GOF can recon-
+struct detailed surfaces for both foreground objects and background
+regions, while SuGaR’s [Guédon and Lepetit 2023] meshes are noisy
+and have fewer details and 2DGS fails to extract meshes for the
+background regions. More qualitative results of our method can be
+found in Figure 13 and Figure 14.
+Table 4. Ablation on the Tanks and Temples Dataset [Knapitsch et al.
+2017]. The metrics are computed with the official script from the dataset.
+GOF significantly improves surface reconstruction quality. Our regulariza-
+tion, decoupled appearance, and densification strategy modeling further
+improve the results.
+Precision ↑
+Recall ↑
+F-score ↑
+A. Mip-Splatting w/ TSDF
+0.15
+0.25
+0.16
+B. Mip-Splatting w/ GOF
+0.40
+0.33
+0.36
+C. Ours w/o GOF
+0.37
+0.45
+0.39
+D. Ours w/o normal consistency
+0.41
+0.35
+0.37
+E. Ours w/o decoupled appearance
+0.49
+0.39
+0.43
+F. Ours w/ minimal axis’s normal
+0.46
+0.36
+0.40
+G. Ours w/o improved densification
+0.52
+0.39
+0.44
+H. Ours
+0.54
+0.42
+0.46
+4.4
+Ablation Study
+Mesh Extraction: Our GOF enables mesh extraction from 3D Gaus-
+sians directly by identifying a level set without resorting to Poisson
+reconstruction or TSDF fusion. Compared to using TSDF fusion
+ACM Trans. Graph., Vol. 43, No. 6, Article . Publication date: December 2024.

@@ -1,0 +1,1324 @@
+Structure-from-Motion Revisited
+Johannes L. Sch¨onberger1,2∗, Jan-Michael Frahm1
+1University of North Carolina at Chapel Hill
+2Eidgen¨ossische Technische Hochschule Z¨urich
+jsch@inf.ethz.ch, jmf@cs.unc.edu
+Abstract
+Incremental Structure-from-Motion is a prevalent strat-
+egy for 3D reconstruction from unordered image collec-
+tions.
+While incremental reconstruction systems have
+tremendously advanced in all regards, robustness, accu-
+racy, completeness, and scalability remain the key problems
+towards building a truly general-purpose pipeline. We pro-
+pose a new SfM technique that improves upon the state of
+the art to make a further step towards this ultimate goal.
+The full reconstruction pipeline is released to the public as
+an open-source implementation.
+1. Introduction
+Structure-from-Motion (SfM) from unordered images
+has seen tremendous evolution over the years. The early
+self-calibrating metric reconstruction systems [42, 6, 19,
+16, 46] served as the foundation for the ﬁrst systems on
+unordered Internet photo collections [48, 53] and urban
+scenes [45]. Inspired by these works, increasingly large-
+scale reconstruction systems have been developed for hun-
+dreds of thousands [1] and millions [20, 62, 51, 47] to re-
+cently a hundred million Internet photos [30]. A variety
+of SfM strategies have been proposed including incremen-
+tal [53, 1, 20, 62], hierarchical [23], and global approaches
+[14, 61, 56]. Arguably, incremental SfM is the most popular
+strategy for reconstruction of unordered photo collections.
+Despite its widespread use, we still have not accomplished
+to design a truly general-purpose SfM system. While the
+existing systems have advanced the state of the art tremen-
+dously, robustness, accuracy, completeness, and scalability
+remain the key problems in incremental SfM that prevent its
+use as a general-purpose method. In this paper, we propose
+a new SfM algorithm to approach this ultimate goal. The
+new method is evaluated on a variety of challenging datasets
+and the code is contributed to the research community as an
+open-source implementation named COLMAP available at
+https://github.com/colmap/colmap.
+∗This work was done at the University of North Carolina at Chapel Hill.
+Figure 1. Result of Rome with 21K registered out of 75K images.
+2. Review of Structure-from-Motion
+SfM is the process of reconstructing 3D structure from
+its projections into a series of images taken from different
+viewpoints. Incremental SfM (denoted as SfM in this paper)
+is a sequential processing pipeline with an iterative recon-
+struction component (Fig. 2). It commonly starts with fea-
+ture extraction and matching, followed by geometric veriﬁ-
+cation. The resulting scene graph serves as the foundation
+for the reconstruction stage, which seeds the model with
+a carefully selected two-view reconstruction, before incre-
+mentally registering new images, triangulating scene points,
+ﬁltering outliers, and reﬁning the reconstruction using bun-
+dle adjustment (BA). The following sections elaborate on
+this process, deﬁne the notation used throughout the paper,
+and introduce related work.
+2.1. Correspondence Search
+The ﬁrst stage is correspondence search which ﬁnds
+scene overlap in the input images I = {Ii | i = 1...NI}
+and identiﬁes projections of the same points in overlapping
+images. The output is a set of geometrically veriﬁed image
+pairs ¯C and a graph of image projections for each point.
+Feature Extraction.
+For each image Ii, SfM detects sets
+Fi = {(xj, fj) | j = 1...NFi} of local features at loca-
+tion xj ∈R2 represented by an appearance descriptor fj.
+The features should be invariant under radiometric and ge-
+ometric changes so that SfM can uniquely recognize them
+in multiple images [41]. SIFT [39], its derivatives [59], and
+more recently learned features [9] are the gold standard in
+terms of robustness. Alternatively, binary features provide
+better efﬁciency at the cost of reduced robustness [29].
+
+Correspondence Search
+Incremental Reconstruction
+Images
+Reconstruction
+Initialization
+Bundle Adjustment
+Triangulation
+Feature Extraction
+Matching
+Geometric Verification
+Image Registration
+Outlier Filtering
+Figure 2. Incremental Structure-from-Motion pipeline.
+Matching.
+Next, SfM discovers images that see the same
+scene part by leveraging the features Fi as an appearance
+description of the images. The na¨ıve approach tests every
+image pair for scene overlap; it searches for feature cor-
+respondences by ﬁnding the most similar feature in image
+Ia for every feature in image Ib, using a similarity met-
+ric comparing the appearance fj of the features. This ap-
+proach has computational complexity O(N 2
+I N 2
+Fi) and is
+prohibitive for large image collections. A variety of ap-
+proaches tackle the problem of scalable and efﬁcient match-
+ing [1, 20, 37, 62, 28, 50, 30]. The output is a set of poten-
+tially overlapping image pairs C = {{Ia, Ib} | Ia, Ib ∈
+I, a < b} and their associated feature correspondences
+Mab ∈Fa × Fb.
+Geometric Veriﬁcation.
+The third stage veriﬁes the po-
+tentially overlapping image pairs C.
+Since matching is
+based solely on appearance, it is not guaranteed that cor-
+responding features actually map to the same scene point.
+Therefore, SfM veriﬁes the matches by trying to estimate a
+transformation that maps feature points between images us-
+ing projective geometry. Depending on the spatial conﬁg-
+uration of an image pair, different mappings describe their
+geometric relation. A homography H describes the trans-
+formation of a purely rotating or a moving camera capturing
+a planar scene [26]. Epipolar geometry [26] describes the
+relation for a moving camera through the essential matrix
+E (calibrated) or the fundamental matrix F (uncalibrated),
+and can be extended to three views using the trifocal ten-
+sor [26]. If a valid transformation maps a sufﬁcient number
+of features between the images, they are considered geo-
+metrically veriﬁed. Since the correspondences from match-
+ing are often outlier-contaminated, robust estimation tech-
+niques, such as RANSAC [18], are required. The output
+of this stage is a set of geometrically veriﬁed image pairs ¯C,
+their associated inlier correspondences ¯
+Mab, and optionally
+a description of their geometric relation Gab. To decide on
+the appropriate relation, decision criterions like GRIC [57]
+or methods like QDEGSAC [21] can be used. The output
+of this stage is a so-called scene graph [54, 37, 49, 30] with
+images as nodes and veriﬁed pairs of images as edges.
+2.2. Incremental Reconstruction
+The input to the reconstruction stage is the scene graph.
+The outputs are pose estimates P = {Pc ∈SE(3) | c =
+1...NP } for registered images and the reconstructed scene
+structure as a set of points X = {Xk ∈R3 | k = 1...NX}.
+Initialization.
+SfM initializes the model with a carefully
+selected two-view reconstruction [7, 52]. Choosing a suit-
+able initial pair is critical, since the reconstruction may
+never recover from a bad initialization. Moreover, the ro-
+bustness, accuracy, and performance of the reconstruction
+depends on the seed location of the incremental process.
+Initializing from a dense location in the image graph with
+many overlapping cameras typically results in a more robust
+and accurate reconstruction due to increased redundancy. In
+contrast, initializing from a sparser location results in lower
+runtimes, since BAs deal with overall sparser problems ac-
+cumulated over the reconstruction process.
+Image Registration.
+Starting from a metric reconstruc-
+tion, new images can be registered to the current model by
+solving the Perspective-n-Point (PnP) problem [18] using
+feature correspondences to triangulated points in already
+registered images (2D-3D correspondences). The PnP prob-
+lem involves estimating the pose Pc and, for uncalibrated
+cameras, its intrinsic parameters.
+The set P is thus ex-
+tended by the pose Pc of the newly registered image. Since
+the 2D-3D correspondences are often outlier-contaminated,
+the pose for calibrated cameras is usually estimated using
+RANSAC and a minimal pose solver, e.g. [22, 34]. For un-
+calibrated cameras, various minimal solvers, e.g. [10], or
+sampling-based approaches, e.g. [31], exist. We propose a
+novel robust next best image selection method for accurate
+pose estimation and reliable triangulation in Sec. 4.2.
+Triangulation.
+A newly registered image must observe
+existing scene points. In addition, it may also increase scene
+coverage by extending the set of points X through triangu-
+lation. A new scene point Xk can be triangulated and added
+to X as soon as at least one more image, also covering the
+new scene part but from a different viewpoint, is registered.
+Triangulation is a crucial step in SfM, as it increases the sta-
+bility of the existing model through redundancy [58] and it
+enables registration of new images by providing additional
+2D-3D correspondences. A large number of methods for
+multi-view triangulation exist [27, 5, 25, 35, 40, 3, 44, 32].
+These methods suffer from limited robustness or high com-
+putational cost for use in SfM, which we address by propos-
+ing a robust and efﬁcient triangulation method in Sec. 4.3.
+Bundle Adjustment.
+Image registration and triangula-
+tion are separate procedures, even though their products are
+highly correlated – uncertainties in the camera pose propa-
+gate to triangulated points and vice versa, and additional tri-
+angulations may improve the initial camera pose through in-
+creased redundancy. Without further reﬁnement, SfM usu-
+ally drifts quickly to a non-recoverable state. BA [58] is the
+joint non-linear reﬁnement of camera parameters Pc and
+point parameters Xk that minimizes the reprojection error
+E =
+X
+j ρj
+
+∥π (Pc, Xk) −xj∥2
+2
+
+(1)
+using a function π that projects scene points to image space
+
+and a loss function ρj to potentially down-weight outliers.
+Levenberg-Marquardt [58, 26] is the method of choice for
+solving BA problems. The special structure of parameters
+in BA problems motivates the Schur complement trick [8],
+in which one ﬁrst solves the reduced camera system and
+then updates the points via back-substitution. This scheme
+is commonly more efﬁcient, since the number of cameras is
+usually smaller than the number of points. There are two
+choices for solving the system: exact and inexact step al-
+gorithms. Exact methods solve the system by storing and
+factoring it as a dense or sparse matrix [13, 38] with a space
+complexity of O(N 2
+P ) and a time complexity of O(N 3
+P ).
+Inexact methods approximately solve the system, usually
+by using an iterative solver, e.g. preconditioned conjugate
+gradients (PCG), which has O(NP ) time and space com-
+plexity [4, 63]. Direct algorithms are the method of choice
+for up to a few hundred cameras but they are too expen-
+sive in large-scale settings. While sparse direct methods re-
+duce the complexity by a large factor for sparse problems,
+they are prohibitive for large unstructured photo collections
+due to typically much denser connectivity graphs [54, 4].
+In this case, indirect algorithms are the method of choice.
+Especially for Internet photos, BA spends signiﬁcant time
+on optimizing many near-duplicate images. In Sec. 4.5, we
+propose a method to identify and parameterize highly over-
+lapping images for efﬁcient BA of dense collections.
+3. Challenges
+While the current state-of-the-art SfM algorithms can
+handle the diverse and complex distribution of images in
+large-scale Internet photo collections, they frequently fail to
+produce fully satisfactory results in terms of completeness
+and robustness. Oftentimes, the systems fail to register a
+large fraction of images that empirically should be registra-
+ble [20, 30], or the systems produce broken models due to
+mis-registrations or drift. First, this may be caused by cor-
+respondence search producing an incomplete scene graph,
+e.g. due to matching approximations, and therefore provid-
+ing neither the necessary connectivity for complete models
+nor sufﬁcient redundancy for reliable estimation. Second,
+this may be caused by the reconstruction stage failing to
+register images due to missing or inaccurate scene structure
+– image registration and triangulation have a symbiotic re-
+lationship in that images can only be registered to existing
+scene structure and scene structure can only be triangulated
+from registered images [64]. Maximizing the accuracy and
+completeness of both at each step during the incremental
+reconstruction is a key challenge in SfM. In this paper, we
+address this challenge and signiﬁcantly improve results over
+the current state of the art (Sec. 5) in terms of completeness,
+robustness, and accuracy while boosting efﬁciency.
+4. Contributions
+This section presents a new algorithm that improves on
+the main challenges in SfM. First, we introduce a geo-
+metric veriﬁcation strategy that augments the scene graph
+with information subsequently improving the robustness of
+the initialization and triangulation components. Second, a
+next best view selection maximizing the robustness and ac-
+curacy of the incremental reconstruction process. Third,
+a robust triangulation method that produces signiﬁcantly
+more complete scene structure than the state of the art at
+reduced computational cost. Fourth, an iterative BA, re-
+triangulation, and outlier ﬁltering strategy that signiﬁcantly
+improves completeness and accuracy by mitigating drift ef-
+fects.
+Finally, a more efﬁcient BA parameterization for
+dense photo collections through redundant view mining.
+This results in a system that clearly outperforms the cur-
+rent state of the art in terms of robustness and completeness
+while preserving its efﬁciency. We contrast our contribu-
+tions to the current state-of-the-art systems Bundler (open-
+source) [52] and VisualSFM (closed-source) [62]. The pro-
+posed system is released as an open-source implementation.
+4.1. Scene Graph Augmentation
+We propose a multi-model geometric veriﬁcation strat-
+egy to augment the scene graph with the appropriate geo-
+metric relation. First, we estimate a fundamental matrix. If
+at least NF inliers are found, we consider the image pair
+as geometrically veriﬁed. Next, we classify the transfor-
+mation by determining the number of homography inliers
+NH for the same image pair. To approximate model se-
+lection methods like GRIC, we assume a moving camera
+in a general scene if NH/NF < ϵHF . For calibrated im-
+ages, we also estimate an essential matrix and its number
+of inliers NE. If NE/NF > ϵEF , we assume correct cali-
+bration. In case of correct calibration and NH/NF < ϵHF ,
+we decompose the essential matrix, triangulate points from
+inlier correspondences, and determine the median triangu-
+lation angle αm. Using αm, we distinguish between the
+case of pure rotation (panoramic) and planar scenes (pla-
+nar). Furthermore, a frequent problem in Internet photos are
+watermarks, timestamps, and frames (WTFs) [60, 30] that
+incorrectly link images of different landmarks. We detect
+such image pairs by estimating a similarity transformation
+with NS inliers at the image borders. Any image pair with
+NS/NF > ϵSF ∨NS/NE > ϵSE is considered a WTF and
+not inserted to the scene graph. For valid pairs, we label the
+scene graph with the model type (general, panoramic, pla-
+nar) alongside the inliers of the model with maximum sup-
+port NH, NE, or NF . The model type is leveraged to seed
+the reconstruction only from non-panoramic and preferably
+calibrated image pairs. An already augmented scene graph
+enables to efﬁciently ﬁnd an optimal initialization for a ro-
+bust reconstruction process. In addition, we do not triangu-
+
+Score = 66
+Score = 80
+Score = 146
+Score = 200
+Figure 3. Scores for different number of points (left and right) with
+different distributions (top and bottom) in the image for L = 3.
+late from panoramic image pairs to avoid degenerate points
+and thereby improve robustness of triangulation and subse-
+quent image registrations.
+4.2. Next Best View Selection
+Next best view planning has been studied in the ﬁelds
+of computer vision, photogrammetry, and robotics [12].
+Choosing the next best view in robust SfM aims to mini-
+mize the reconstruction error [17, 24]. Here, we propose an
+efﬁcient next best view strategy following an uncertainty-
+driven approach that maximizes reconstruction robustness.
+Choosing the next best view is critical, as every decision
+impacts the remaining reconstruction. A single bad deci-
+sion may lead to a cascade of camera mis-registrations and
+faulty triangulations. In addition, choosing the next best
+view greatly impacts both the quality of pose estimates and
+the completeness and accuracy of triangulation. An accu-
+rate pose estimate is essential for robust SfM, as point tri-
+angulations may fail if the pose is inaccurate. The decision
+about choosing the next best view is challenging, since for
+Internet photo collections there is usually no a priori infor-
+mation about scene coverage and camera parameters, and
+therefore the decision is based entirely on information de-
+rived from appearance [17], two-view correspondences, and
+the incrementally reconstructed scene [53, 24].
+A popular strategy is to choose the image that sees most
+triangulated points [52] with the aim of minimizing the un-
+certainty in camera resection. Haner et al. [24] propose an
+uncertainty-driven approach that minimizes the reconstruc-
+tion error. Usually, the camera that sees the largest number
+of triangulated points is chosen, except when the conﬁgu-
+ration of observations is not well-conditioned. To this end,
+Lepetit et al. [34] experimentally show that the accuracy of
+the camera pose using PnP depends on the number of ob-
+servations and their distribution in the image. For Internet
+photos, the standard PnP problem is extended to the estima-
+tion of intrinsic parameters in the case of missing or inac-
+curate prior calibration. A large number of 2D-3D corre-
+spondences provides this estimation with redundancy [34],
+while a uniform distribution of points avoids bad conﬁgura-
+tions and enables reliable estimation of intrinsics [41].
+The candidates for the next best view are not the yet
+registered images that see at least Nt > 0 triangulated
+points.
+Keeping track of this statistic can be efﬁciently
+implemented using a graph of feature tracks. For Internet
+datasets, this graph can be very dense, since many images
+may see the same structure. Hence, there are many candi-
+date views to choose from at each step in the reconstruction.
+Exhaustive covariance propagation as proposed by Haner et
+al. is not feasible, as the covariance would need to be com-
+puted and analyzed for each candidate at each step. Our
+proposed method approximates their uncertainty-driven ap-
+proach using an efﬁcient multi-resolution analysis.
+We must simultaneously keep track of the number of
+visible points and their distribution in each candidate im-
+age. More visible points and a more uniform distribution
+of these points should result in a higher score S [31], such
+that images with a better-conditioned conﬁguration of visi-
+ble points are registered ﬁrst. To achieve this goal, we dis-
+cretize the image into a ﬁxed-size grid with Kl bins in both
+dimensions. Each cell takes two different states: empty and
+full. Whenever a point within an empty cell becomes vis-
+ible during the reconstruction, the cell’s state changes to
+full and the score Si of the image is increased by a weight
+wl. With this scheme, we quantify the number of visible
+points. Since cells only contribute to the overall score once,
+we favor a more uniform distribution over the case when
+the points are clustered in one part of the image (i.e. only a
+few cells contain all visible points). However, if the number
+of visible points is Nt ≪K2
+l , this scheme may not cap-
+ture the distribution of points well as every point is likely to
+fall into a separate cell. Consequently, we extend the pre-
+viously described approach to a multi-resolution pyramid
+with l = 1...L levels by partitioning the image using higher
+resolutions Kl = 2l at each successive level. The score
+is accumulated over all levels with a resolution-dependent
+weight wl = K2
+l . This data structure and its score can be
+efﬁciently updated online. Fig. 3 shows scores for differ-
+ent conﬁgurations, and Sec. 5 demonstrates improved re-
+construction robustness and accuracy using this strategy.
+4.3. Robust and Efﬁcient Triangulation
+Especially for sparsely matched image collections, ex-
+ploiting transitive correspondences boosts triangulation
+completeness and accuracy, and hence improves subsequent
+image registrations. Approximate matching techniques usu-
+ally favor image pairs similar in appearance, and as a re-
+sult two-view correspondences often stem from image pairs
+with a small baseline. Leveraging transitivity establishes
+correspondences between images with larger baselines and
+thus enables more accurate triangulation. Hence, we form
+feature tracks by concatenating two-view correspondences.
+A variety of approaches have been proposed for multi-
+view triangulation from noisy image observations [27, 40,
+5]. While some of the proposed methods are robust to a
+certain degree of outlier contamination [25, 35, 3, 44, 32],
+
+to the best of our knowledge none of the approaches can
+handle the high outlier ratio often present in feature tracks
+(Fig. 6). We refer to Kang et al. [32] for a detailed overview
+of existing multi-view triangulation methods. In this sec-
+tion, we propose an efﬁcient, sampling-based triangula-
+tion method that can robustly estimate all points within an
+outlier-contaminated feature track.
+Feature tracks often contain a large number of out-
+liers due to erroneous two-view veriﬁcation of ambiguous
+matches along the epipolar line. A single mismatch merges
+the tracks of two or more independent points. For example,
+falsely merging four feature tracks with equal length results
+in an outlier ratio of 75%. In addition, inaccurate camera
+poses may invalidate track elements due to high reprojec-
+tion errors. Hence, for robust triangulation, it is necessary
+to ﬁnd a consensus set of track elements before performing
+a reﬁnement using multiple views. Moreover, to recover the
+potentially multiple points of a feature track from a faulty
+merge, a recursive triangulation scheme is necessary.
+Bundler samples all pairwise combinations of track el-
+ements, performs two-view triangulation, and then checks
+if at least one solution has a sufﬁcient triangulation angle.
+If a well-conditioned solution is found, multi-view triangu-
+lation is performed on the whole track, and it is accepted
+if all observations pass the cheirality constraint [26]. This
+method is not robust to outliers, as it is not possible to re-
+cover independent points merged into one track. Also, it has
+signiﬁcant computational cost due to exhaustive pairwise
+triangulation. Our method overcomes both limitations.
+To handle arbitrary levels of outlier contamination, we
+formulate the problem of multi-view triangulation using
+RANSAC. We consider the feature track T = {Tn | n =
+1...NT } as a set of measurements with an a priori un-
+known ratio ϵ of inliers. A measurement Tn consists of
+the normalized image observation ¯xn ∈R2 and the cor-
+responding camera pose Pn ∈SE(3) deﬁning the pro-
+jection from world to camera frame P =
+
+RT
+−RT t
+
+with R ∈SO(3) and t ∈R3. Our objective is to maxi-
+mize the support of measurements conforming with a well-
+conditioned two-view triangulation
+Xab ∼τ (¯xa, ¯xb, Pa, Pb) with a ̸= b,
+(2)
+where τ is any chosen triangulation method (in our case
+the DLT method [26]) and Xab is the triangulated point.
+Note, that we do not triangulate from panoramic image pairs
+(Sec. 4.1) to avoid erroneous triangulation angles due to in-
+accurate pose estimates. A well-conditioned model satisﬁes
+two constraints. First, a sufﬁcient triangulation angle α
+cos α =
+ta −Xab
+∥ta −Xab∥2
+·
+tb −Xab
+∥tb −Xab∥2
+.
+(3)
+Second, positive depths da and db w.r.t. the views Pa and
+Pb (cheirality constraint), with the depth being deﬁned as
+d =
+p31
+p32
+p33
+p34
+ 
+XT
+ab
+1
+T ,
+(4)
+where pmn denotes the element in row m and column n of
+P. A measurement Tn is considered to conform with the
+model if it has positive depth dn and if its reprojection error
+en =
+¯xn −
+x′/z′
+y′/z′
+
+2
+with
+
+
+x′
+y′
+z′
+
+= Pn
+Xab
+1
+
+(5)
+is smaller than a certain threshold t. RANSAC maximizes
+K as an iterative approach and generally it uniformly sam-
+ples the minimal set of size two at random. However, since
+it is likely to sample the same minimal set multiple times for
+small NT , we deﬁne our random sampler to only generate
+unique samples. To ensure with conﬁdence η that at least
+one outlier-free minimal set has been sampled, RANSAC
+must run for at least K iterations. Since the a priori inlier
+ratio is unknown, we set it to a small initial value ϵ0 and
+adapt K whenever we ﬁnd a larger consensus set (adaptive
+stopping criterion). Because a feature track may contain
+multiple independent points, we run this procedure recur-
+sively by removing the consensus set from the remaining
+measurements. The recursion stops if the size of the lat-
+est consensus set is smaller than three. The evaluations in
+Sec. 5 demonstrate increased triangulation completeness at
+reduced computational cost for the proposed method.
+4.4. Bundle Adjustment
+To mitigate accumulated errors, we perform BA after im-
+age registration and triangulation. Usually, there is no need
+to perform global BA after each step, since incremental SfM
+only affects the model locally. Hence, we perform local BA
+on the set of most-connected images after each image reg-
+istration. Analogous to VisualSFM, we perform global BA
+only after growing the model by a certain percentage, re-
+sulting in an amortized linear run-time of SfM.
+Parameterization.
+To account for potential outliers, we
+employ the Cauchy function as the robust loss function ρj
+in local BA. For problems up to a few hundred cameras, we
+use a sparse direct solver, and for larger problems, we rely
+on PCG. We use Ceres Solver [2] and provide the option
+to share camera models of arbitrary complexity among any
+combination of images. For unordered Internet photos, we
+rely on a simple camera model with one radial distortion
+parameter, as the estimation relies on pure self-calibration.
+Filtering.
+After BA, some observations do not conform
+with the model. Accordingly, we ﬁlter observations with
+large reprojection errors [53, 62]. Moreover, for each point,
+we check for well-conditioned geometry by enforcing a
+minimum triangulation angle over all pairs of viewing rays
+
+[53]. After global BA, we also check for degenerate cam-
+eras, e.g. those caused by panoramas or artiﬁcially enhanced
+images. Typically, those cameras only have outlier obser-
+vations or their intrinsics converge to a bogus minimum.
+Hence, we do not constrain the focal length and distortion
+parameters to an a priori ﬁxed range but let them freely
+optimize in BA. Since principal point calibration is an ill-
+posed problem [15], we keep it ﬁxed at the image center for
+uncalibrated cameras. Cameras with an abnormal ﬁeld of
+view or a large distortion coefﬁcient magnitude are consid-
+ered incorrectly estimated and ﬁltered after global BA.
+Re-Triangulation.
+Analogous to VisualSfM, we perform
+re-triangulation (RT) to account for drift effects prior to
+global BA (pre-BA RT). However, BA often signiﬁcantly
+improves camera and point parameters. Hence, we propose
+to extend the very effective pre-BA RT with an additional
+post-BA RT step. The purpose of this step is to improve
+the completeness of the reconstruction (compare Sec. 4.3)
+by continuing the tracks of points that previously failed to
+triangulate, e.g., due to inaccurate poses etc.
+Instead of
+increasing the triangulation thresholds, we only continue
+tracks with observations whose errors are below the ﬁlter-
+ing thresholds. In addition, we attempt to merge tracks and
+thereby provide increased redundancy for the next BA step.
+Iterative Reﬁnement.
+Bundler and VisualSfM perform
+a single instance of BA and ﬁltering. Due to drift or the
+pre-BA RT, usually a signiﬁcant portion of the observations
+in BA are outliers and subsequently ﬁltered. Since BA is
+severely affected by outliers, a second step of BA can sig-
+niﬁcantly improve the results. We therefore propose to per-
+form BA, RT, and ﬁltering in an iterative optimization until
+the number of ﬁltered observations and post-BA RT points
+diminishes. In most cases, after the second iteration re-
+sults improve dramatically and the optimization converges.
+Sec. 5 demonstrates that the proposed iterative reﬁnement
+signiﬁcantly boosts reconstruction completeness.
+4.5. Redundant View Mining
+BA is a major performance bottleneck in SfM. In this
+section, we propose a method that exploits the inherent
+characteristics of incremental SfM and dense photo collec-
+tions for a more efﬁcient parameterization of BA by cluster-
+ing redundant cameras into groups of high scene overlap.
+Internet photo collections usually have a highly non-
+uniform visibility pattern due to varying popularity of
+points of interest. Moreover, unordered collections are usu-
+ally clustered into fragments of points that are co-visible in
+many images. A number of previous works exploit this fact
+to improve the efﬁciency of BA, including Kushal et al. [33]
+who analyze the visibility pattern for efﬁcient precondition-
+ing of the reduced camera system. Ni et al. [43] partition
+the cameras and points into submaps, which are connected
+through separator variables, by posing the partitioning as a
+graph cut problem on the graph of connected camera and
+point parameters. BA then alternates between ﬁxing the
+cameras and points and reﬁning the separator variables, and
+vice versa. Another approach by Carlone et al. [11] col-
+lapses multiple points with a low-rank into a single factor
+imposing a high-rank constraint on the cameras, providing a
+computational advantage when cameras share many points.
+Our proposed method is motivated by these previous
+works. Similar to Ni et al., we partition the problem into
+submaps whose internal parameters are factored out. We
+have three main contributions: First, an efﬁcient camera
+grouping scheme leveraging the inherent properties of SfM
+and replacing the expensive graph-cut employed by Ni et
+al. Second, instead of clustering many cameras into one
+submap, we partition the scene into many small, highly
+overlapping camera groups. The cameras within each group
+are collapsed into a single camera, thereby reducing the cost
+of solving the reduced camera system. Third, as a con-
+sequence of the much smaller, highly overlapping camera
+groups, we eliminate the alternation scheme of Ni et al. by
+skipping the separator variable optimization.
+SfM groups images and points into two sets based on
+whether their parameters were affected by the latest incre-
+mental model extension. For large problems, most of the
+scene remains unaffected since the model usually extends
+locally.
+BA naturally optimizes more for the newly ex-
+tended parts while other parts only improve in case of drift
+[62]. Moreover, Internet photo collections often have an un-
+even camera distribution with many redundant viewpoints.
+Motivated by these observations, we partition the unaffected
+scene parts into groups G = {Gr | r = 1...NG} of highly
+overlapping images and parameterize each group Gr as a
+single camera. Images affected by the latest extension are
+grouped independently to allow for an optimal reﬁnement
+of their parameters. Note that this results in the standard
+BA parameterization (Eq. 1). For unaffected images, we
+create groups of cardinality NGr. We consider an image as
+affected if it was added during the latest model extension or
+if more than a ratio ϵr of its observations have a reprojection
+error larger than r pixels (to reﬁne re-triangulated cameras).
+Images within a group should be as redundant as possible
+[43], and the number of co-visible points between images
+is a measure to describe their degree of mutual interaction
+[33]. For a scene with NX points, each image can be de-
+scribed by a binary visibility vector vi ∈{0, 1}NX, where
+the n-th entry in vi is 1 if point Xn is visible in image i and
+0 otherwise. The degree of interaction between image a and
+b is calculated using bitwise operations on their vectors vi
+Vab = ∥va ∧vb∥/ ∥va ∨vb∥.
+(6)
+To build groups, we sort the images as ¯I = {Ii | ∥vi∥≥
+∥vi+1∥}. We initialize a group Gr by removing the ﬁrst im-
+age Ia from ¯I and ﬁnding the image Ib that maximizes Vab.
+
+0
+0.05
+0.1
+0.15
+Standard deviation σ
+0
+2
+4
+6
+8
+10
+Score
+×105
+µ = 0
+µ = 0.1
+µ = 0.2
+µ = 0.3
+µ = 0.4
+µ = 0.5
+0
+200
+400
+600
+800
+1000
+Number of points
+0
+2
+4
+6
+8
+10
+Score
+×105
+σ = 0
+σ = 0.03
+σ = 0.06
+σ = 0.09
+σ = 0.12
+σ = 0.15
+Figure 4. Next best view scores for Gaussian distributed points
+xj ∈[0, 1]×[0, 1] with mean µ and std. dev. σ. Score S w.r.t. uni-
+formity (left) and number of points for µ = 0.5 (right).
+If Vab > V and |Gr| < S, image Ib is removed from ¯I and
+added to group Gr. Otherwise, a new group is initialized.
+To reduce the time of ﬁnding Ib, we employ the heuristic
+of limiting the search to the Kr spatial nearest neighbors
+with a common viewing direction in the range of ±β de-
+grees, motivated by the fact that those images have a high
+likelihood of sharing many points.
+Each image within a group is then parameterized w.r.t. a
+common group-local coordinate frame. The BA cost func-
+tion (Eq. 1) for grouped images is
+Eg =
+X
+j ρj
+
+∥πg (Gr, Pc, Xk) −xj∥2
+2
+
+(7)
+using the extrinsic group parameters Gr ∈SE(3) and ﬁxed
+Pc. The projection matrix of an image in group r is then
+deﬁned as the concatenation of the group and image pose
+Pcr = PcGr. The overall cost ¯E is the sum of the grouped
+and ungrouped cost contributions. For efﬁcient concatena-
+tion of the rotational components of Gr and Pi, we rely on
+quaternions. A larger group size leads to a greater perfor-
+mance beneﬁt due to a smaller relative overhead of com-
+puting πg over π. Note that even for the case of a group
+size of two, we observe a computational beneﬁt. In addi-
+tion, the performance beneﬁt depends on the problem size,
+as a reduction in the number of cameras affects the cubic
+computational complexity of direct methods more than the
+linear complexity of indirect methods (Sec. 2).
+5. Experiments
+We run experiments on a large variety of datasets to eval-
+uate both the proposed components and the overall system
+compared to state-of-the-art incremental (Bundler [53], Vi-
+sualSFM [62]) and global SfM systems (DISCO [14], Theia
+[55]1). The 17 datasets contain a total of 144,953 unordered
+Internet photos, distributed over a large area and with highly
+varying camera density. In addition, Quad [14] has ground-
+truth camera locations. Throughout all experiments, we use
+RootSIFT features and match each image against its 100
+nearest neighbors using a vocabulary tree trained on unre-
+lated datasets. To ensure comparability between the differ-
+ent methods, correspondence search is not included in the
+timings on a 2.7GHz machine with 256GB RAM.
+1Results for Theia kindly provided by the authors [55].
+0
+1000
+2000
+3000
+4000
+5000
+Number of registered images
+0.5
+0.6
+0.7
+0.8
+0.9
+1
+Intersection over union
+Pyramid - Number
+Pyramid - Ratio
+Number - Ratio
+50
+100
+150
+200
+Number of registered ground-truth images
+0.4
+0.6
+0.8
+1
+Median error [m]
+Pyramid
+Ratio
+Number
+Figure 5. Next best view results for Quad: Shared number of reg-
+istered images and reconstruction error during incremental SfM.
+0
+0.2
+0.4
+0.6
+0.8
+1
+Outlier ratio
+0
+2
+4
+6
+log10 Num. of points
+0
+20
+40
+60
+80
+100
+Track length
+0
+1
+2
+3
+4
+log10 Num. of samples
+Exhaustive, non-rec.
+RANSAC, non-rec., η = 0.999
+RANSAC, non-rec., η = 0.5
+Exhaustive, rec.
+RANSAC, rec., η = 0.999
+RANSAC, rec., η = 0.5
+Figure 6. Triangulation statistics for Dubrovnik dataset. Left: Out-
+lier ratio distribution of feature tracks. Right: Average number of
+samples required to triangulate N-view point.
+0
+20
+40
+60
+80
+100
+1
+2
+Image Registration
+Triangulation
+Local BA
+Global BA
+Filtering
+Figure 7. Average relative runtimes using standard global BA and
+exhaustive, rec. triangulation (1), and grouped BA and RANSAC,
+rec. triangulation (2). Runtime for Initialization and Next Best
+View Selection (all strategies) is smaller than 0.1%.
+Next Best View Selection.
+A synthetic experiment
+(Fig. 4) evaluates how well the score S reﬂects the num-
+ber and distribution of points.
+We use L = 6 pyramid
+levels, and we generate Gaussian-distributed image points
+with spread σ and location µ. A larger σ and a more cen-
+tral µ corresponds to a more uniform distribution and cor-
+rectly produces a higher score. Similarly, the score is dom-
+inated by the number of points when there are few and oth-
+erwise by their distribution in the image. Another experi-
+ment (Fig. 5) compares our method (Pyramid) to existing
+strategies in terms of the reconstruction error. The other
+methods are Number [53], which maximizes the number of
+triangulated points, and Ratio which maximizes the ratio
+of visible over potentially visible points. After each im-
+age registration, we measure the number of registered im-
+ages shared between the strategies (intersection over union)
+and the reconstruction error as the median distance to the
+ground-truth camera locations.
+While all strategies con-
+verge to the same set of registered images, our method pro-
+duces the most accurate reconstruction by choosing a better
+registration order for the images.
+Robust and Efﬁcient Triangulation.
+An experiment on
+the Dubrovnik dataset (Fig. 6 and Table 2) evaluates our
+method on 2.9M feature tracks composed from 47M veri-
+ﬁed matches. We compare against Bundler and an exhaus-
+tive strategy that samples all pairwise combinations in a
+track. We set α = 2◦, t = 8px, and ϵ0 = 0.03. To avoid
+combinatorial explosion, we limit the exhaustive approach
+to 10K iterations, i.e. ϵmin ≈0.02 with η = 0.999. The di-
+verse inlier ratio distribution (as determined with the recur-
+
+# Images
+# Registered
+# Points (Avg. Track Length)
+Time [s]
+Avg. Reproj. Error [px]
+Theia
+Bundler
+VSFM
+Ours
+Theia
+Bundler
+VSFM
+Ours
+Theia
+Bundler
+VSFM
+Ours
+Theia
+Bundler
+VSFM
+Ours
+Rome [14]
+74,394
+–
+13,455
+14,797
+20,918
+–
+5.4M
+12.9M
+5.3M
+–
+295,200
+6,012
+10,912
+–
+–
+–
+–
+Quad [14]
+6,514
+–
+5,028
+5,624
+5,860
+–
+10.5M
+0.8M
+1.2M
+–
+223,200
+2,124
+3,791
+–
+–
+–
+–
+Dubrovnik [36]
+6,044
+–
+–
+–
+5,913
+–
+–
+–
+1.35M
+–
+–
+–
+3,821
+–
+–
+–
+–
+Alamo [61]
+2,915
+582
+647
+609
+666
+146K (6.0)
+127K (4.5)
+124K (8.9)
+94K (11.6)
+874
+22,025
+495
+882
+1.47
+2.29
+0.70
+0.68
+Ellis Island [61]
+2,587
+231
+286
+297
+315
+29K (4.9)
+39K (4.1)
+61K (5.5)
+64K (6.8)
+94
+12,798
+240
+332
+2.41
+2.24
+0.71
+0.70
+Gendarmenmarkt [61]
+1,463
+703
+302
+807
+861
+87K (3.8)
+93K (3.7)
+138K (4.9)
+123K (6.1)
+202
+465,213
+412
+627
+2.19
+1.59
+0.71
+0.68
+Madrid Metropolis [61]
+1,344
+351
+330
+309
+368
+47K (5.0)
+27K (3.2)
+48K (5.2)
+43K (6.6)
+95
+21,633
+203
+251
+1.48
+1.62
+0.59
+0.60
+Montreal Notre Dame [61]
+2,298
+464
+501
+491
+506
+154K (5.4)
+135K (4.6)
+110K (7.1)
+98K (8.7)
+207
+112,171
+418
+723
+2.01
+1.92
+0.88
+0.81
+NYC Library [61]
+2,550
+339
+400
+411
+453
+66K (4.1)
+71K (3.7)
+95K (5.5)
+77K (7.1)
+194
+36,462
+327
+420
+1.89
+1.84
+0.67
+0.69
+Piazza del Popolo [61]
+2,251
+335
+376
+403
+437
+36K (5.2)
+34K (3.7)
+50K (7.2)
+47K (8.8)
+89
+33,805
+275
+380
+2.11
+1.76
+0.76
+0.72
+Piccadilly [61]
+7,351
+2,270
+1,087
+2,161
+2,336
+197K (4.9)
+197K (3.9)
+245K (6.9)
+260K (7.9)
+1,427
+478,956
+1,236
+1,961
+2.33
+1.79
+0.79
+0.75
+Roman Forum [61]
+2,364
+1,074
+885
+1,320
+1,409
+261K (4.9)
+281K (4.4)
+278K (5.7)
+222K (7.8)
+1,302
+587,451
+748
+1,041
+2.07
+1.66
+0.69
+0.70
+Tower of London [61]
+1,576
+468
+569
+547
+578
+140K (5.2)
+151K (4.8)
+143K (5.7)
+109K (7.4)
+201
+184,905
+497
+678
+1.86
+1.54
+0.59
+0.61
+Trafalgar [61]
+15,685
+5,067
+1,257
+5,087
+5,211
+381K (4.8)
+196K (3.7)
+497K (8.7)
+450K (10.1)
+1,494
+612,452
+3,921
+5,122
+2.09
+2.07
+0.79
+0.74
+Union Square [61]
+5,961
+720
+649
+658
+763
+35K (5.3)
+48K (3.7)
+43K (7.1)
+53K (8.2)
+131
+56,317
+556
+693
+2.36
+3.22
+0.68
+0.67
+Vienna Cathedral [61]
+6,288
+858
+853
+890
+933
+259K (4.9)
+276K (4.6)
+231K (7.6)
+190K (9.8)
+764
+567,213
+899
+1,244
+2.45
+1.69
+0.80
+0.74
+Yorkminster [61]
+3,368
+429
+379
+427
+456
+143K (4.5)
+71K (3.9)
+130K (5.2)
+105K (6.8)
+164
+34,641
+661
+997
+2.38
+2.61
+0.72
+0.70
+Table 1. Reconstruction results for state-of-the-art SfM systems on large-scale unordered Internet photo collections.
+#Points
+#Elements
+Avg. Track Length
+#Samples
+Bundler
+713,824
+5.58 M
+7.824
+136.34 M
+Non-recursive
+Exhaustive
+861,591
+7.64 M
+8.877
+120.44 M
+RANSAC, η1
+861,591
+7.54 M
+8.760
+3.89 M
+RANSAC, η2
+860,422
+7.46 M
+8.682
+3.03 M
+Recursive
+Exhaustive
+894,294
+8.05 M
+9.003
+145.22 M
+RANSAC, η1
+902,844
+8.03 M
+8.888
+12.69 M
+RANSAC, η2
+906,501
+7.98 M
+8.795
+7.82 M
+Table 2. Triangulation results using η1 = 0.99 and η2 = 0.5.
+2
+4
+6
+8
+10
+12
+14
+16
+18
+20
+Number of global bundle adjustments
+0
+50
+100
+150
+Num. cameras
+Standard BA
+Grouped BA, V = 0.6
+Grouped BA, V = 0.5
+Grouped BA, V = 0.4
+Grouped BA, V = 0.3
+Grouped BA, V = 0.2
+Figure 8. Number of cameras in standard and grouped BA using
+ϵr = 0.02, S = 10, and varying scene overlap V .
+sive, exhaustive approach) evidences the need for a robust
+triangulation method. Our proposed recursive approaches
+recover signiﬁcantly longer tracks and overall more track el-
+ements than their non-recursive counterparts. Note that the
+higher number of points for the recursive RANSAC-based
+methods corresponds to the slightly reduced track lengths.
+The RANSAC-based approach yields just marginally infe-
+rior tracks but is much faster (10-40x). By varying η, it is
+easy to balance speed against completeness.
+Redundant View Mining.
+We evaluate redundant view
+mining on an unordered collection of densely distributed
+images. Fig. 8 shows the growth rate of the parameterized
+cameras in global BA using a ﬁxed number of BA itera-
+tions. Depending on the enforced scene overlap V , we can
+reduce the time for solving the reduced camera system by
+a signiﬁcant factor. The effective speedup of the total run-
+time is 5% (V = 0.6), 14% (V = 0.3) and 32% (V = 0.1),
+while the average reprojection error degrades from 0.26px
+(standard BA) to 0.27px, 0.28px, and 0.29px, respectively.
+The reconstruction quality is comparable for all choices of
+V > 0.3 and increasingly degrades for a smaller V . Using
+V = 0.4, the runtime of the entire pipeline for Colosseum
+reduces by 36% yet results in an equivalent reconstruction.
+System.
+Table 1 and Fig. 1 demonstrate the performance
+Figure 9. Reconstruction of Gendarmenmarkt [61] for Bundler
+(left) and our method (right).
+of the overall system and thereby also evaluate the perfor-
+mance of the individual proposed components of the sys-
+tem. For each dataset, we report the largest reconstructed
+component. Theia is the fastest method, while our method
+achieves slightly worse timings than VisualSFM and is more
+than 50 times faster than Bundler. Fig. 7 shows the rela-
+tive timings of the individual modules. For all datasets, we
+signiﬁcantly outperform any other method in terms of com-
+pleteness, especially for the larger models. Importantly, the
+increased track lengths result in higher redundancy in BA.
+In addition, we achieve the best pose accuracy for the Quad
+dataset: DISCO 1.16m, Bundler 1.01m, VisualSFM 0.89m,
+and Ours 0.85m. Fig. 9 shows a result of Bundler com-
+pared to our method. We encourage readers to view the
+supplementary material for additional visual comparisons
+of the results, demonstrating the superior robustness, com-
+pleteness, and accuracy of our method.
+6. Conclusion
+This paper proposes a SfM algorithm that overcomes key
+challenges to make a further step towards a general-purpose
+SfM system. The proposed components of the algorithm
+improve the state of the art in terms of completeness, ro-
+bustness, accuracy, and efﬁciency. Comprehensive experi-
+ments on challenging large-scale datasets demonstrate the
+performance of the individual components and the overall
+system. The entire algorithm is released to the public as an
+open-source implementation.
+Acknowledgements.
+We thank J. Heinly and T. Price for
+proofreading. We also thank C. Sweeney for producing the
+Theia experiments. Supported in part by the NSF No. IIS-
+1349074, No. CNS-1405847, and the MITRE Corp.

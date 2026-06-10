@@ -1,0 +1,1175 @@
+Mini-Splatting: Representing Scenes with a
+Constrained Number of Gaussians
+Guangchi Fang
+and Bing Wang
+⋆
+Spatial Intelligence Group, The Hong Kong Polytechnic University
+guangchi.fang@gmail.com, bingwang@polyu.edu.hk
+Mini-Splatting-D (6.0mil, 75 FPS)
+Train: 33min, PSNR: 25.5dB
+3DGS (6.1mil, 66 FPS)
+Train: 35min, PSNR: 25.2dB
+Mini-Splatting (0.6mil, 430 FPS)
+Train: 17min, PSNR: 25.2dB
+Ground Truth
+Fig. 1: By reorganizing the spatial distribution of 3D Gaussians [17], our Mini-
+Splatting reduces the number of Gaussians (in millions) while enhancing model perfor-
+mance in terms of rendering speed, training time, and rendering quality. The Gaussian
+centers of a foreground object bicycle are projected onto the rendered image as blue
+points, demonstrating the more uniform spatial distribution achieved by our algorithm.
+Abstract. In this study, we explore the challenge of efficiently represent-
+ing scenes with a constrained number of Gaussians. Our analysis shifts
+from traditional graphics and 2D computer vision to the perspective of
+point clouds, highlighting the inefficient spatial distribution of Gaussian
+representation as a key limitation in model performance. To address this,
+we introduce strategies for densification including blur split and depth
+reinitialization, and simplification through intersection preserving and
+sampling. These techniques reorganize the spatial positions of the Gaus-
+sians, resulting in significant improvements across various datasets and
+benchmarks in terms of rendering quality, resource consumption, and
+storage compression. Our Mini-Splatting integrates seamlessly with the
+original rasterization pipeline, providing a strong baseline for future re-
+search in Gaussian-Splatting-based works. Code is available.
+Keywords: Gaussian Splatting · Point Clouds · Scene Representation
+1
+Introduction
+Recent advancements in 3D Gaussian Splatting (3DGS) [17] have showcased its
+significant potential across a range of applications, such as immersive render-
+ing and 3D reconstruction, attributed to its capabilities for real-time and high-
+quality rendering. Unlike traditional radiance field-based algorithms [1, 2, 24],
+⋆Corresponding author
+arXiv:2403.14166v3  [cs.CV]  16 Oct 2024
+
+2
+G. Fang and B. Wang⋆
+3DGS employs millions of elliptical Gaussians for scene modeling (e.g., 1 to 6
+million Gaussians for each scene in the Mip-NeRF360 dataset [2]). The detailed
+characterization of these Gaussians, including their 3D position, opacity, covari-
+ance, and spherical harmonic (SH) coefficients, allows for a remarkably detailed
+and realistic scene representation. However, the extensive use of Gaussians also
+leads to inefficiencies, as depicted in Fig. 1, where Gaussian centers are prone to
+clustering together. This suboptimal spatial distribution can constrain the ren-
+dering quality and speed. In this regard, our study aims to address the challenge
+of efficiently representing a scene with a constrained number of Gaussians.
+The optimization of minimal Gaussian representation remains a relatively un-
+derexplored topic, with only a handful of compression-focused studies venturing
+into this area. Drawing inspiration from voxel pruning techniques used in grid-
+based neural representations [21, 41], Niedermayr et al. [27] proposed pruning
+Gaussians based on parameter sensitivity derived from image gradients. Simi-
+larly, Lee et al. [20] and LightGaussian [11] have implemented pruning strategies
+based on Gaussian opacity and scale. However, these methods, which primarily
+aim at storage compression, often neglect the inefficient spatial distribution of
+input Gaussians. As a result, direct pruning, as practiced in these approaches,
+tends to yield suboptimal simplification outcomes. Moreover, most existing 3D
+data simplification algorithms focus on preserving feature points [16,19] or geo-
+metric structures [23,29], making them less suitable for explicit representations
+with densely optimizable parameters like 3DGS. Therefore, adapting these tech-
+niques to the 3DGS model presents a non-trivial challenge.
+In this paper, we start with a comprehensive analysis of Gaussian representa-
+tion. By visualizing the projected Gaussian centers and rendered results, we find
+that 3D Gaussians are not uniformly distributed around the object surface, which
+limits the rendering speed and quality of the model. To construct an efficient
+Gaussian representation, we pivot the task of directly simplifying 3D Gaussians
+to reorganizing their spatial positions employing our Gaussian densification and
+simplification method. Specifically, our proposed densification algorithm includes
+two key components: blur split, which involves splitting Gaussians in the blurring
+areas, and depth reinitialization, which uses merged depth points to reinitialize
+the scene. Our simplification approach comprises intersection preserving, which
+preserve Gaussians with maximal impact on the rendered image, and sampling,
+designed to preserve both the geometric structure and rendering quality of the
+original model. By stacking our densification and simplification techniques, we
+achieve a more uniform and efficient spatial distribution of Gaussians, as illus-
+trated in Fig. 1. Our main contributions are as follows:
+– Through a deep analysis of the spatial distribution of Gaussians, we observe
+that the vanilla 3DGS presents two significant phenomena: ‘overlapping’ and
+‘under-reconstruction’. We identify that this inefficient distribution limits
+the rendering quality and speed, and it is non-trivial to achieve a minimal
+Gaussian representation while maintaining rendering quality.
+– We propose a Gaussian densification and simplification algorithm to reorga-
+nize the spatial positions of Gaussians rather than directly pruning them.
+
+Mini-Splatting
+3
+The proposed densification (blur split and depth reinitialization) and sim-
+plification (intersection preserving and Gaussian sampling) strategies, lever-
+aging both screen-space and world-space information, effectively achieve a
+dense distribution of Gaussians around the object.
+– By integrating densification and simplification with corresponding further
+processing, our proposed Mini-Splatting achieves a balanced trade-off be-
+tween rendering quality, resource consumption, and storage. Extensive ex-
+perimental results on multiple benchmarks and datasets demonstrate the
+potential and scalability of our method.
+2
+Related Work
+2.1
+Gaussian Splatting
+3D Gaussian Splatting (3DGS) [17] represents a recent advancement in novel
+view synthesis, enabling real-time high-quality rendering. Over the past year,
+numerous follow-up works have emerged. The concept of 3DGS has been ap-
+plied to domains such as autonomous driving [40], human avatar [31], content
+generation [35,36] and dynamic scene [22], resulting in advancements within each
+domain [4]. While several works aim to enhance 3DGS from the perspectives of
+graphics [12], image processing [42], and system performance [10], few studies
+focus on delving into the nature of Gaussians as the scene representation.
+The Gaussian representation constitutes a key distinction between 3DGS and
+previous standard techniques for novel view rendering. While most prior works
+employ implicit [1, 2, 24] or explicit [34, 39, 41] neural representations with vol-
+ume rendering based on ray marching, the primary challenge lies in the dense
+ray point sampling required by ray marching, which consequently limits both
+training and rendering speed. In contrast, 3DGS utilizes a large collection of
+elliptical Gaussians [43] for scene representation and rasterize these Gaussians
+onto the image plane for alpha blending. This carefully designed rasterization
+pipeline circumvents the issues associated with ray marching. However, the per-
+formance of 3DGS models is constrained by the large number of Gaussians due
+to the rasterization process.
+2.2
+3D Data Simplification
+For point cloud simplification purposes, conventional techniques such as farthest
+point sampling [30], random sampling [15], and grid sampling [13] are commonly
+utilized in point cloud processing tasks. In contrast, most works oriented towards
+point cloud simplification focus on preserving either feature points [5,16,19] or
+geometric structures [23,25,29]. Several learning-based algorithms [9,19,37] have
+been proposed to sample points during training, integrating downstream tasks in
+an end-to-end manner. However, it is non-trivial to directly apply these sampling
+techniques to 3DGS due to differences in representations.
+With recent advancements in neural radiance fields, several works have been
+proposed to simplify neural representations, primarily focusing on feature grids
+
+4
+G. Fang and B. Wang⋆
+and introducing voxel pruning [7,21] or voxel masking [32,38] strategies. Inspired
+by these developments, similar pruning techniques have been adapted in recent
+3DGS compression-oriented works [11,20,27]. For instance, Niedermayr et al. [27]
+proposed to prune Gaussians based on image gradients, while Lee et al. [20]
+and LightGaussian [11] performed pruning according to Gaussian opacity and
+scale. However, these works overlook the issue of inefficient spatial distribution
+of Gaussians, which can easily lead to suboptimal simplification results after
+Gaussian pruning. One concurrent work, RadSplat [28], also share a similar
+technical pipeline with our algorithm.
+3
+Analyzing 3DGS from a Perspective of Point Clouds
+3.1
+Preliminaries of Gaussian Splatting
+Gaussian Representation. 3D Gaussian Splatting (3DGS) [17] models the
+scene geometry as a set of 3D Gaussians {Gi|i = 1, · · · , N}. Each Gaussian Gi is
+characterized by its opacity αi ∈[0, 1], center pi ∈R3×1 and covariance matrix
+in world space Σi ∈R3×3 [43] as Gi(x) = e−1
+2 (x−pi)T Σ−1
+i
+(x−pi). To render an
+image from these Gaussians, 3DGS sorts them in an approximate depth order
+based on the distance from their centers pi to the image plane, and further
+applies alpha-blending [24] as follows:
+ \la b
+e
+l
+ {e
+q: rend
+er} \ bc  (\ bx ) = 
+\
+sum 
+_{ i
+=1}
+^
+N w
+_i \c dot 
+\
+bc _i, \quad \text {where } w_i=T_i\cdot \alpha _i \cdot \cG ^{2D}_i(\bx ), \quad T_i=\prod _{j=1}^{i-1} (1 - \alpha _j \cdot \cG ^{2D}_j(\bx )), (1)
+where ci represents the view-dependent color modeled by spherical harmonic
+(SH) coefficients, and G2D
+i
+is the projected 2D Gaussian distribution of Gi through
+a local affine transformation [43].
+Adaptive Density Control of Gaussians. In 3DGS, sparse points from
+Structure-from-Motion (SfM) are first initialized as Gaussians. During the opti-
+mization, these Gaussians undergo an adaptive density control strategy, allowing
+the dynamic addition and removal of individual Gaussians. Specifically, Gaus-
+sians with a significant gradient are identified and are either split or cloned de-
+pending on their scales. Additionally, Gaussians with low opacity or an overlarge
+screen space size are pruned from the representation. Ablation studies presented
+in [17] demonstrate that this clone and split strategy can control the density of
+Gaussians, which in turn benefits scene recovery.
+3.2
+Challenges in Gaussian Simplification
+Visual Analysis of Gaussians. In 3DGS, scene geometry is represented us-
+ing elliptical Gaussian primitives. Ideally, these Gaussians should be distributed
+around the geometric surface to accurately model the scene, particularly for the
+foreground Gaussians with relatively small 3D scales. Under this assumption, the
+
+Mini-Splatting
+5
+3DGS (25.2, 6.1)
+（a）
+Random (24.8, 0.6)
+(c)
+Pruning (24.9, 0.6)
+(b)
+Grid (23.5, 1.1)
+(d)
+Density (24.7, 0.6)
+(e)
+Fig. 2: Visual analysis of Gaussian centers. (a): Visualization of the original 3DGS
+model’s projected Gaussian centers, along with its corresponding rendering quality
+(PSNR in dB) and the number of Gaussians (in millions). Notably, we observe the phe-
+nomena of ‘overlapping’ and ‘under-reconstruction’. (b), (c), (d), and (e): Visualization
+of Gaussian centers after applying different sampling techniques, including pruning,
+random sampling, grid sampling, and density-preserved sampling, respectively.
+Gaussian centers pi, akin to point clouds, can be approximated as the geometric
+structure with their scales as the corresponding surface segments.
+Following the experimental setup of 3DGS, we utilize sparse points as input
+initialization in the main paper. As depicted in Fig. 2 (a), we project Gaussian
+centers of the vanilla 3DGS model onto the rendered image as blue points. Typ-
+ically, points captured by depth sensors or reconstructed by multiview stereo
+methods tend to uniformly adhere to the object surface. However, the first row
+illustrates the ‘overlapping’ phenomenon, where most Gaussians are clustered in
+certain areas but sparse in neighboring parts. The second row highlights ‘under-
+reconstruction’, wherein 3DGS fails to model the details of a specific area and
+presents artifacts in the form of Gaussian blurs. These two phenomena collec-
+tively indicate the inefficient spatial distribution of Gaussians, which underscores
+the inherent redundancy of the Gaussian representation. Additional analysis of
+3DGS from initialization with dense point cloud is provided in the appendix.
+Gaussian Pruning and Sampling. The most straightforward approach to
+reduce the number of Gaussians is to perform pruning and sampling. Similar
+to the importance calculation in [21], we accumulate all blending weights wij of
+Gaussian Gi to obtain its importance score Ii = PK
+j=1 wij, where K is the total
+number of rays intersected with Gi. Then, we prune Gaussians with importance
+lower than a certain threshold. The Gaussian representation is further optimized
+until convergence and is then shown in Fig. 2 (b). The pruning strategy can
+reduce the number of Gaussians from 6.1 million to 0.6 million, but it also
+degrades PSNR from 25.2 dB to 24.9 dB, and the phenomena of ‘overlapping’ and
+‘under-reconstruction’ still exist. We also explore combining pruning with various
+point cloud sampling techniques, such as random sampling, grid sampling, and
+
+6
+G. Fang and B. Wang⋆
+GT
+（a）
+Rendered (3DGS)
+(b)
+Idx (3DGS)
+(c)
+Idx (Blur Split)
+(e)
+Rendered (Blur Split)
+(d)
+Fig. 3: Visual analysis of blur split. (a) Ground truth image. (b) Rendered image using
+the original 3DGS model [17]. (c) Rendered index of Gaussians with the maximum con-
+tribution to each pixel. (d) Rendered image after applying the blur split. (e) Rendered
+Gaussian index after applying the blur split.
+density-preserved sampling, shown in Figs. 2 (c), (d), and (e), respectively. These
+results suggest that addressing the inefficient spatial distribution of Gaussians
+and achieving a minimal Gaussian representation while maintaining rendering
+quality requires further efforts.
+4
+Methodology
+In this section, we introduce our densification and simplification algorithms
+aimed at reorganizing the spatial distribution of Gaussians, thereby constraining
+the number of Gaussians while preserving rendering quality.
+4.1
+Densification
+Our densification approach comprises two key components: blur split and depth
+initialization, to obtain Gaussians with a dense and uniform spatial distribution.
+Blur Split. The blur split strategy aims to address the Gaussian blur artifacts,
+as shown in Fig. 3 (b), which are also discussed in Sec. 3.2. The gradient-based
+split and clone strategy [17] may fail in areas with smooth color transitions, as
+illustrated in Fig. 3 (a). Consequently, the corresponding oversized Gaussians
+Gi tend to be preserved during optimization. One intuitive approach adopted by
+3DGS is to prune Gaussians with an excessively large scale in screen space based
+on their projected 2D distribution G2D
+i
+. However, this pruning method does not
+address the issue of ‘under-reconstruction’.
+As illustrated in Fig. 3 (c), we render indexes of Gaussians with the maximum
+contribution to a pixel as imax = arg max
+i
+wi (i.e., the Gaussian with the max-
+imum weight in alpha-blending) onto the image. The rendered indexes imax(x)
+
+Mini-Splatting
+7
+Depth Points (Mid)
+(d)
+Depth Points (Center)
+(c)
+Blending Depth
+(a)
+Depth Points (Blending)
+(b)
+1
+2
+3
+Fig. 4: Visual analysis of depth map and depth points from 3DGS [17]. (a): Rendered
+depth map from alpha blending. (b): Reconstructed depth points from alpha blending
+with red boxes highlighting significant artifacts. (c): Reconstructed depth points from
+our depth map using Gaussian centers. (d): Reconstructed depth points from our depth
+map using mid-points.
+of each pixel x are mapped to random colors. To distinguish with the rendered
+indexes from all Gaussians imax(x), we denote the projected index of ith Gaus-
+sian Gi as i(x). A key observation is that, compared to the projected index i(x)
+(i.e., the projected area of Gaussian Gi), the blurry artifacts are more directly
+related to the rendered index imax(x). This indicates that Gaussians with large
+maximum contribution areas lead to the problem of ‘under-reconstruction’.
+Based on this observation, for each image, we identify Gaussians with large
+blurry areas, denoted as Gblur, using the following criterion:
+ \lab e l {eq: b lur_s p l i t} \cG 
+^{blu r }=\{\ c G  _i | S_i > \mathcal {T}_{blur} \land i \in [1, N]\}, \quad \mathcal {T}_{blur}=\theta _{blur} \cdot H \cdot W. 
+(2)
+Here, Si = P(H,W )
+x=(1,1) δ(i(x) = imax(x)) represents the maximum contribution
+area of Gaussian Gi, where δ is the indicator function, and (H, W) denotes the
+image resolution. The value of Si can be computed during the forward pass of
+rasterization. The hyperparameter θblur is empirically set as 2 × 10−4 to control
+the extent of the blurry area. Gaussians that meet the criteria Gblur are then
+split according to the split strategy in [17] during the optimization process. The
+results of this deblurring strategy are illustrated in Fig. 3 (d) and (e), showcasing
+the effectiveness of the blur split approach in enhancing image clarity.
+Depth Reinitialization. Our depth reinitialization leverages dense depth in-
+formation to alleviate both the ‘overlapping’ and ‘under-reconstruction’ phe-
+nomena. The concept of utilizing depth to enhance neural rendering is both
+straightforward and effective, as evidenced by its application in several recent
+NeRF-based algorithms [8,39]. However, in Gaussian-Splatting-based works, the
+primary challenge lies not in how to utilize the reconstructed depth, but in how
+to generate accurate and practical depth data.
+Similar to NeRF [24], 3DGS can render blending depth by directly replacing
+the Gaussian color ci with the depth of its center di, as dblend = PN
+i=1 wi · di.
+This approach is popular among many subsequent works, and the rendered depth
+map is shown in Fig. 4 (a). However, we observe that this seemingly decent 2D
+depth map can be misleading, often resulting in a depth point cloud with signif-
+icant artifacts. In Fig. 4 (b), we reproject the blending depth to world space and
+
+8
+G. Fang and B. Wang⋆
+Merged Depth Points
+(c)
+Depth Points (Mid)
+(b)
+Depth Points (Center)
+(a)
+Fig. 5: Depth points. (a): Depth points from our depth map using Gaussian centers.
+(b): Depth points from our depth map using mid-points. (c): Merged depth points from
+our depth map using mid-points.
+also visualize Gaussian centers with their colors. Three types of artifacts (depth
+collapse, object misalignment, and blending boundary) are highlighted with red
+boxes for better illustration. These failures can be attributed to the alpha blend-
+ing of multiple Gaussians, and more analysis is provided in the appendix.
+Here, we present our formulation of the rendered depth. Given one ellip-
+tical Gaussian defined by its scale s = (sx, sy, sz), we model the Gaussian as
+an ellipsoid in 3D space as g(x, y, z) = x2
+s2x + y2
+s2y + z2
+s2z = 1. With an input ray
+r(t) = o+td, where o and d are the ray origin and the ray direction transferred
+in the coordinate system of the ellipsoid, we can simply calculate the position of
+the mid-point between two intersection points of the ray and the ellipsoid. We
+set the depth of this mid-point as our Gaussian depth dmid
+i
+. Another intuitive
+formulation is to calculate the optimized t where the maximum density of the
+Gaussian distribution along the ray is reached. We adopt the former formula-
+tion because these two share the same numerical result, but the former one can
+provide an auxiliary discriminant (i.e., the discriminant to distinguish the inter-
+section point of the ray and the ellipsoid exists or not). Details of the calculation
+are provided in the appendix.
+For multiple Gaussians, we only collect the Gaussian with the maximum
+contribution to the pixel to avoid the artifacts from alpha blending. The final
+depth dmid can be formulated as dmid = dmid
+imax, where imax = arg max
+i
+wi. In
+practice, we observe that setting the depth based on the Gaussian center, as
+dcenter = dimax, can also achieve a similar rendering quality as dmid after fur-
+ther optimization. However, considering that dmid shows a better reconstruction
+result as illustrated in Figs. 5 (a) and (b), we chose to include it in our main
+pipeline of Mini-Splatting for potential future usage.
+After generating the depth map, we reproject all depth points into the world
+space. For each image, we randomly select a certain number of points as initial
+points and assign the ground truth colors as their corresponding colors. The total
+number of sampled points is empirically set at around 3.5 million for each scene.
+During optimization, we repeatedly reinitialize our Gaussian representation with
+these points to reorganize the spatial distribution of Gaussians. The resulting
+
+Mini-Splatting
+9
+merged point cloud is shown in Fig. 5 (c). These dense and uniform depth points
+assist our model in initializing a dense and uniform point distribution.
+4.2
+Simplification
+After the densification process, we achieve a denser Gaussian representation
+of the scene. To further refine this representation, we propose simplification
+techniques, including intersection preserving and Gaussian sampling, to attain an
+efficient Gaussian representation while still maintaining high-quality rendering.
+Intersection Preserving. Drawing inspiration from the concept of ray-mesh
+intersection, our intersection preserving technique is designed to discard Gaus-
+sians that do not directly intersect with the ray. However, we avoid strictly
+converting the smooth opacity or blending weights into binary values of 0, 1, as
+this could potentially compromise the rendering quality.
+In the depth reinitialization step, we model 3D Gaussians as ellipsoids and
+determine their depths based on the mid-points. We render the depth of the
+Gaussian with the maximum contribution, representing it as the depth of the
+scene. These mid-points, indicating the intersection of the rays with the scene
+representation, serve as the basis for our intersected Gaussians Gint. Specifically,
+for each image, we only retain Gaussians that provide these intersection points,
+and formulate these Gaussians as the intersected Gaussians:
+  \c G  ^{in t }=\{ \ c G  _{ i} | i \in \mathcal {I}_{max} \land i \in [1, N]\}, 
+(3)
+where Imax is the collection of all indexes in the rendered indexes imax(x).
+PSNR: 23.21
+24.20
+25.01
+25.28
+25.28
+24.99
+24.41
+PSNR: 23.28
+Fig. 6: The relation between the pre-
+serving ratio and the geometry.
+Importance-weighted Sampling. In
+this section, we address the limitations
+of the direct pruning strategy and intro-
+duce our importance-weighted sampling
+approach. This method considers the ge-
+ometric structure of the scene, thereby
+enhancing rendering quality while main-
+taining a sparse set of Gaussians.
+The concept of pruning in neural
+representation is initially introduced for
+grid-based neural radiance fields [21,
+41], aimed at removing empty or low-
+information voxels, and this technique can also be extended to Gaussian rep-
+resentations. By assigning each Gaussian a pre-defined importance value Ii, we
+can simply prune Gaussians with low importance. While this strategy is effective
+for removing a limited number of Gaussians, it may lead to a collapse in ren-
+dering quality when the pruning ratio is relatively large. The main issue lies in
+the fact that Gaussian importance only reflects its significance before simplifica-
+tion. Direct pruning can easily disrupt local geometry, which in turn degrades the
+final rendering quality after further optimization. Specifically, neighboring Gaus-
+sians often exhibit similar importance in a given area, causing them to be either
+
+10
+G. Fang and B. Wang⋆
+removed or preserved simultaneously, thus risking the destruction of local geom-
+etry. To illustrate this point, we conduct Gaussian pruning on our intersected
+Gaussians and measure the geometry quality using the chamfer distance between
+the centers of pruned and non-simplified Gaussians. The significant chamfer dis-
+tance observed after pruning, especially at low preserving ratios, suggests that
+relying solely on Gaussian importance leads to suboptimal simplification results.
+Compared to deterministic pruning, a stochastic sampling strategy can bet-
+ter maintain overall geometry. Working under this observation, we incorporate
+Gaussian importance Ii into the sampling probability of each Gaussian, formu-
+lated as Pi =
+Ii
+PN
+i=1 Ii . Thus, Gaussians can be sampled based on their sampling
+probability. As illustrated in Fig. 6, the results demonstrate that this importance-
+weighted sampling strategy exhibits a stronger capability to preserve geometry
+quality, thereby enhancing the final rendering result. In our experiments, we find
+that using blending weight-based importance yields better performance in both
+pruning and sampling. Additionally, different combinations of blending weight
+and other information (e.g., the scale of projected Gaussians and the rendered
+index) exhibit varying performance on indoor and outdoor scans. Further imple-
+mentation details of the importance metric are provided in the appendix.
+5
+Implementation Variants
+Based on our densification and simplification algorithms, we construct three
+implementation variants. Details of each variant are provided in the appendix.
+Mini-Splatting. Our Mini-Splatting is specifically designed for resource-efficient
+training and rendering. Following a similar optimization schedule as 3DGS [17],
+we set the total number of optimization steps to 30K. Densification is enabled un-
+til the 15Kth iteration, after which simplification is conducted at the 15Kth and
+20Kth iterations. Additionally, we observe that incorporating view-dependent
+colors barely enhance densification. Therefore, we only enable SH coefficients
+and increase the SH level after simplification (15K).
+Mini-Splatting-D. Our Mini-Splatting-D is tailored for quality-prioritized ren-
+dering. While its overall pipeline is similar to that of Mini-Splatting, the main
+distinction lies in the omission of the simplification process.
+Mini-Splatting-C. Our Mini-Splatting-C is designed for scenarios requiring
+storage compression. This pipeline is directly based on our Mini-Splatting. Given
+a pre-trained Mini-Splatting model, we store the Gaussian centers as float32,
+while other attributes, such as scales and SH coefficients, are processed using
+transform coding [6] and a standard zip compression.
+6
+Experiments
+Datasets. We perform experiments on three real-world datasets: Mip-NeRF360
+[2], Tanks&Temples [18] and Deep Blending [14]. To ensure consistency and fair-
+ness in our evaluations, we adopt identical processing details for these datasets,
+
+Mini-Splatting
+11
+Table 1: Quantitative evaluation of our Mini-Splatting and previous works. 3DGS*
+indicates the retrained model from the official implementation.
+Dataset
+Mip-NeRF 360
+Tanks&Temples
+Deep Blending
+Method | Metric
+SSIM ↑PSNR ↑LPIPS ↓Num SSIM ↑PSNR ↑LPIPS ↓Num SSIM ↑PSNR ↑LPIPS ↓Num
+Plenoxels [41]
+0.626
+23.08
+0.463
+-
+0.719
+21.08
+0.379
+-
+0.795
+23.06
+0.510
+-
+INGP-Big [26]
+0.699
+25.59
+0.331
+-
+0.745
+21.92
+0.305
+-
+0.817
+24.96
+0.390
+-
+mip-NeRF 360 [2]
+0.792
+27.69
+0.237
+-
+0.759
+22.22
+0.257
+-
+0.901
+29.40
+0.245
+-
+Zip-NeRF [3]
+0.828
+28.54
+0.189
+-
+-
+-
+-
+-
+-
+-
+-
+-
+3DGS [17]
+0.815
+27.21
+0.214
+3.36
+0.841
+23.14
+0.183
+1.78
+0.903
+29.41
+0.243
+2.98
+3DGS [17]*
+0.815
+27.47
+0.216
+3.35
+0.848
+23.66
+0.176
+1.84
+0.904
+29.54
+0.244
+2.82
+Mini-Splatting-D
+0.831
+27.51
+0.176
+4.69
+0.853
+23.23
+0.140
+4.28
+0.906
+29.88
+0.211
+4.63
+Mini-Splatting
+0.822
+27.34
+0.217
+0.49
+0.835
+23.18
+0.202
+0.20
+0.908
+29.98
+0.253
+0.35
+Fig. 7: Number-Quality curves of our algorithms and other baselines on the Mip-
+NeRF360 dataset.
+including scene selection, train/test split, and image resolution, as specified in
+the official implementation of 3DGS [17].
+Implementation Details. We implement our densification and simplification
+algorithms using PyTorch and integrate them into the optimization pipeline of
+3DGS [17]. We modify the Gaussian rasterization module of 3DGS to render
+Gaussian indexes and depth points. Further implementation details of our Mini-
+Splatting, Mini-Splatting-D, and Mini-Splatting-C are provided in the appendix.
+6.1
+Experimental Results
+Rendering Quality. The quantitative results of various methods are presented
+in Table 1. We compare our Mini-Splatting and Mini-Splatting-D against the
+baseline 3DGS and other NeRF-based algorithms, utilizing standard metrics
+such as PSNR, SSIM, and LPIPS. The table demonstrates that, in comparison
+to the 3DGS baseline, our densification method, Mini-Splatting-D, exhibits su-
+perior performance across most metrics, highlighting the significant impact of
+Gaussian spatial distribution in rendering. Notably, our Mini-Splatting-D even
+surpasses the state-of-the-art neural rendering algorithm, Zip-NeRF [3], in terms
+of SSIM and LPIPS on the Mip-NeRF360 dataset. Moreover, our Mini-Splatting
+is comparable to 3DGS, despite employing only a fraction (7× fewer) of the
+Gaussians. Our algorithms exhibit a decreased PSNR on the Tanks&Temples
+
+12
+G. Fang and B. Wang⋆
+(0.210, 6.14)
+(0.203, 1.25)
+(0.159, 6.04)
+(0.174, 3.76)
+GT
+3DGS
+Mini-Splatting-D
+Mini-Splatting
+(0.225, 0.54)
+(0.201, 0.36)
+Fig. 8: Qualitative results (bicycle and truck) of our Mini-Splatting and 3DGS. LPIPS
+and number of Gaussians in million are displayed as (LPIPS, Number).
+dataset. This can be attributed to large sky areas in the scans (i.e., train) within
+Tanks&Temples, which our depth-based strategy does not accurately model. Fur-
+ther analysis is provided in the appendix.
+As depicted in Fig. 7, we present the number-quality curves of our algorithms
+alongside 3DGS. The curve for our Mini-Splatting is generated by controlling the
+sampling ratio during the importance-weighted sampling process. Additionally,
+we compare against several recent Gaussian-Splatting-based algorithms, incorpo-
+rating Gaussian pruning within their pipelines. Specifically, we apply the pruning
+technique proposed by [21] to 3DGS, denoted as VQ, and re-implement the prune
+and recovery stage outlined by [11] based on their official repository, referred to
+as LightGaussian. The results reported by Lee et al. [20] are collected from
+their paper. Notably, with a larger number of Gaussians, our Mini-Splatting-D
+demonstrates superior rendering quality, and it is clear that our Mini-Splatting
+outperforms all its counterparts at similar numbers of Gaussians.
+The rendered images are presented in Fig. 8. These qualitative outcomes are
+in line with the quantitative results provided in Table 1 and Fig. 7. Notably, our
+Mini-Splatting-D exhibits superior rendering quality in terms of finer details,
+while our Mini-Splatting maintains an acceptable rendering quality despite em-
+ploying a limited number of Gaussians. These results indicate the effectiveness
+of our densification and simplification algorithm.
+Resource Consumption. We also present resource consumption metrics, in-
+cluding training time, training peak GPU memory usage, rendering FPS, and
+rendering peak GPU memory usage, in Table 2, where peak memory consump-
+tion is measured using torch.cuda.max_memory_allocated(). In outdoor scenes,
+our Mini-Splatting-D, despite employing more Gaussians, exhibits similar train-
+ing time and memory consumption to 3DGS due to our strategy of constraining
+SH coefficients during densification. Furthermore, our efficient representation sig-
+nificantly accelerates both training and rendering processes while reducing peak
+memory usage. In indoor scenes, both our Mini-Splatting-D and Mini-Splatting
+learn denser Gaussian distributions, yet the results still show an acceptable re-
+
+Mini-Splatting
+13
+Table 2: Resource consumption of our algorithms and 3DGS on Mip-NeRF360. Mini-
+Splatting* indicates Mini-Splatting trained on a GTX 1060 6G GPU, and all other
+models are trained with a RTX 3090 GPU.
+Mip-NeRF360 (Outdoor)
+Mip-NeRF360 (Indoor)
+Method | Metric Num
+Training
+Rendering
+Num
+Training
+Rendering
+Time
+Memory FPS Memory
+Time Memory FPS Memory
+3DGS [17]
+4.86
+30m8s
+7.45GB
+98
+2.79GB 1.46 24m41s 2.75GB 151 1.07GB
+Mini-Splatting-D 5.40 31m48s 7.45GB
+83
+3.12GB 3.80 40m13s 5.55GB
+83
+2.46GB
+Mini-Splatting
+0.57 17m56s 2.61GB 410 0.40GB 0.40 27m2s 2.77GB 362 0.35GB
+Mini-Splatting*
+0.57 101m11s 2.61GB
+64
+0.40GB 0.40
+154m
+2.82GB
+40
+0.35GB
+Fig. 9: Rate-distribution curves for our Mini-Splatting-C and recent compression-
+oriented works [20,27] applied to 3DGS.
+source consumption of our algorithms. Additionally, we successfully train and
+evaluate our Mini-Splatting* on a low-cost graphics card (a GTX 1060 6G GPU).
+This highlights the potential for on-device neural rendering and reconstruction
+on consumer-grade machines.
+Storage Compression. As depicted in Fig. 9, we provide rate-distribution
+curves comparing our Mini-Splatting-C with two compression-oriented meth-
+ods [20,27] applied to 3DGS. Results for these baseline approaches are collected
+from their respective papers. Due to the optimized and simplified Gaussian rep-
+resentation, our Mini-Splatting-C, which solely integrates basic post-processing
+techniques, demonstrates superior performance compared to other methods pri-
+marily tailored for storage compression.
+6.2
+Ablation Studies
+Densification. We begin by presenting the ablation study of our densification
+in Table 3. Starting from the 3DGS baseline, we incrementally introduce blur
+splitting and depth reinitialization steps. The results demonstrate a consistent
+improvement in rendering quality with the increasing number of Gaussians. No-
+tably, we observe a high correlation between the number of Gaussians and the
+LPIPS metric, indicating that a dense and uniform spatial distribution of Gaus-
+sians positively influences human perception metrics.
+We extend our analysis by comparing blending depth with depth obtained
+from Gaussian center and mid-point in Table 4. As discussed in Sec. 4.1, reinitial-
+
+14
+G. Fang and B. Wang⋆
+Table 3: Ablation study of densification.
+SSIM ↑PSNR ↑LPIPS ↓Num
+Baseline
+0.815
+27.47
+0.216
+3.35
++ Blur Split
+0.819
+27.47
+0.195
+3.74
++ Depth Reinit
+0.832
+27.54
+0.175
+4.32
+Table 4: Ablation study of depth
+reinitialization.
+SSIM ↑PSNR ↑LPIPS ↓Num
+Blending
+0.513
+17.67
+0.475
+4.01
+Center
+0.832
+27.57
+0.176
+4.70
+Mid
+0.832
+27.54
+0.175
+4.69
+izing Gaussians with blending depth may degrade rendering quality due to the
+presence of noise points resulting from depth artifacts. Although depth reinitial-
+ization using Gaussian center yields results comparable to those obtained from
+the mid-point, depth derived from the mid-point exhibits superior dense point
+cloud reconstruction, as illustrated in Fig. 5, and holds potential for extension
+to normal estimation tasks.
+Fig. 10: Ablations of simplification.
+Simplification. The ablations of simpli-
+fication on Mip-NeRF360 are depicted in
+Fig. 10. Starting from the 3DGS baseline,
+we first add densification to obtain our
+Mini-Splatting-D. Subsequently, we inte-
+grate direct pruning into Mini-Splatting-
+D and tune the pruning ratio to estab-
+lish the baseline curve, Add Pruning, for
+our simplification algorithm. It is worth
+noting that this baseline encompasses
+the combination of Mini-Splatting-D and
+direct pruning, surpassing 3DGS with
+pruning (i.e., VQ) as depicted in Fig. 7. To underscore the effectiveness of our
+intersection preserving and sampling techniques, we add intersection preserving
+and then sampling to Mini-Splatting-D (Add Intersection and Add Sampling).
+The results clearly demonstrate that our simplification algorithm outperforms
+direct pruning, achieving approximately a halved reduction in the number of
+Gaussians while maintaining comparable rendering quality. This result indicates
+the effectiveness of the proposed simplification method.
+7
+Conclusion
+We introduced Mini-Splatting, which aimed at representing scene with a con-
+strained nubmer of Gaussians, through our proposed densification and simpli-
+fication algorithm. Our Gaussian densification process, involving blur splitting
+and depth initialization, facilitates the construction of a dense Gaussian repre-
+sentation, while our simplification algorithm, featuring intersection preserving
+and Gaussian sampling, effectively limits the number of Gaussians while pre-
+serving high-quality rendering. Our experimental results show the effectiveness
+of Mini-Splatting and its variants across benchmarks, encompassing not only
+rendering quality but also resource consumption and storage compression.
+
+Mini-Splatting
+15
+Acknowledgements. This work was jointly supported by the Young Scien-
+tists Fund of the National Natural Science Foundation of China (42301520), the
+Research Grants Council of Hong Kong (25206524), the Platform Project of Un-
+manned Autonomous Systems Research Centre (P0049516), the Seed Project
+of Smart Cities Research Institute (P0051028), the Research Team Cultivation
+Program of ShenZhen University (2023JCT003), and the Pearl River Talent Pro-
+gram (2021JC02G046).
+
+16
+G. Fang and B. Wang⋆
+Appendix
+A
+Visualization of Elliptical Gaussians
+We visualize 3D Gaussians as ellipsoids using Open3D, as illustrated in Fig.
+11. Within the Gaussian representation, the Gaussian centers, akin to point
+clouds, can be interpreted as the geometric structure (see Fig. 11 (a)). The
+elliptical Gaussians are distributed around the geometric surface, resembling
+surface segments with consistent normal vectors, as depicted in Fig. 11 (b).
+This inherent geometric structure of the Gaussian representation supports our
+analysis from the perspective of point clouds.
+Normal
+(b)
+RGB
+(a)
+Fig. 11: Visualization of Elliptical Gaussians. (a): RGB colors derived from the first
+order of SH coefficients. (b): Normals of the corresponding ellipsoids. Gaussians with
+an opacity lower than 0.1 have been removed for better visualization.
+B
+Gaussian Splatting with Dense Initialization
+We additionally offer an analysis of 3DGS using dense initialization. In this ex-
+periment, we acquire dense point clouds through Multi-View Stereo (MVS) [33],
+and substitute these dense points with the original sparse points for initialization
+purposes. To prevent memory overflow, dense point clouds from each scene are
+randomly sampled to 2 million points.
+As depicted in Fig. 12, we project the Gaussian centers of densely initial-
+ized 3DGS, Mini-Splatting-D, and Mini-Splatting onto the rendered image, rep-
+resented as blue and white points. In comparison with Mini-Splatting-D and
+Mini-Splatting, 3DGS (Dense) still exhibits the issue of ‘overlapping’. Specifi-
+cally, Gaussian centers tend to cluster around the top tube and spokes of the
+bicycle, while our Mini-Splatting-D and Mini-Splatting demonstrate a more uni-
+form point distribution. Regarding the phenomenon of ‘under-reconstruction’
+(i.e., the second row), dense initialization can mitigate this issue, yet our Mini-
+Splatting-D still showcases denser points in the corresponding area.
+We further present quantitative results of our method alongside 3DGS with
+sparse and dense initialization in 5. We can see a significant improvement in
+
+Mini-Splatting
+17
+Mini-Splatting
+(c)
+Mini-Splatting-D
+(b)
+3DGS (Dense)
+(a)
+Fig. 12: Visual analysis of Gaussian centers. (a): Projected Gaussian centers of the
+densely initialized 3DGS model. (b) and (c): Projected Gaussian centers of our Mini-
+Splatting-D and Mini-Splatting, both initialized with sparse points.
+all methods with dense initialization. Remarkably, all methods demonstrate sig-
+nificant enhancements with dense initialization. This outcome underscores the
+potential for further refinement of our algorithm through the integration of stereo
+matching techniques. It is noteworthy that our Mini-Splatting-D (Sparse) con-
+tinues to exhibit superior SSIM and LPIPS scores compared to 3DGS (Dense),
+underscoring the effectiveness of our densification algorithm.
+Table 5: Quantitative evaluation of our Mini-Splatting and 3DGS with sparse and
+dense initialization on the Mip-NeRF360 dataset.
+Dataset
+Mip-NeRF360 (Sparse)
+Mip-NeRF360 (Dense)
+Method | Metric SSIM ↑PSNR ↑LPIPS ↓Num SSIM ↑PSNR ↑LPIPS ↓Num
+3DGS
+0.815
+27.47
+0.216
+3.35
+0.831
+27.78
+0.180
+4.40
+Mini-Splatting-D
+0.832
+27.54
+0.175
+4.69
+0.838
+27.76
+0.171
+4.71
+Mini-Splatting
+0.822
+27.22
+0.218
+0.48
+0.825
+27.31
+0.215
+0.48
+C
+Artifacts of Blending Depth
+We display rendered depth obtained from alpha blending in Fig. 13 (a), and sub-
+sequently reproject the rendered depth into world space in Fig. 13 (b). Artifacts,
+including depth collapse, object misalignment and blending boundary, are em-
+phasized in Figs. 13 (c), (d) and (e). These failures can primarily be attributed
+to the alpha blending of multiple Gaussians.
+Depth Collapse. Several segments of the background scene exhibit unrea-
+sonably low depth values. This issue arises primarily because 3DGS employs a
+
+18
+G. Fang and B. Wang⋆
+default background color (i.e., black for the Mip-NeRF360 dataset), which is
+incorporated into the blending color to generate the final output. For black ob-
+jects situated in the background, 3DGS optimizes these segments based on the
+default background color, resulting in a failure to accurately learn the geometry.
+Consequently, we observe a relatively low accumulated opacity value along the
+ray, leading to a tendency for the corresponding depth to collapse into a low
+depth value.
+Object Misalignment. It is clear that the depth points do not align with
+the Gaussian centers in Fig. 13 (d). This discrepancy arises due to the presence of
+large Gaussians around the object and floaters positioned in front of the camera.
+These Gaussians, optimized to represent reflection and noise, result in inaccurate
+depth estimation through alpha blending.
+Blending Boundary. Recovering a sharp boundary poses a challenge for
+alpha blending due to the formulation of the weighted sum. Along the boundary,
+all Gaussians exhibit relatively low blending weights, resulting in a smooth image
+edge in the depth map. Consequently, the issue of blending boundary becomes
+apparent in the world space.
+Blending Depth
+(a)
+Depth Points 
+(Blending)
+(b)
+1
+2
+3
+Depth
+Collapse
+(c)
+Object 
+Misalignment 
+(d)
+Blending
+Boundary 
+(e)
+Fig. 13: Visual analysis of blending depth and depth points from 3DGS [17]. (a):
+Rendered depth map from alpha blending. (b): Reconstructed depth points from alpha
+blending, with red boxes highlighting three significant artifacts, (c): depth collapse,
+(d): object misalignment, and (e): blending boundary.
+D
+Calculation of Gaussian Depth
+Given an elliptical Gaussian defined by its scale s = (sx, sy, sz), we model the
+Gaussian as an ellipsoid in 3D space as g(x, y, z) = x2
+s2x + y2
+s2y + z2
+s2z = 1. For an
+input ray r(t) = o + td, where o = (ox, oy, oz) and d = (dx, dy, dz) are the ray
+origin and direction transformed into the coordinate system of the ellipsoid, we
+can compute the intersection points of the ray and the ellipsoid by solving for
+the parameter t that satisfies the equation.
+
+Mini-Splatting
+19
+First, substitute the parametric representation of the ray into the equation
+of the ellipsoid as follows:
+  \ f rac {
+(o_
+x +t d _x)^2
+}{s
+_ x^2 }  + \f
+rac
+ {(o_y+t d_y)^2}{s_y^2} + \frac {(o_z+t d_z)^2}{s_z^2} = 1. 
+(4)
+Then, expand and rewrite the equation as:
+  (
+\
+fra
+c  {
+d
+_x^
+2 }{
+s
+_x^
+2} + 
+\frac
+ {d
+_ y^2}
+{s_
+y ^2} 
++ \
+f
+ra
+c
+ {
+d
+_z^
+2 }{
+s
+_z^
+2 })
+t
+^2 
++  
+2
+\ left (\frac {o_x d_x}{s_x^2} + \frac {o_y d_y}{s_y^2} + \frac {o_z d_z}{s_z^2}\right )t + \left (\frac {o_x^2}{s_x^2} + \frac {o_y^2}{s_y^2} + \frac {o_z^2}{s_z^2} - 1\right ) = 0. (5)
+This equation is quadratic in t, and we can solve it using the quadratic formula:
+  t =
+ 
+\f r ac 
+{-
+b \pm \sqrt {b^2 - 4ac}}{2a}, 
+(6)
+where a = d2
+x
+s2x +
+d2
+y
+s2y + d2
+z
+s2z , b = 2
+
+oxdx
+s2x
++ oydy
+s2y
++ ozdz
+s2z
+
+, and c = o2
+x
+s2x +
+o2
+y
+s2y + o2
+z
+s2z −1.
+Thus, the position of the mid-point pmid can be calculated as
+  \b p  ^{mid} = \br  
+(t^ { m i d }
+)=\b
+r (-\ f r ac  {b}{2a})=\bo +-\frac {b}{2a}\bd , \quad \text {where } \Delta =b^2 - 4ac. 
+(7)
+The discriminant ∆is used to determine whether real intersection points exist,
+and our Gaussian depth dmid can be also obtained as tmid.
+Another intuitive formulation involves calculating the optimized t where the
+maximum density of the Gaussian distribution along the ray is reached. Given
+a Gaussian distribution defined by its scale s = (sx, sy, sz), the distribution can
+be formulated as:
+  \mat hc a
+l
+ {N}
+(
+\ mat
+h
+b f {
+x
+}|
+\boldsy
+m
+b
+ol {0 } , \boldsy
+mb ol
+ { \S
+igma }) = \frac {1}{(2\pi )^\frac {n}{2}|\boldsymbol {\Sigma }|^\frac {1}{2}} \exp \left (-\frac {1}{2}\mathbf {x}^\top \boldsymbol {\Sigma }^{-1}\mathbf {x}\right ), \quad \text {where } \boldsymbol {\Sigma }=diag(s_x^2, s_y^2, s_z^2). 
+(8)
+With the input ray r(t) = o + td, we can calculate the optimized topt.
+First, the substitution and simplification:
+  \beg in  
+{
+spli
+t
+}  \m
+a
+t hca
+l
+ {
+N
+}
+(\
+m
+ath
+b f 
+{
+x}|
+\ bo
+l
+dsy
+m
+b o
+l
+ {0},\
+bol
+d symbo
+l {
+\ Sigma
+ })
+ 
+& = 
+\
+f
+ra
+c
+ {1
+} {(
+2
+\pi
+ )^
+\
+fra
+c {n}{2}|\boldsymbol {\Sigma }|^\frac {1}{2}} \exp \left (-\frac {1}{2} \left (\frac {o_x^2}{s_x^2} + \frac {o_y^2}{s_y^2} + \frac {o_z^2}{s_z^2}\right ) \right . \\ &\left . -\frac {t}{2} \left (\frac {2o_xd_x}{s_x^2} + \frac {2o_yd_y}{s_y^2} + \frac {2o_zd_z}{s_z^2}\right ) - \frac {t^2}{2} \left (\frac {d_x^2}{s_x^2} + \frac {d_y^2}{s_y^2} + \frac {d_z^2}{s_z^2}\right )\right ) \end {split} 
+(9)
+Denote the equation as:
+  \mat hc a l  {N}(\ m athbf {x}|\boldsymbol {0},\boldsymbol {\Sigma }) = A \exp (Bt + Ct^2), 
+(10)
+with A =
+1
+(2π)
+n
+2 |Σ|
+1
+2 exp
+
+−1
+2
+
+o2
+x
+s2x +
+o2
+y
+s2y + o2
+z
+s2z
+
+, B = −1
+2
+
+2oxdx
+s2x
++ 2oydy
+s2y
++ 2ozdz
+s2z
+
+and C = −1
+2
+
+d2
+x
+s2
+x +
+d2
+y
+s2
+y + d2
+z
+s2
+z
+
+. To find the maximum, we take the derivative with

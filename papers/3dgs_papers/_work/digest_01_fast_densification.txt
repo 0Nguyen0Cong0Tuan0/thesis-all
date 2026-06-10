@@ -1,0 +1,3651 @@
+
+
+==========================================================================================
+### 2311.13681_Compact3DGaussian  (pages=14, img=2311.13681_Compact3DGaussian_fig.png)
+==========================================================================================
+Compact 3D Gaussian Representation for Radiance Field
+Joo Chan Lee1
+Daniel Rho2
+Xiangyu Sun1
+Jong Hwan Ko1B
+Eunbyung Park1B
+Sungkyunkwan University1, KT2
+GT
+3DGS (110 fps)
+29.06 PSNR, 774 MB
+Ours (155 fps)
+29.16 PSNR, 28 MB 
+Gaussian Center Points
+Rendered Ellipsoids
+Rendered Result
+3DGS
+Ours
+Figure 1. Our method achieves reduced storage and faster rendering speed while maintaining high-quality reconstruction of 3DGS [18].
+The core idea is to effectively remove the redundant Gaussians that do not significantly contribute to the overall performance (the sparser
+distribution of Gaussian points and reduced ellipsoid redundancy shown in the figure). We also introduce a more compact representation
+of Gaussian attributes, resulting in markedly improved storage efficiency and rendering speed.
+Abstract
+Neural Radiance Fields (NeRFs) have demonstrated re-
+markable potential in capturing complex 3D scenes with
+high fidelity. However, one persistent challenge that hin-
+ders the widespread adoption of NeRFs is the computa-
+tional bottleneck due to the volumetric rendering. On the
+other hand, 3D Gaussian splatting (3DGS) has recently
+emerged as an alternative representation that leverages a
+3D Gaussisan-based representation and adopts the ras-
+terization pipeline to render the images rather than volu-
+metric rendering, achieving very fast rendering speed and
+promising image quality.
+However, a significant draw-
+back arises as 3DGS entails a substantial number of 3D
+Gaussians to maintain the high fidelity of the rendered im-
+ages, which requires a large amount of memory and stor-
+age.
+To address this critical issue, we place a specific
+emphasis on two key objectives: reducing the number of
+Gaussian points without sacrificing performance and com-
+pressing the Gaussian attributes, such as view-dependent
+color and covariance. To this end, we propose a learn-
+able mask strategy that significantly reduces the number
+of Gaussians while preserving high performance. In ad-
+dition, we propose a compact but effective representation
+of view-dependent color by employing a grid-based neural
+field rather than relying on spherical harmonics. Finally,
+we learn codebooks to compactly represent the geometric
+attributes of Gaussian by vector quantization. With model
+compression techniques such as quantization and entropy
+coding, we consistently show over 25× reduced storage and
+enhanced rendering speed, while maintaining the quality of
+the scene representation, compared to 3DGS. Our work pro-
+vides a comprehensive framework for 3D scene represen-
+tation, achieving high performance, fast training, compact-
+ness, and real-time rendering. Our project page is available
+at https://maincold2.github.io/c3dgs/.
+1. Introduction
+The field of neural rendering has witnessed substantial ad-
+vancements in recent years, driven by the pursuit of ren-
+dering photorealistic 3D scenes from limited input data.
+Among the pioneering approaches, Neural Radiance Field
+(NeRF) [28] has gained considerable attention for its re-
+markable ability to generate high-fidelity images and 3D re-
+constructions of scenes from only a collection of 2D images
+in diverse applications.
+Follow-up research efforts have
+been dedicated to improving image quality [2, 30], accel-
+erating training and rendering speed [7, 8, 10, 11, 30, 34],
+and reducing memory and storage footprints [35, 40].
+1
+arXiv:2311.13681v2 [cs.CV] 15 Feb 2024
+
+Despite the massive efforts, one persistent challenge that
+hinders the widespread adoption of NeRFs is the compu-
+tational bottleneck due to the volumetric rendering. Since
+it demands dense point sampling along the ray to render a
+pixel, which requires significant computational resources,
+NeRFs often fail to achieve real-time rendering on hand-
+held devices or low-end GPUs. This challenge limits their
+use in practical scenarios where fast rendering speed is es-
+sential, such as various interactive 3D applications.
+3D Gaussian splatting (3DGS) [18] has recently emerged
+as an alternative representation that achieved very fast ren-
+dering speed and promising image quality. This approach
+leverages a point-based representation associated with 3D
+Gaussian attributes and adopts the rasterization pipeline to
+render the images rather than volumetric rendering. Highly
+optimized customized cuda kernels to maximize the paral-
+lelism and clever algorithmic tricks enable unprecedented
+rendering speed without compromising the image quality.
+However, a significant drawback arises as 3DGS entails a
+substantial number of 3D Gaussians to maintain the high-
+fidelity of the rendered images (Fig. 1), which requires a
+large amount of memory and storage (e.g., often > 1GB for
+representing a large real-world scene).
+To address the critical large memory and storage issue in
+3DGS, we propose a compact 3D Gaussian representation
+framework. This approach significantly improves memory
+and storage efficiency while showing high-quality recon-
+struction, fast training speed, and real-time rendering, as
+shown in Fig. 1. We place a specific emphasis on two key
+objectives. First, we aim to reduce the number of Gaus-
+sian points required for scene representation without sac-
+rificing performance. The number of Gaussians increases
+with regular densification processes consisting of cloning
+and splitting Gaussians, and it was a crucial component
+in representing the fine details of scenes.
+However, we
+observed that the current densification algorithm produces
+many redundant and unnecessary Gaussians, resulting in
+high memory and storage requirements. We introduce a
+novel volume-based masking strategy that identifies and re-
+moves non-essential Gaussians that have minimal impact on
+overall performance. With the proposed masking method,
+we learn to reduce the number of Gaussians while achiev-
+ing high performance during training. In addition to the
+efficient memory and storage usage, we can achieve faster
+rendering speed since the computational complexity is lin-
+early proportional to the number of Gaussians.
+Second, we propose compressing the Gaussian at-
+tributes, such as view-dependent color and covariance. In
+the original 3DGS, each Gaussian has its own attributes,
+and it does not exploit spatial redundancy, which has been
+widely utilized for various types of signal compression. For
+example, neighboring Gaussians may share similar color at-
+tributes, and we can reuse similar colors from neighboring
+Gaussians. Given this motivation, we incorporate a grid-
+based neural field to efficiently represent view-dependent
+colors rather than using per Gaussian color attributes. When
+provided with the query Gaussian points, we extract the
+color attribute from the compact grid representation, avoid-
+ing the need to store it for each Gaussian separately. For our
+initial approach, we opt for a hash-based grid representation
+(Instant NGP [30]) from among several candidates due to its
+compactness and fast processing speed. This choice has led
+to a significant reduction in the spatial complexity of 3DGS.
+In contrast to the color attribute, the majority of Gaus-
+sians exhibit similar geometry, with limited variation in
+scale and rotation attributes. 3DGS represents a scene with
+numerous small Gaussians collectively, and each Gaussian
+primitive is not expected to show high diversity. Therefore,
+we introduce a codebook-based approach for modeling the
+geometry of Gaussians. It learns to find similar patterns or
+geometry shared across each scene and only stores the code-
+book index for each Gaussian, resulting in a very compact
+representation. Moreover, because the codebook size can be
+quite small, the spatial and computational overhead during
+training are not significant.
+We have extensively tested our proposed compact 3D
+Gaussian representation on various datasets including real
+and synthetic scenes. Throughout the experiments regard-
+less of dataset, we consistently showed about 15× reduced
+storage and enhanced rendering speed, while maintaining
+the quality of the scene representation, compared to 3DGS.
+Furthermore, our method can benefit from simple post-
+processings such as quantization and entropy coding, con-
+sequently achieving over 25× compression throughout the
+datasets.
+Especially for the evaluation on Deep Blend-
+ing [16], a real-world dataset, we outperform 3DGS in
+terms of the reconstruction quality (measured in PSNR),
+notably with over 28× enhancement in storage efficiency
+and nearly 40% increase in rendering speed, setting a new
+state-of-the-art benchmark.
+2. Related Work
+2.1. Neural Radiance Fields
+Neural radiance fields (NeRFs) have significantly expanded
+the horizons of 3D scene reconstruction and novel view syn-
+thesis. NeRF [28] introduced a novel approach to synthesiz-
+ing novel views of 3D scenes, representing volume features
+by utilizing Multilayer Perceptrons (MLPs) and introduc-
+ing volumetric rendering. Since its inception, various works
+have been proposed to enhance performance in diverse sce-
+narios, such as different resolutions of reconstruction [2, 3],
+the reduced number of training samples [32, 36, 42, 44, 47],
+and reconstruction of large realistic scenes [29, 41] and dy-
+namic scenes [12, 23, 24, 33]. However, NeRF’s reliance
+on MLP has been a bottleneck, particularly causing slow
+2
+
+training and inference.
+In an effort to address the limitations, grid-based meth-
+ods emerged as a promising alternative. These approaches
+using explicit voxel grid structures [4, 9, 10, 25, 26, 39] have
+demonstrated a significant improvement in training speed
+compared to traditional MLP-based NeRF methods. Never-
+theless, despite this advancement, grid-based methods still
+suffer from relatively slow inference speeds and, more im-
+portantly, require large amounts of memory. This has been a
+substantial hurdle in advancing towards more practical and
+widely applicable solutions.
+Subsequent research efforts have been directed toward
+the reduction of the memory footprint while maintaining or
+even enhancing the performance quality by grid factoriza-
+tion [6, 7, 11, 13, 15, 31], hash grids [30], grid quantiza-
+tion [38, 40] or pruning [10, 35]. These methods have also
+been instrumental in the fast training of 3D scene represen-
+tation, thereby making more efficient use of computational
+resources.
+However, a persistent challenge that remains
+is the ability to achieve real-time rendering of large-scale
+scenes. The volumetric sampling inherent in these meth-
+ods, despite their advancements, still poses a limitation.
+2.2. Point-based Rendering and Radiance Field
+Point-NeRF [45] employed points to represent a radiance
+field with volumetric rendering. Although it shows promis-
+ing performance, the volume rendering hinders the real-
+time rendering. NeRF-style volumetric rendering and point-
+based α-blending fundamentally share the same model for
+rendering images but differ significantly in their rendering
+algorithms [18]. NeRFs offer a continuous feature repre-
+sentation of the entire volume as empty or occupied spaces,
+which necessitate costly volumetric sampling to render a
+pixel, leading to high computational demands. In contrast,
+points provide an unstructured, discrete representation of a
+volume geometry by the creation, destruction, and move-
+ment of points, and a pixel is rendered by blending several
+ordered points overlapping the pixel. This is achieved by
+optimizing opacity and positions [20], thus bypassing the
+limitations inherent in full volumetric representations and
+achieving remarkably fast rendering.
+Point-based methods have been widely used in rendering
+3D scenes, where the simplest form is point clouds. How-
+ever, point clouds can lead to visual artifacts such as holes
+and aliasing. To mitigate this, point-based neural rendering
+methods have been proposed, processing
+
+
+==========================================================================================
+### 2311.17245_LightGaussian  (pages=19, img=2311.17245_LightGaussian_fig.png)
+==========================================================================================
+LightGaussian: Unbounded 3D Gaussian Compression
+with 15x Reduction and 200+ FPS
+Zhiwen Fan1†∗, Kevin Wang1∗, Kairun Wen2, Zehao Zhu1, Dejia Xu1, Zhangyang Wang1
+1The University of Texas at Austin
+2XMU
+{zhiwenfan,kevinwang.1839,atlaswang}@utexas.edu
+Project Website: https://lightgaussian.github.io
+Ours (0.5M points, 0.916)
+3D-GS (1.4M points,0.917)
+Figure 1: Compressibility and Speed: LightGaussian compacts 3D Gaussians, reducing storage
+from 782MB to 45MB and boosting FPS from 144 to 237, while maintaining visual quality.
+Abstract
+Recent advances in real-time neural rendering using point-based techniques have
+enabled broader adoption of 3D representations. However, foundational approaches
+like 3D Gaussian Splatting impose substantial storage overhead, as Structure-from-
+Motion (SfM) points can grow to millions, often requiring gigabyte-level disk
+space for a single unbounded scene. This growth presents scalability challenges
+and hinders splatting efficiency. To address this, we introduce LightGaussian,
+a method for transforming 3D Gaussians into a more compact format. Inspired
+by Network Pruning, LightGaussian identifies Gaussians with minimal global
+significance on scene reconstruction, and applies a pruning and recovery process
+to reduce redundancy while preserving visual quality. Knowledge distillation and
+pseudo-view augmentation then transfer spherical harmonic coefficients to a lower
+degree, yielding compact representations. Gaussian Vector Quantization, based on
+each Gaussian’s global significance, further lowers bitwidth with minimal accuracy
+loss. LightGaussian achieves an average 15× compression rate while boosting
+FPS from 144 to 237 within the 3D-GS framework, enabling efficient complex
+scene representation on the Mip-NeRF 360 and Tank & Temple datasets. The
+proposed Gaussian pruning approach is also adaptable to other 3D representations
+(e.g., Scaffold-GS), demonstrating strong generalization capabilities.
+1
+Introduction
+Novel view synthesis (NVS) aims to generate photo-realistic images of a 3D scene from unobserved
+viewpoints, given a set of calibrated multi-view images. This capability has widespread applications
+∗Z. Fan and K. Wang contributed equally; † Z. Fan is the Project Lead
+38th Conference on Neural Information Processing Systems (NeurIPS 2024).
+arXiv:2311.17245v6 [cs.CV] 12 Nov 2024
+
+in virtual reality [1], augmented reality [2], digital twins [3], and autonomous driving [4]. Neural
+Radiance Fields (NeRFs) [5–7] have shown promise in 3D modeling from multi-view images by
+mapping 3D locations and view directions to view-dependent color and volumetric density, with pixel
+intensity rendered through volume rendering [8]. However, NeRF and its variants face limitations
+in rendering speed, limiting their deployment in real-world scenarios. To address this, voxel-based
+representations [9–13], hash grids [14], and neural light fields [15] have been developed. Despite
+improvements, these methods often compromise between quality and speed.
+Recent progress in point-based 3D Gaussian Splatting (3D-GS) [16] has enabled real-time rendering
+with photo-realistic quality for complex scenes. By representing the scene with explicit 3D Gaussians
+and using a splatting technique [17], 3D-GS balances speed and quality, making it suitable for
+large-scale scenarios like digital twins and autonomous driving. However, point-based methods incur
+high storage costs, as each point and its attributes require independent storage. Additionally, heuristic
+densification of sparse SfM points into dense Gaussians often results in overparameterization, leading
+to excessive storage and slower rendering speeds. For instance, a typical unbounded 360-degree
+scene in 3D-GS [7] may require over 1GB of storage (e.g., 1.4GB for the Bicycle scene).
+In this paper, we address storage and rendering speed issues by developing a compact representation
+that retains the original rendering quality. The heuristic densification process in 3D-GS results in
+significant redundancy. Our method, LightGaussian, reduces redundancy by targeting both Gaussian
+count (N) and feature dimension (F) through a comprehensive pipeline:
+• To reduce Gaussian count (N), we propose a Gaussian Pruning and Recovery step, identi-
+fying and removing Gaussians with minimal impact on visual quality, followed by recovery
+to ensure smooth adaptation.
+• For compressing features (F), we introduce an SH Distillation process to compact higher-
+degree spherical harmonic (SH) coefficients, supported by pseudo-view augmentation.
+Additionally, we employ Vector Quantization (VQ) to adaptively select a codebook of Gaus-
+sian attributes (e.g, positions, scales, and rotations), reducing precision for less significant
+features and applying quantization-aware fine-tuning to maintain quality.
+In summary, LightGaussian achieves substantial compression (e.g., from 782MB to 45MB) while
+maintaining visual fidelity (SSIM decrease of only 0.007 on Mip-NeRF 360). Rendering speed also
+improves, reaching over 200 FPS on complex scenes. Our Gaussian Pruning and Recovery method
+generalizes well, enhancing performance across different 3D Gaussian formats, such as Scaffold-GS.
+2
+Related Works
+Efficient 3D Scene Representations.
+Neural radiance fields (NeRF) [5] use multi-layer perceptrons
+(MLPs) to represent scenes, setting new standards for view synthesis quality. However, NeRF
+models face challenges with slow inference speeds, limiting practical use. Efforts to address this
+have explored ray re-parameterizations [6, 7], explicit spatial data structures [18–21, 9, 14, 13],
+caching and distillation techniques [15, 22–24], and ray-based representations [25, 26]. Nevertheless,
+achieving real-time rendering remains challenging for NeRF methods, especially for large-scale
+scenes where multiple queries per pixel hinder performance.
+Point-based representations, like Gaussians, have been explored in various applications, such as
+shape reconstruction [27], molecular modeling [28], and point-cloud replacement [29], as well as in
+shadow [30] and cloud rendering [31]. Pulsar [32] demonstrated efficient sphere rasterization, while
+3D Gaussian Splatting (3D-GS) [16] applies anisotropic Gaussians [33] with tile-based sorting to
+achieve real-time speed and quality comparable to MLP-based methods like Mip-NeRF 360 [7].
+Despite its strengths, 3D-GS has high storage demands due to the extensive attributes stored with each
+Gaussian, often requiring gigabytes per scene and hindering rendering efficiency. Recent concurrent
+works address these issues by using region-based vector quantization [34], K-means codebooks [35],
+view-direction exclusion [36], or learned binary masks and grid-based neural networks instead of
+spherical harmonics (SHs) [37] to reduce model size.
+Pruning and Quantization.
+Model pruning reduces neural network complexity by removing non-
+significant parameters, balancing performance and resource use. Unstructured [38] and structured
+2
+
+3D Gaussians
+Gaussian Prune & Recovery
+SH Distillation
+High-degree
+Low-degree
+Rasterizer
+Rasterizer
+Distillation
+Attributes
+Significance Score
+XYZ
+Spherical Harmonics
+Opacity/Rot/Scale
+FP16
+FP16
+Vector Quantization
+FP16
+Gaussian Vector
+Quantization
+Score
+Calculation
+Multi-view
+Images
+Pseudo cameras
+Training cameras
+Figure 2: Pipeline of LightGaussian. 3D Gaussians are optimized from multi-view images and SfM
+points. LightGaussian calculates each Gaussian’s global significance on training data, pruning those
+with the least significance. Next, SH coefficients are distilled into a compact format using synthesized
+pseudo-views. Finally, vector quantization, including codebook initialization and assignment, reduces
+model bandwidth.
+pruning [39, 40] eliminate parameters at the weight level and neuron/channel levels, resulting in a
+smaller, more efficient architecture. Iterative magnitude pruning (IMP), where low-magnitude weights
+are progressively removed, has proven effective in methods like lottery ticket rewinding [41, 42].
+Vector quantization (VQ) [43] compresses data by representing it with discrete codebook entries
+(tokens), using mean square error (MSE) to select the closest match in the codebook for each data
+vector. Prior studies [44–46] have shown that learning discrete, compact representations enhances
+visual understanding and model robustness. VQ has thus been widely applied in image synthesis [47],
+text-to-image generation [48], and novel view synthesis [18, 49, 50].
+Knowledge Distillation.
+Knowledge Distillation (KD) [51–54, 15] trains a smaller student model
+by transferring knowledge from a larger teacher model [55]. In 3D vision, KD has been applied
+to neural scene representations, leveraging view renderings to incorporate 2D priors. For example,
+DreamFusion [56] and NeuralLift-360 [57] use pre-trained diffusion models for 3D generation, while
+models like DFF [58], NeRF-SOS [59], INS [60], and SA3D [61] distill 2D image feature extractors
+to 3D tasks. KD has also been central to compressing scene representation models [15, 24].
+3
+Methods
+Overview.
+The LightGaussian framework is illustrated in Fig. 2. The 3D-GS model is trained on
+multi-view images, initialized from SfM point clouds, and expanded to millions of Gaussians to
+represent the scene comprehensively. Our pipeline then processes the 3D-GS model into a compact
+format using Gaussian Prune and Recovery to reduce the number of Gaussians, SH Distillation to
+eliminate redundant SHs while retaining key lighting information, and Vector Quantization to store
+Gaussians with lower bit-width.
+3.1
+Background: 3D Gaussian Splatting
+3D Gaussian Splatting (3D-GS) [16] is an explicit point-based 3D scene representation, utilizing
+Gaussians with various attributes to model the scene. When representing a complex real-world scene,
+3D-GS is initialized from a sparse point cloud generated by SfM, and Gaussian Densification is
+applied to increase the Gaussian counts that are used for handling small-scale geometry insufficiently
+covered and over reconstruction. Formally, each Gaussian is characterized by a covariance matrix Σ
+and a center point X, which is referred to as the mean value of the Gaussian:
+ \l a be l
+ {f ormul a : gaus si an's formula} \text {G}(\boldsymbol {X})=e^{-\frac {1}{2}\boldsymbol {X}^T\boldsymbol {\Sigma }^{-1}\boldsymbol {X}}, \boldsymbol {\Sigma } = \mathbf {R}\mathbf {S}\mathbf {S}^T\mathbf {R}^T, 
+(1)
+where Σ can be decomposed into a scaling matrix S and a rotation matrix R.
+The complex directional appearance is modeled by an additional property, Spherical Harmonics (SH),
+with n coefficients,
+
+ci ∈R3|i = 1, 2, . . . , n
+ 
+where n = D2 represents the number of coefficients
+of SH with degree D. A higher degree D equips 3D-GS with a better capacity to model the view-
+dependent effect but causes a significantly heavier attribute load.
+When rendering 2D images from the 3D Gaussians, the technique of splatting [62, 17] is employed
+for the Gaussians within the camera planes. With a viewing transform denoted as W and the Jacobian
+3
+
+PSNR: 27.2 (3D-GS)
+PSNR: 25.3(Opacity prune)
+Figure 3: Zero-shot Opacity-based Pruning. A significant number of Gaussians exhibit small
+opacity values (top). Simply utilizing Gaussian opacity as an indicator for pruning the least important
+Gaussians results in the rendered image losing intricate details (bottom), with the PSNR dropping
+from 27.2 to 25.3. This has inspired us to find better criteria to measure global significance in terms
+of rendering quality. The accumulated Probability Density Function(PDF) is equal to 1.
+of the affine approximation of the projective transformation represented by J, the covariance matrix
+Σ′ in camera coordinates can be computed as Σ′ = JW ΣW T JT . Specifically, for each pixel, the
+color and opacity of all the Gaussians are computed using the Gaussian’s representation Eq. 1. The
+blending of N ordered points that overlap the pixel is given by the formula:
+ 
+\
+lab
+el {
+eq:
+v
+olu
+me
+
+
+==========================================================================================
+### 2312.04564_EAGLES  (pages=20, img=2312.04564_EAGLES_fig.png)
+==========================================================================================
+EAGLES: Efficient Accelerated 3D Gaussians with
+Lightweight EncodingS
+Sharath Girish1, Kamal Gupta2, and Abhinav Shrivastava3
+1 sgirish@cs.umd.edu
+2 kamalgupta308@gmail.com
+3 abhinav@cs.umd.edu
+University of Maryland, College Park
+Fig. 1: We propose EAGLES, a technique to significantly reduce the memory footprint of 3D-
+Gaussian splatting by an order of magnitude while offering further speed ups in training time and
+rendering FPS all while maintaining the reconstruction quality.
+Abstract. Recently, 3D Gaussian splatting (3D-GS) has gained popularity in
+novel-view scene synthesis. It addresses the challenges of lengthy training times
+and slow rendering speeds associated with Neural Radiance Fields (NeRFs). Through
+rapid, differentiable rasterization of 3D Gaussians, 3D-GS achieves real-time ren-
+dering and accelerated training. They, however, demand substantial memory re-
+sources for both training and storage, as they require millions of Gaussians in
+their point cloud representation for each scene. We present a technique utilizing
+quantized embeddings to significantly reduce per-point memory storage require-
+ments and a coarse-to-fine training strategy for a faster and more stable optimiza-
+tion of the Gaussian point clouds. Our approach develops a pruning stage which
+results in scene representations with fewer Gaussians, leading to faster training
+times and rendering speeds for real-time rendering of high resolution scenes. We
+reduce storage memory by more than an order of magnitude all while preserv-
+ing the reconstruction quality. We validate the effectiveness of our approach on
+a variety of datasets and scenes preserving the visual quality while consuming
+10-20× less memory and faster training/inference speed. Project page and code
+is available here.
+arXiv:2312.04564v3 [cs.CV] 26 Sep 2024
+
+2
+S. Girish et al.
+1
+Introduction
+Neural Radiance Fields [29] (NeRF) have become widespread in their use as 3D scene
+representations achieving high visual quality by training implicit neural networks via
+differentiable volume rendering. They however come at the cost of high training and
+rendering costs. While more recent works such as Plenoxels [14] or Multiresolution
+Hashgrids [30] have significantly reduced the training times, they are still slow to render
+for high resolution scenes and do not reach the same visual quality as NeRF methods
+such as [3,4]. To overcome these issues, 3D Gaussian splatting [22] (3D-GS) proposed
+an approach to learn 3D gaussian point clouds as scene representations. Unlike the
+slow volume rendering of NeRFs, they utilize a fast differentiable rasterizer, to project
+the points on the 2D plane for rendering views. They achieve state-of-the-art (SOTA)
+reconstruction quality while still obtaining similar training times as the efficient NeRF
+variants. Through their fast tile-based rasterizer, they also achieve real-time rendering
+speeds at 1080p scene resolutions, significantly faster than NeRF approaches.
+While 3D-GS has several advantages over NeRFs for novel view synthesis, they
+come at the cost of high memory usage. Each high resolution scene is represented with
+several millions of Gaussians in order to achieve high quality view reconstructions.
+Each point consists of several attributes such as position, color, rotation, opacity and
+scaling. This leads to representations of each scene requiring high amounts of mem-
+ory for storage (>1GB). The GPU runtime memory requirements during training and
+rendering is also much higher compared to standard NeRF methods, requiring almost
+20GB of GPU RAM for several high-resolution scenes. They are thus not very practical
+for graphic systems with strong memory-constraints of storage or runtime memory or
+in low-bandwidth applications.
+Our approach aims to decrease both storage and runtime memory costs while en-
+hancing both training and rendering speeds, and maintaining view synthesis quality
+on par with the SOTA, 3D-GS. The color attribute, represented by spherical harmonic
+(SH) coefficients, and the rotation attribute, represented by covariance matrices, utilize
+more than 80% of the memory cost of all attributes. Our approach significantly reduces
+the memory usage of each Gaussian by compressing the color and rotation attributes
+via a latent quantization framework. We also quantize the opacity coefficients of the
+Gaussians improving the optimization and leading to fewer floaters or visual artifacts in
+novel view reconstructions. Additionally, we propose a coarse-to-fine training strategy
+which improves the training stability and convergence speed while also obtaining better
+reconstructions. Finally, to reduce the number of redundant Gaussians resulting from
+frequent densification (via cloning and splitting), we utilize a pruning stage identifying
+Gaussians with the least influence in the full reconstruction. This further reduces the
+memory cost of the scene representation while improving the rendering and training
+speed due to faster rasterization. To summarize, our contributions are as follows:
+– We propose a simple yet powerful approach for compressing 3D Gaussian point
+clouds by quantizing per-point attributes leading to lower storage memory.
+– We further improve the optimization of the Gaussians by quantizing the opacity co-
+efficients and utilizing a progressive training strategy while controlling the number
+of Gaussians with a pruning stage.
+
+EAGLES: Efficient Accelerated 3D Gaussians with Lightweight EncodingS
+3
+– We provide ablations of the different components of our approach to show their
+effectiveness in producing efficient 3D Gaussian representations. We evaluate our
+approach on a variety of datasets achieving comparable quality as 3D-GS while
+being faster and more efficient.
+2
+Related Work
+Neural fields or Implicit Neural Representations (INRs) have recently become a domi-
+nant representation for not just 3D objects [29,30], but also audio [27,38], images [11,
+38, 39], and videos [6, 28]. Consequently, there is a big focus on improving the speed
+and efficiency of this line of methods. Since neural fields essentially use a neural net-
+work to represent a physical field, a number of works have been inspired by and have
+borrowed from the neural network compression techniques that we discuss first.
+Compression for neural networks. Since the explosion of neural networks and their
+proliferation in the industry and applications, neural network compression and effi-
+ciency has gained a lot of attention. A typical compression scheme used for neural
+networks is quantization or discretization of the parameters to a smaller, finite preci-
+sion and using entropy coding or other lossless compression methods to further store
+the parameters. While some approaches directly train binary or finite precision net-
+works [9, 10, 25, 33], others attempt to quantize the network using non-uniform scalar
+quantization [2,15,31,45], or vector quantization [7,8,18]. Advantage of former tech-
+niques is typically cheaper setup cost and training time, however they can often result in
+sub-optimal network performance at the inference time. Another line of work attempt
+to prune the networks either during the training [19,24,34] or in a post-hoc optimization
+step [12,13,16,35] which may require retraining the entire network. While pruning can
+be often a good compression strategy, these method may require a lot more training to
+reach a competitive performance as an unpruned network.
+Compression for neural fields. Several neural field compression approaches [37, 39,
+42] propose a meta learning approach that learns a network on auxiliary datasets which
+can provide a good initialization for the downstream network. While our method can
+benefit from meta-learning as well, we restrict our current approach to compressing a
+single scene for brevity. VQAD [40] propose a vector quantization for a hierarchical
+feature grids used in NGLOD [41]. Their method is able to achieve higher compres-
+sion as compared to other feature-grid methods such as Instant NGP [30] however its
+training can be memory intensive and it struggles to achieve the same quality of recon-
+structions as compared to some other NeRF variants such as MipNeRF. [26] propose a
+similar compression approach using voxel pruning and codebook quantization. Scalar
+quantization approaches [5, 17] reparameterize the network weights with integers and
+apply further entropy regularization to compress the scene even further. While these
+approaches require lower training memory as compared to [41], they are sensitive to
+hyperparameters and the reconstruction efficacy of these approaches remain lower as
+compared to MipNeRF360 or Gaussian Splatting.
+In this work, we show for the first time, that it is possible to compress 3D Gaussian
+point cloud representations which can retain high reconstruction quality with much
+smaller memory and higher FPS for inference.
+
+4
+S. Girish et al.
+3
+Background
+3D Gaussian splatting consists of a Gaussian point cloud representation in 3D space.
+Each Gaussian consists of various attributes such as the position (for mean), scaling and
+rotation coefficients (for covariance), opacity and color. These Gaussians represent a 3D
+scene and are used for rendering images from certain viewpoints by anisotropic volu-
+metric “splatting" [46,47] of 3D Gaussians onto a 2D plane. This is done by projecting
+the 3D points to 2D and then using a differentiable tile-based rasterizer for blending
+together different Gaussians.
+3D Gaussians with a mean 3D position vector x and covariance matrix Σ can be
+defined as
+ G( \ bo l
+d sy mbol {x}) = e^{-\frac {1}{2}\boldsymbol {x}^T\Sigma ^{-1}\boldsymbol {x}} 
+(1)
+The 3D covariance matrix is in turn defined using a scale matrix S (represented using a
+3D scale vector s) and rotation matrix R (represented using a 4D rotation vector r) as
+ \Sig ma = RSS^TR^T 
+(2)
+For a camera viewpoint with a projective transform P (world-to-camera matrix) and J as
+the Jacobian of the affine approximation of the projective transform, the corresponding
+covariance matrix projection [21] to 2D is written as:
+ \ Sigm a ' = JP\Sigma P^TJ^T 
+(3)
+The color of a pixel C is then computed using N Gaussian points overlapping the pixel.
+The points are sorted based on their depth values and blended as:
+ 
+C
+ = 
+\sum
+ _{
+i
+\in
+ \ m athcal {N}}\boldsymbol {c}_i\alpha _i\prod _{j=1}^{i-1}(1-\alpha _j) \label {eq:raster} 
+(4)
+where αi is computed by computing the 2D Gaussian at the pixel location multiplied
+with a scalar opacity value. The color ci of each Gaussian is then computed using spher-
+ical harmonic coefficients [36].
+The Gaussians are initialized using the sparse point clouds created by Structure from
+Motion (SfM) [43]. Further optimization of the attributes is then done using Stochastic
+Gradient Descent as the rendering process is fully differentiable. For each view sampled
+from the training dataset, the corresponding image is projected and rasterized with the
+forward process explained above.
+
+
+==========================================================================================
+### 2402.14650_GaussianPro  (pages=11, img=2402.14650_GaussianPro_fig.png)
+==========================================================================================
+GaussianPro: 3D Gaussian Splatting with Progressive Propagation
+Kai Cheng * 1 Xiaoxiao Long * 2 Kaizhi Yang 1 Yao Yao 3 Wei Yin 4 Yuexin Ma 5 Wenping Wang 6
+Xuejin Chen 1
+Rendered Image
+Rendered Normal
+Gaussians
+3DGS
+Ours
+PSNR: 35.83
+PSNR: 36.88
+Figure 1: The sparse SfM points and less-constrained densification strategies of 3DGS pose challenges in optimizing 3D
+Gaussians, particularly for textureless areas. 3DGS generates incorrect Gaussians (blue circle) to be over-fitted on the
+training images, leading to a noticeable performance drop in novel view rendering with erroneous geometries.
+Abstract
+The advent of 3D Gaussian Splatting (3DGS)
+has recently brought about a revolution in the
+field of neural rendering, facilitating high-quality
+renderings at real-time speed. However, 3DGS
+heavily depends on the initialized point cloud
+produced by Structure-from-Motion (SfM) tech-
+niques. When tackling with large-scale scenes
+that unavoidably contain texture-less surfaces,
+the SfM techniques always fail to produce
+enough points in these surfaces and cannot pro-
+vide good initialization for 3DGS. As a result,
+3DGS suffers from difficult optimization and
+low-quality renderings.
+In this paper, inspired
+by classical multi-view stereo (MVS) techniques,
+we propose GaussianPro, a novel method that ap-
+plies a progressive propagation strategy to guide
+the densification of the 3D Gaussians. Compared
+to the simple split and clone strategies used in
+3DGS, our method leverages the priors of the ex-
+isting reconstructed geometries of the scene and
+patch matching techniques to produce new Gaus-
+*Equal contribution
+1University of Science and Technol-
+ogy of China 2The University of Hong Kong 3Nanjing Uni-
+versity 4The University of Adelaide 5ShanghaiTech University
+6Texas A&M University.
+Correspondence to:
+Xuejin Chen
+<xjchen99@ustc.edu.cn>.
+sians with accurate positions and orientations.
+Experiments on both large-scale and small-scale
+scenes validate the effectiveness of our method,
+where our method significantly surpasses 3DGS
+on the Waymo dataset, exhibiting an improve-
+ment of 1.15dB in terms of PSNR.
+1. Introduction
+Novel view synthesis is an important but challenging task
+in computer vision and computer graphics that aims to gen-
+erate images of novel viewpoints in the captured scene.
+It has extensive applications in various domains, includ-
+ing virtual reality (Deng et al., 2022b), autonomous driv-
+ing (Yang et al., 2023; Cheng et al., 2023), and 3D content
+generation (Poole et al., 2022; Tang et al., 2023). Recently,
+Neural Radiance Fields (NeRF) (Mildenhall et al., 2020)
+has significantly boosted this task, achieving high-fidelity
+renderings without explicitly modeling 3D scenes, texture
+and illumination. However, due to the heavy manner of
+volume rendering, NeRFs still suffer from slow rendering
+speed, although various efforts (M¨uller et al., 2022; Barron
+et al., 2022; 2023; Chen et al., 2022; Xu et al., 2022) have
+been made.
+To achieve real-time neural rendering, 3D Gaussian Splat-
+ting (3DGS) (Kerbl et al., 2023) has been developed. It
+models the scenes explicitly as 3D Gaussians with learn-
+able attributes and performs rasterization of the Gaus-
+1
+arXiv:2402.14650v1 [cs.CV] 22 Feb 2024
+
+sians to produce renderings. The splatting strategy avoids
+time-consuming ray sampling and allows parallel compu-
+tations, thus yielding high efficiency and fast rendering.
+3DGS heavily relies on the sparse point clouds produced by
+Structure-from-Motion (SfM) techniques to initialize the
+Gaussians, e.g., their positions, colors, and shapes. More-
+over, clone and split strategies to create more new Gaus-
+sians to achieve a complete coverage of the scene. How-
+ever, the densification strategies to create 3D Gaussians
+lead to two main limitations. 1) Sensitive to Gaussian Ini-
+tialization. The SfM techniques always fail to produce 3D
+points and leave empty in textureless regions, and there-
+fore the densification strategy struggles to generate reliable
+Gaussians to cover the scene with a poor initialization. 2)
+Ignore the priors of the existing reconstructed geome-
+try. The new Gaussians are either cloned to be the same as
+the old Gaussians or initialized with random positions and
+orientations.
+The less-constrained densification leads to
+difficulties in the optimization of 3D Gaussians, e.g., noisy
+geometries, and few Gaussians in texture-less regions, fi-
+nally degrading the rendering quality. As shown in Fig-
+ure 1, the results of 3DGS contain many noisy Gaussians
+and some regions are not covered by enough Gausians.
+In this paper, we propose a novel progressive propaga-
+tion strategy to facilitate 3DGS, which could produce more
+compact and accurate 3D Gaussians and therefore improve
+the rendering quality, especially in texture-less surfaces.
+The key idea of our method is to fully leverage the re-
+constructed scene geometries as priors and classical patch
+matching techniques to progressively produce new Gaus-
+sians with accurate positions and orientations.
+Specifically, we consider Gaussian densification in both 3D
+world space and 2D image space. For each input image,
+we render the depth and normal map by accumulating the
+positions and orientations of 3D Gaussians via alpha blend-
+ing. Based on the observation that the neighboring pixels
+are likely to share similar depth and normal values, for a
+pixel, we iteratively propagate the depth and normal val-
+ues of its neighboring pixels to this pixel to formulate a
+set of candidates. With the candidates, we leverage classi-
+cal patch matching techniques to pick up the best candidate
+that satisfies the multi-view photometric consistency con-
+straint, thus yielding new depth and normal for each pixel
+(named as propagated depth/normal). We select the pixels
+whose propagated depth is significantly different from the
+rendered depth since large differences imply that the exist-
+ing 3D Gaussians may not accurately capture the true ge-
+ometry. As a result, we explicitly back-project the selected
+pixels using the propagated depths into 3D space and ini-
+tialize them as new Gaussians. Additionally, we leverage
+the propagated normals to regularize the orientations of 3D
+Gaussians, further improving the reconstructed 3D geome-
+try and rendering quality.
+Our proposed progressive propagation strategy could pro-
+duce more compact and accurate 3D Gaussians by transfer-
+ring of accurate geometric information from well-modeled
+regions to under-modeled regions. As shown in Figure. 1,
+compared to 3DGS, our method produces more accurate
+and compact Gaussians and therefore achieves a better cov-
+erage of the 3D scene. Experiments on public datasets such
+as Waymo and MipNeRF360 validate that our proposed
+strategy significantly boosts the performance of 3DGS.
+Overall, the contributions of our method are summarized
+as:
+• We propose a novel Gaussian propagation strategy
+that guides the densification to produce more compact
+and accurate Gaussians, particularly in low-texture re-
+gions.
+• We additionally leverage a planar loss that provides a
+further constraint in the optimization of Gaussians.
+• Our method achieves new state-of-the-art render-
+ing performance on the Waymo and MipNeRF360
+datasets. Our method also presents robustness to the
+varying numbers of input images.
+2. Related Work
+2.1. Multi-view Stereo
+Multi-view stereo (MVS) aims to reconstruct a 3D model
+from a collection of posed images, which can be further
+combined with traditional rendering algorithms to generate
+novel views. Traditional methods (Campbell et al., 2008;
+Furukawa & Ponce, 2009; Bleyer et al., 2011; Furukawa
+et al., 2015; Sch¨onberger et al., 2016; Xu & Tao, 2019)
+explicitly establish pixel correspondences between images
+based on hand-crafted image features and then optimize
+the 3D structure to achieve the best pixel correspondences
+among images. Learning-based MVS methods (Yao et al.,
+2018; Vakalopoulou et al., 2018; Long et al., 2020; Chen
+et al., 2019; Long et al., 2021; Ma et al., 2022; Long et al.,
+2022; Feng et al., 2023) implicitly build multi-view corre-
+spondences with learnable features and regress depth or 3D
+volume based on the features in an end-to-end framework.
+In this paper, we draw inspiration from depth optimization
+in MVS to improve the geometry of the Gaussians, thereby
+achieving better rendering results.
+2.2. Neural Radiance Field
+NeRF combines deep learning techniques with the 3D vol-
+umetric representation, transforming a 3D scene into a
+learnable continuous density field. Utilizing ray march-
+ing in volume rendering, NeRF is able to achieve high-
+quality novel view synthesis without explicit modeling of
+the 3D scene and illumination.
+To further improve the
+2
+
+rendering quality, some approaches (Barron et al., 2021;
+Xu et al., 2022; Barron et al., 2023) directly improve the
+point sampling strategy in ray marching for more accurate
+modeling of the volume rendering process. Others (Bar-
+ron et al., 2022; Wang et al., 2023) improve rendering by
+reparameterizing the scene to generate more compact scene
+representation and easier learning process. Additionally,
+regularization terms (Deng et al., 2022a; Yu et al., 2022)
+could be introduced to constrain the scene representation
+towards a closer approximation of real geometry. Despite
+these advancements, NeRF still incurs high computational
+costs during rendering.
+Since NeRF employs MLPs to
+represent the scene, the computation and optimization of
+any point in the scene are dependent on the entire MLP.
+Many works propose novel scene representations to ac-
+celerate rendering. They replace MLPs with sparse vox-
+els (Liu et al., 2020; Fridovich-Keil et al., 2022), hash ta-
+bles (M¨uller et al., 2022), or triplane (Chen et al., 2022),
+allowing the computation and optimization of each point
+to be localized to the corresponding local region of the
+scene. Although these methods significantly improve ren-
+dering speed, real-time rendering is still challenging due to
+the inherent ray marching strategy in volume rendering.
+2.3. 3D Gaussian Splatting
+3DGS employs a spatting-based rasterization (Zwicker
+et al., 2002) approach to project anisotropic 3D Gaussians
+onto a 2D screen. It computes the pixel’s color by perform-
+ing depth sorting and α-blending on the projected 2D Gaus-
+sians, which avoids the sophisticated sampling strategy of
+ray marching and achieves real-time rendering. Some con-
+current works have made improvements to 3DGS. Firstly,
+3DGS is sensitive to sampling frequency, i.e., changing
+the camera’s focal length or camera distance could result
+in rendering artifacts.
+These artifacts are addressed by
+introducing low-pass filtering (Yu et al., 2023) or multi-
+scale Gaussian representations (Yan et al., 2023). Addi-
+tionally, 3DGS excessively grows Gaussians without ex-
+plicitly constraining the scene’s real geometric structure,
+resulting in numerous redundant Gaussians and significant
+memory consumption. Some methods evaluate the contri-
+bution of Gaussians to rendering by their scales (Lee et al.,
+2023) or calculating their visibility in views (Fan et al.,
+2023), forcing the removal of Gaussians with small con-
+tributions.
+Others compress the storage of Gaussian at-
+tributes by quantization technique (Navaneet et al., 2023)
+or interpolating Gaussian attributes from structured grid
+features (Morgenstern et al., 2023; Lu et al., 2023).
+Although these methods significantly reduce the storage
+overhead of Gaussians, they do not explicitly
+
+
+==========================================================================================
+### 2403.14166_MiniSplatting  (pages=25, img=2403.14166_MiniSplatting_fig.png)
+==========================================================================================
+Mini-Splatting: Representing Scenes with a
+Constrained Number of Gaussians
+Guangchi Fang
+and Bing Wang
+⋆
+Spatial Intelligence Group, The Hong Kong Polytechnic University
+guangchi.fang@gmail.com, bingwang@polyu.edu.hk
+Mini-Splatting-D (6.0mil, 75 FPS)
+Train: 33min, PSNR: 25.5dB
+3DGS (6.1mil, 66 FPS)
+Train: 35min, PSNR: 25.2dB
+Mini-Splatting (0.6mil, 430 FPS)
+Train: 17min, PSNR: 25.2dB
+Ground Truth
+Fig. 1: By reorganizing the spatial distribution of 3D Gaussians [17], our Mini-
+Splatting reduces the number of Gaussians (in millions) while enhancing model perfor-
+mance in terms of rendering speed, training time, and rendering quality. The Gaussian
+centers of a foreground object bicycle are projected onto the rendered image as blue
+points, demonstrating the more uniform spatial distribution achieved by our algorithm.
+Abstract. In this study, we explore the challenge of efficiently represent-
+ing scenes with a constrained number of Gaussians. Our analysis shifts
+from traditional graphics and 2D computer vision to the perspective of
+point clouds, highlighting the inefficient spatial distribution of Gaussian
+representation as a key limitation in model performance. To address this,
+we introduce strategies for densification including blur split and depth
+reinitialization, and simplification through intersection preserving and
+sampling. These techniques reorganize the spatial positions of the Gaus-
+sians, resulting in significant improvements across various datasets and
+benchmarks in terms of rendering quality, resource consumption, and
+storage compression. Our Mini-Splatting integrates seamlessly with the
+original rasterization pipeline, providing a strong baseline for future re-
+search in Gaussian-Splatting-based works. Code is available.
+Keywords: Gaussian Splatting · Point Clouds · Scene Representation
+1
+Introduction
+Recent advancements in 3D Gaussian Splatting (3DGS) [17] have showcased its
+significant potential across a range of applications, such as immersive render-
+ing and 3D reconstruction, attributed to its capabilities for real-time and high-
+quality rendering. Unlike traditional radiance field-based algorithms [1, 2, 24],
+⋆Corresponding author
+arXiv:2403.14166v3 [cs.CV] 16 Oct 2024
+
+2
+G. Fang and B. Wang⋆
+3DGS employs millions of elliptical Gaussians for scene modeling (e.g., 1 to 6
+million Gaussians for each scene in the Mip-NeRF360 dataset [2]). The detailed
+characterization of these Gaussians, including their 3D position, opacity, covari-
+ance, and spherical harmonic (SH) coefficients, allows for a remarkably detailed
+and realistic scene representation. However, the extensive use of Gaussians also
+leads to inefficiencies, as depicted in Fig. 1, where Gaussian centers are prone to
+clustering together. This suboptimal spatial distribution can constrain the ren-
+dering quality and speed. In this regard, our study aims to address the challenge
+of efficiently representing a scene with a constrained number of Gaussians.
+The optimization of minimal Gaussian representation remains a relatively un-
+derexplored topic, with only a handful of compression-focused studies venturing
+into this area. Drawing inspiration from voxel pruning techniques used in grid-
+based neural representations [21, 41], Niedermayr et al. [27] proposed pruning
+Gaussians based on parameter sensitivity derived from image gradients. Simi-
+larly, Lee et al. [20] and LightGaussian [11] have implemented pruning strategies
+based on Gaussian opacity and scale. However, these methods, which primarily
+aim at storage compression, often neglect the inefficient spatial distribution of
+input Gaussians. As a result, direct pruning, as practiced in these approaches,
+tends to yield suboptimal simplification outcomes. Moreover, most existing 3D
+data simplification algorithms focus on preserving feature points [16,19] or geo-
+metric structures [23,29], making them less suitable for explicit representations
+with densely optimizable parameters like 3DGS. Therefore, adapting these tech-
+niques to the 3DGS model presents a non-trivial challenge.
+In this paper, we start with a comprehensive analysis of Gaussian representa-
+tion. By visualizing the projected Gaussian centers and rendered results, we find
+that 3D Gaussians are not uniformly distributed around the object surface, which
+limits the rendering speed and quality of the model. To construct an efficient
+Gaussian representation, we pivot the task of directly simplifying 3D Gaussians
+to reorganizing their spatial positions employing our Gaussian densification and
+simplification method. Specifically, our proposed densification algorithm includes
+two key components: blur split, which involves splitting Gaussians in the blurring
+areas, and depth reinitialization, which uses merged depth points to reinitialize
+the scene. Our simplification approach comprises intersection preserving, which
+preserve Gaussians with maximal impact on the rendered image, and sampling,
+designed to preserve both the geometric structure and rendering quality of the
+original model. By stacking our densification and simplification techniques, we
+achieve a more uniform and efficient spatial distribution of Gaussians, as illus-
+trated in Fig. 1. Our main contributions are as follows:
+– Through a deep analysis of the spatial distribution of Gaussians, we observe
+that the vanilla 3DGS presents two significant phenomena: ‘overlapping’ and
+‘under-reconstruction’. We identify that this inefficient distribution limits
+the rendering quality and speed, and it is non-trivial to achieve a minimal
+Gaussian representation while maintaining rendering quality.
+– We propose a Gaussian densification and simplification algorithm to reorga-
+nize the spatial positions of Gaussians rather than directly pruning them.
+
+Mini-Splatting
+3
+The proposed densification (blur split and depth reinitialization) and sim-
+plification (intersection preserving and Gaussian sampling) strategies, lever-
+aging both screen-space and world-space information, effectively achieve a
+dense distribution of Gaussians around the object.
+– By integrating densification and simplification with corresponding further
+processing, our proposed Mini-Splatting achieves a balanced trade-off be-
+tween rendering quality, resource consumption, and storage. Extensive ex-
+perimental results on multiple benchmarks and datasets demonstrate the
+potential and scalability of our method.
+2
+Related Work
+2.1
+Gaussian Splatting
+3D Gaussian Splatting (3DGS) [17] represents a recent advancement in novel
+view synthesis, enabling real-time high-quality rendering. Over the past year,
+numerous follow-up works have emerged. The concept of 3DGS has been ap-
+plied to domains such as autonomous driving [40], human avatar [31], content
+generation [35,36] and dynamic scene [22], resulting in advancements within each
+domain [4]. While several works aim to enhance 3DGS from the perspectives of
+graphics [12], image processing [42], and system performance [10], few studies
+focus on delving into the nature of Gaussians as the scene representation.
+The Gaussian representation constitutes a key distinction between 3DGS and
+previous standard techniques for novel view rendering. While most prior works
+employ implicit [1, 2, 24] or explicit [34, 39, 41] neural representations with vol-
+ume rendering based on ray marching, the primary challenge lies in the dense
+ray point sampling required by ray marching, which consequently limits both
+training and rendering speed. In contrast, 3DGS utilizes a large collection of
+elliptical Gaussians [43] for scene representation and rasterize these Gaussians
+onto the image plane for alpha blending. This carefully designed rasterization
+pipeline circumvents the issues associated with ray marching. However, the per-
+formance of 3DGS models is constrained by the large number of Gaussians due
+to the rasterization process.
+2.2
+3D Data Simplification
+For point cloud simplification purposes, conventional techniques such as farthest
+point sampling [30], random sampling [15], and grid sampling [13] are commonly
+utilized in point cloud processing tasks. In contrast, most works oriented towards
+point cloud simplification focus on preserving either feature points [5,16,19] or
+geometric structures [23,25,29]. Several learning-based algorithms [9,19,37] have
+been proposed to sample points during training, integrating downstream tasks in
+an end-to-end manner. However, it is non-trivial to directly apply these sampling
+techniques to 3DGS due to differences in representations.
+With recent advancements in neural radiance fields, several works have been
+proposed to simplify neural representations, primarily focusing on feature grids
+
+4
+G. Fang and B. Wang⋆
+and introducing voxel pruning [7,21] or voxel masking [32,38] strategies. Inspired
+by these developments, similar pruning techniques have been adapted in recent
+3DGS compression-oriented works [11,20,27]. For instance, Niedermayr et al. [27]
+proposed to prune Gaussians based on image gradients, while Lee et al. [20]
+and LightGaussian [11] performed pruning according to Gaussian opacity and
+scale. However, these works overlook the issue of inefficient spatial distribution
+of Gaussians, which can easily lead to suboptimal simplification results after
+Gaussian pruning. One concurrent work, RadSplat [28], also share a similar
+technical pipeline with our algorithm.
+3
+Analyzing 3DGS from a Perspective of Point Clouds
+3.1
+Preliminaries of Gaussian Splatting
+Gaussian Representation. 3D Gaussian Splatting (3DGS) [17] models the
+scene geometry as a set of 3D Gaussians {Gi|i = 1, · · · , N}. Each Gaussian Gi is
+characterized by its opacity αi ∈[0, 1], center pi ∈R3×1 and covariance matrix
+in world space Σi ∈R3×3 [43] as Gi(x) = e−1
+2 (x−pi)T Σ−1
+i
+(x−pi). To render an
+image from these Gaussians, 3DGS sorts them in an approximate depth order
+based on the distance from their centers pi to the image plane, and further
+applies alpha-blending [24] as follows:
+ \la b
+e
+l
+ {e
+q: rend
+er} \ bc (\ bx ) = 
+\
+sum 
+_{ i
+=1}
+^
+N w
+_i \c dot 
+\
+bc _i, \quad \text {where } w_i=T_i\cdot \alpha _i \cdot \cG ^{2D}_i(\bx ), \quad T_i=\prod _{j=1}^{i-1} (1 - \alpha _j \cdot \cG ^{2D}_j(\bx )), (1)
+where ci represents the view-dependent color modeled by spherical harmonic
+(SH) coefficients, and G2D
+i
+is the projected 2D Gaussian distribution of Gi through
+a local affine transformation [43].
+Adaptive Density Control of Gaussians. In 3DGS, sparse points from
+Structure-from-Motion (SfM) are first initialized as Gaussians. During the opti-
+mization, these Gaussians undergo an adaptive density control strategy, allowing
+the dynamic addition and removal of individual Gaussians. Specifically, Gaus-
+sians with a significant gradient are identified and are either split or cloned de-
+pending on their scales. Additionally, Gaussians with low opacity or an overlarge
+screen space size are pruned from the representation. Ablation studies presented
+in [17] demonstrate that this clone and split strategy can control the density of
+Gaussians, which in turn benefits scene recovery.
+3.2
+Challenges in Gaussian Simplification
+Visual Analysis of Gaussians. In 3DGS, scene geometry is represented us-
+ing elliptical Gaussian primitives. Ideally, these Gaussians should be distributed
+around the geometric surface to accurately model the scene, particularly for the
+foreground Gaussians with relatively small 3D scales. Under this assumption, the
+
+Mini-Splatting
+5
+3DGS (25.2, 6.1)
+（a）
+Random (24.8, 0.6)
+(c)
+Pruning (24.9, 0.6)
+(b)
+Grid (23.5, 1.1)
+(d)
+Density (24.7, 0.6)
+(e)
+Fig. 2: Visual analysis of Gaussian centers. (a): Visualization of the original 3DGS
+model’s projected Gaussian centers, along with its corresponding rendering quality
+(PSNR in dB) and the number of Gaussians (in millions). Notably, we observe the phe-
+nomena of ‘overlapping’ and ‘under-reconstruction’. (b), (c), (d), and (e): Visualization
+of
+
+
+==========================================================================================
+### 2403.15530_PixelGS  (pages=21, img=2403.15530_PixelGS_fig.png)
+==========================================================================================
+Pixel-GS: Density Control with Pixel-aware
+Gradient for 3D Gaussian Splatting
+Zheng Zhang1
+Wenbo Hu2†
+Yixing Lao1
+Tong He3
+Hengshuang Zhao1†
+1The University of Hong Kong
+2Tencent AI Lab
+3Shanghai AI Lab
+Abstract. 3D Gaussian Splatting (3DGS) has demonstrated impressive
+novel view synthesis results while advancing real-time rendering perfor-
+mance. However, its efficacy heavily relies on the quality of the initial
+point cloud, leading to blurring and needle-like artifacts in regions with
+inadequate initializing points. This issue is mainly due to the point cloud
+growth condition, which only considers the average gradient magnitude
+of points from observable views, thereby failing to grow for large Gaus-
+sians that are observable for many viewpoints while many of them are
+only covered in the boundaries. To address this, we introduce Pixel-GS,
+a novel approach to take into account the number of pixels covered by
+the Gaussian in each view during the computation of the growth con-
+dition. We regard the covered pixel numbers as the weights to dynam-
+ically average the gradients from different views, such that the growth
+of large Gaussians can be prompted. As a result, points within the ar-
+eas with insufficient initializing points can be grown more effectively,
+leading to a more accurate and detailed reconstruction. In addition, we
+propose a simple yet effective strategy to scale the gradient field accord-
+ing to the distance to the camera, to suppress the growth of floaters near
+the camera. Extensive qualitative and quantitative experiments confirm
+that our method achieves state-of-the-art rendering quality while main-
+taining real-time speeds, outperforming on challenging datasets such as
+Mip-NeRF 360 and Tanks & Temples. Code and demo are available at:
+https://pixelgs.github.io
+Keywords: View Synthesis · Point-based Radiance Field · Read-time
+Rendering · 3D Gaussian Splatting · Adaptive Density Control
+1
+Introduction
+Novel View Synthesis (NVS) is a fundamental problem in computer vision and
+graphics. Recently, 3D Gaussian Splatting (3DGS) [21] has drawn increasing
+attention for its explicit point-based representation of 3D scenes and real-time
+rendering performance.
+3DGS represents the scene as a set of points associated with geometry (Gaus-
+sian scales) and appearance (opacities and colors) attributes. These attributes
+†Corresponding author.
+arXiv:2403.15530v1 [cs.CV] 22 Mar 2024
+
+2
+Z. Zhang et al.
+GT
+LPIPS: 0.293
+LPIPS: 0.242
+LPIPS: 0.213
+SFM
+Mem: 0.79GB
+Mem: 1.75GB
+Mem: 1.67GB
+(a) Ground Truth
+(b) 3DGS∗(original
+threshold)
+(c) 3DGS∗(lower threshold)
+(d) Pixel-GS (Ours)
+To convert b to d, adjust densification from
+P ∥g∥
+P 1
+> τpos to
+P pixel·∥g∥
+P pixel
+> τpos.
+Fig. 1: Our Pixel-GS effectively grows points in areas with insufficient initializing
+points (a), leading to a more accurate and detailed reconstruction (d). In contrast,
+3D Gaussian Splatting (3DGS) suffers from blurring and needle-like artifacts in these
+areas, even with a lower threshold of splitting and cloning to encourage more grown
+points (c). The rendering quality (in LPIPS ↓) and memory consumption are shown in
+the results. 3DGS∗is our retrained 3DGS model with better performance.
+can be effectively learned by the differentiable rendering, while the optimization
+of the point cloud’s density is challenging. 3DGS carefully initializes the point
+cloud using the sparse points produced by the Structure from Motion (SfM)
+process and presents an adaptive density control mechanism to split or clone the
+points during the optimization process. However, this mechanism relies heavily
+on the initial point cloud’s quality and cannot effectively grow points in areas
+where the initial point cloud is sparse, resulting in blurry or needle-like artifacts
+in the synthesized images. In practice, the initial point cloud from SfM unavoid-
+ably suffers from insufficient points in areas with repetitive textures and few
+observations. As shown in the first and second columns of Figure 1, the blurry
+regions in the RGB images are well aligned with the areas where few points are
+initialized, and 3DGS fails to generate enough points in these areas.
+In essence, this issue is mainly attributed to the condition of when to split or
+clone a point. 3DGS decides it by checking whether the average gradient magni-
+tude of the points in the Normalized Device Coordinates (NDC) is larger than
+a threshold. The magnitude of the gradient is equally averaged across different
+viewpoints, and the threshold is fixed. Large Gaussians are usually visible in
+many viewpoints, and the size of their projection area varies significantly across
+views, leading to the number of pixels involved in the gradient calculation varies
+significantly. According to the mathematical form of the Gaussian distribution, a
+few pixels near the center of the projected Gaussian contribute much more to the
+gradient than the pixels far away from the center. Larger Gaussians often have
+many viewpoints where the area near the projected center point is not within
+the screen space, thereby lowering the average gradient, making them difficult to
+split or clone. This issue cannot be solved by merely lowering the threshold, as
+it would more likely encourage growing points in areas with sufficient points, as
+
+Pixel-GS
+3
+shown in the third column of Figure 1, still leaving blurry artifacts in the areas
+with insufficient points.
+In this paper, we propose to consider the calculation of the mean gradient
+magnitude of points from the perspective of pixels. During the computation of
+the average gradient magnitude for a Gaussian, we take into account the number
+of pixels covered by the Gaussian in each view by replacing the averaging across
+views with the weighted average across views by the number of covered pix-
+els. The motivation behind this is to amplify the gradient contribution of large
+Gaussians while leaving the conditions for splitting or cloning small Gaussians
+unchanged, such that we can effectively grow points in the areas with large Gaus-
+sians. In the meanwhile, for small Gaussians, the weighted average only slightly
+impacts the final gradient since the variation of covered pixel numbers across
+different viewpoints is minimal. Therefore, the final number of points in areas
+with sufficient initial points would not change significantly to avoid unnecessary
+memory consumption and processing time, but importantly, points in areas with
+insufficient initial points can be effectively grown to reconstruct fine-grained de-
+tails. As shown in the last column of Figure 1, our method effectively grows
+points in areas with insufficient initial points and renders high-fidelity images,
+while directly lowering the threshold in 3DGS to maintain a similar number of fi-
+nal points fails to render blurring-free results. Besides, we observe that “floaters”
+tend to appear near the camera, which are points that are not well aligned with
+the scene geometry and are not contributing to the final rendering. To this end,
+we propose to scale the gradient field in NDC space according to the depth value
+of the points, thereby suppressing the growth of “floaters” near the camera.
+To evaluate the effectiveness of our method, we conducted extensive experi-
+ments on the challenging Mip-NeRF 360 [3] and Tanks & Temples [22] datasets.
+Experimental results validate that our method consistently outperforms the orig-
+inal 3DGS, both quantitatively (17.8% improvement in terms of LPIPS) and
+qualitatively. We also demonstrate that our method is more robust to the spar-
+sity of the initial point cloud by manually discarding a certain proportion (up
+to 99%) of the initial SfM point clouds. In summary, we make the following
+contributions:
+– We analyzed the reason for the blurry artifacts in 3DGS and propose to op-
+timize the number of points from the perspective of pixels, thereby enabling
+effectively growing points in areas with insufficient initial points.
+– We present a simple yet effective gradient scaling strategy to suppress the
+“floater” artifacts near the camera.
+– Our method achieves state-of-the-art performance on the challenging Mip-
+NeRF 360 and Tanks & Temples datasets and is more robust to the quality
+of initial points.
+2
+Related Work
+Novel view synthesis. The task of novel view synthesis refers to the process of
+generating images from perspectives different from the original input viewpoints.
+
+4
+Z. Zhang et al.
+Recently, NeRF [35] has achieved impressive results in novel view synthesis by
+using neural networks to approximate the radiance field and employing volu-
+metric rendering [10, 27, 32, 33] techniques for rendering. These approaches use
+implicit functions (such as MLPs [2,3,35], feature grid-based representations [6,
+13,29,37,46], or feature point-based representations [21,50]) to fit the scene’s ra-
+diance field and utilize a rendering formula for rendering. Due to the requirement
+to process each sampled point along a ray through an MLP to obtain its density
+and color, during the volume rendering, these works significantly suffer from low
+rendering speed. Subsequent methods [15,41,42,56,58] have refined a pre-trained
+NeRF into a sparse representation, thus achieving real-time rendering of NeRF.
+Although some advanced scene representations [2–4,6,7,13,16,25,29,37,46] have
+been proposed to improve one or more aspects of NeRF, such as training cost,
+rendering results, and rendering speed, 3D Gaussian Splatting (3DGS) [21] still
+draws increasing attention due to its explicit representation, high-fidelity results,
+and real-time rendering speed. Some subsequent works on 3DGS have further
+improved it from perspectives such as anti-aliasing [51,59], reducing memory us-
+age [12,26,30,36,38,39], replacing spherical harmonics functions to enhance the
+modeling capability of high-frequency signals based on reflective surfaces [54],
+and modeling dynamic scenes [11, 17, 20, 24, 31, 49, 53, 55]. However, 3DGS still
+tends to exhibit blurring and needle-like artifacts in areas where the initial points
+are sparse. This is because 3DGS initializes the scale of each Gaussian based on
+the distance to neighboring Gaussians, making it challenging for the point cloud
+growth mechanism of 3DGS to generate sufficient points to accurately model
+these areas.
+Point-based radiance field. Point-based representations (such as point clouds)
+commonly represent scenes using fixed-size, unstructured points, and are ren-
+dered by rasterization using GPUs [5, 43, 45]. Although this is a simple and
+convenient solution to address topological changes, it often results in holes or
+outliers, leading to artifacts during rendering. To mitigate issues of discontinu-
+ity, researchers have proposed differentiable rendering based on points, utilizing
+points to model local domains [14,18,21,28,48,50,57]. Among these approaches,
+[1,23] employs neural networks to represent point features and utilizes 2D CNNs
+for rendering. Point-NeRF [50] models 3D scenes using neural 3D points and
+presents strategies
+
+
+==========================================================================================
+### 2404.06109_RevisingDensification  (pages=21, img=2404.06109_RevisingDensification_fig.png)
+==========================================================================================
+Revising Densification in Gaussian Splatting
+Samuel Rota Bulò, Lorenzo Porzi, and Peter Kontschieder
+Meta Reality Labs Zurich
+Ground Truth
+3DGS
+Ours
+Fig. 1: Densification is a critical component of 3D Gaussian Splatting (3DGS), and a
+common failure point. In this example (ground truth on the left) we show how 3DGS
+can fail (center) to add primitives to high-texture areas, like the grass in the bottom
+part of the pictures, producing large and blurry artifacts. Our approach (right) solves
+this issue by comprehensively revising densification in 3DGS.
+Abstract. In this paper, we address the limitations of Adaptive Den-
+sity Control (ADC) in 3D Gaussian Splatting (3DGS), a scene repre-
+sentation method achieving high-quality, photorealistic results for novel
+view synthesis. ADC has been introduced for automatic 3D point prim-
+itive management, controlling densification and pruning, however, with
+certain limitations in the densification logic. Our main contribution is
+a more principled, pixel-error driven formulation for density control in
+3DGS, leveraging an auxiliary, per-pixel error function as the criterion
+for densification. We further introduce a mechanism to control the total
+number of primitives generated per scene and correct a bias in the cur-
+rent opacity handling strategy of ADC during cloning operations. Our
+approach leads to consistent quality improvements across a variety of
+benchmark scenes, without sacrificing the method’s efficiency.
+Keywords: Gaussian Splatting · 3D reconstruction · Novel View Syn-
+thesis
+1
+Introduction
+High-quality, photorealistic scene modelling from images has been an important
+research area in computer vision and graphics, with plentiful applications in
+AR/VR/MR, robotics, etc. In the last years, this field has gained a lot of at-
+tention due to advances in Neural 3D scene representations, particularly Neural
+Radiance Fields (NeRFs) [17]. NeRFs take a new approach to 3D scene rep-
+resentation and rendering, by leveraging a combination of deep learning and
+arXiv:2404.06109v1 [cs.CV] 9 Apr 2024
+
+2
+Rota Bulò et al.
+volumetric rendering techniques for generating photorealistic images from novel
+viewpoints. By optimizing MLPs to map from spatial coordinates and viewing
+directions to density and colour fields, these models have demonstrated aston-
+ishing capabilities for capturing the complex interplay of light and geometry
+in a data-driven way. While highly efficient in terms of representation quality,
+the original NeRF representation relies on time-consuming sampling strategies
+and thus excludes applications with fast rendering requirements. With many
+advances in terms of the underlying representation, these models have been sig-
+nificantly optimized towards improved training time and scene representation
+fidelity. However, inference speed for high-resolution, novel view synthesis re-
+mains an ongoing limitation.
+More recently, 3D Gaussian Splatting (3DGS) [9] has been proposed as an
+alternative and expressive scene representation, enabling both high-speed, high-
+fidelity training of models and high-resolution, GPU rasterization-friendly ren-
+dering of novel views. Their core representation is an optimized set of (anisotropic)
+3D Gaussians, after being randomly distributed in 3D space, or systematically
+initialized at points obtained by Structure-from-Motion [20]. For obtaining a
+2D image, all relevant 3D primitives are efficiently rendered via splatting-based
+rasterization with low-pass filtering.
+In 3DGS, each 3D primitive is parameterized as a 3D Gaussian distribution
+(i.e., with position and covariance), together with parameters controlling its
+opacity and describing its directional appearance (typically spherical harmonics).
+The parameter optimization procedure is guided by a multi-view, photometric
+loss, and is interleaved with Adaptive Density Control (ADC), a mechanism con-
+trolling density management for 3D points by means of introducing or deleting
+3D primitives. ADC plays a critical role as it determines where to expand/shrink
+the scene representation budget for empty or over-reconstructed regions, respec-
+tively. Both growing and pruning operations are activated based on user-defined
+thresholds: Growing depends on the accumulated positional gradients of existing
+primitives and is, conditioned on the size of the Gaussians, executed by either
+splitting large primitives or by cloning smaller ones. Pruning is activated once
+the opacity falls below a provided threshold. While quite effective in practice,
+such density management strategies have several limitations. First, estimating
+a gradient magnitude-based threshold is rather non-intuitive and not robust to
+potential changes in the model, loss terms, etc. Second, there are cases where
+only few and large Gaussians are modeling high-frequency patterns like grass
+as shown in the middle of Fig. 1. Here, changes accumulated from positional
+gradients might remain very low and thus fail to trigger the densification mech-
+anism, which in turn leads to substantial scene underfitting. Finally, ADC lacks
+explicit control of the maximum number of Gaussians generated per scene. This
+has important, practical implications as uncontrolled growth might easily lead
+to out-of-memory errors during training.
+In this work we address the shortcomings of Adaptive Density Control pro-
+posed in the original 3D Gaussian splatting method. Our core contribution is
+a more principled, pixel-error driven formulation for density control in 3DGS.
+
+Revising Densification in Gaussian Splatting
+3
+We describe how 2D, per-pixel errors as e.g. derived from Structural Similarity
+(or any other informative objective function) can be propagated back as errors
+to contributing Gaussian primitives. In our solution, we first break down the
+per-pixel errors according to each Gaussian’s contribution, and in a camera-
+specific way. This allows us to track the maximum error per primitive for all
+views and across two subsequent ADC runs, yielding our novel, error-specific,
+and thus more intuitive decision criterion for densification. Our second contri-
+bution is correcting a bias introduced with the current form of opacity handling
+in ADC when conducting a primitive cloning operation. The original approach
+suggests to keep the same opacity for the cloned Gaussian, which however biases
+the alpha-compositing logic applied for rendering the pixel colors. Indeed, this
+procedure leads to an overall increase of opacity in the cloned region, preventing
+the model to correctly account for contributions of other primitives and thus
+negatively affecting the densification process. Our third contribution is a mech-
+anism for controlling the total number of primitives generated per scene and the
+maximum amount of novel primitives introduced per densification run. With this
+functionality, we can avoid undesired out-of-memory errors and better tune the
+method’s behaviour w.r.t. given hardware constraints. We extensively validate
+our contributions on standard benchmark datasets like Mip-NeRF 360 [1], Tanks
+and Temples [10], and Deep Blending [6]. Our experiments show consistent im-
+provements over different baselines including 3DGS [9] and Mip-Splatting [29].
+To summarize, our contributions are improving methodological shortcomings in
+3DGS’ Adaptive Density Control mechanism as follows:
+– We propose a principled approach that enables the guidance of the densifica-
+tion process according to an auxiliary, per-pixel error function, rather than
+relying on positional gradients.
+– We correct an existing, systematic bias from the primitive growing procedure
+when cloning Gaussians, negatively impacting the overall densification.
+– We present ablations and experimental evaluations on different, real-world
+benchmarks, confirming quantitative and qualitative improvements.
+1.1
+Related works
+Since it was presented in [9], 3DGS has been used in a remarkably wide set of
+downstream applications, including Simultaneous Localization and Mapping [8,
+16,24,30], text-to-3D generation [2,21,28], photo-realistic human avatars [11,13,
+19,32], dynamic scene modeling [15,22,25] and more [5,23,27]. However, only a
+handful of works like ours have focused on advancing 3DGS itself, by improving
+its quality or overcoming some of its limitations.
+In GS++ [7], Huang et al. present an improved approximation of the 3D-to-
+2D splatting operation at the core of 3DGS, which achieves better accuracy near
+image edges and solves some common visual artifacts. Spec-Gaussian [26] and
+Scaffold-gs [14] focus on improving view-dependent appearance modeling: the
+former by replacing spherical harmonics with an anisotropic spherical Gaussian
+appearance field; the latter by making all 3D Gaussian parameters, including
+
+4
+Rota Bulò et al.
+whether specific primitives should be rendered or not, dependent on view direc-
+tion through a small MLP. Mip-Splatting [29] tackles the strong artifacts that
+appear in 3DGS models when they are rendered at widely different resolutions
+(or viewing distances) compared to the images they were trained on. To do this,
+Yu et al. propose to incorporate a 3D filter to constrain the size of the 3D
+primitives depending on their maximal sampling rate on the training views, and
+a 2D Mip filter to mitigate aliasing issues. All these works adopt the original
+ADC strategy proposed in [9], and can potentially benefit from our improved
+approach, as we show for Mip-Splatting in Sec. 4.
+Only few concurrent works have touched on densification, while putting most
+of their focus on other aspects of 3DGS. Lee et al. [12] propose a quantization-
+based approach to produce more compact 3DGS representations, which includes
+a continuous sparsification strategy that takes both primitive size and opacity
+into account. GaussianPro [3] directly tackles related densification limitations
+as we explore in our work, filling the gaps from SfM-based initialization. They
+propose a rather complex procedure based on the progressive propagation of
+primitives along estimated planes, using patch-matching and geometric consis-
+tency as guidance. In contrast to our method, [3] focuses on fixing the quality of
+planar regions, instead of holistically improving densification. We also note that
+a fair comparison with their method on the standard Mip-NeRF 360 benchmark
+is not feasible at the time of submission, as the authors did not publicly share
+the improved SfM point cloud used in their experiments (see §5.2 of [3]).
+2
+Preliminaries: Gaussian Splatting
+Gaussian Splatting [9] revisits ideas from EWA splatting [33] and proposes to
+fit a 3D scene as a collection of 3D Gaussian primitives Γ := {γ1, . . . , γK} that
+can be rendered by leveraging volume splatting.
+Gaussian primitive. A Gaussian primitive γk := (µk, Σk, αk, f k) geometrically
+resembles a 3D Gaussian kernel
+ \ma th cal
+ 
+G_
+k(\ v ct x)\c
+o lo n eqq
+ \exp \left (-\frac {1}{2}(\vct x-\vct \mu _k)^\top \mat \Sigma _k^{-1}(\vct x-\vct \mu _k)\right ) 
+centered in µk ∈R3 and having Σk as its 3×3 covariance matrix. Each primitive
+additionally entails an opacity factor αk ∈[0, 1] and a feature vector f k ∈Rd
+(e.g. RGB color or spherical harmonics coefficients).
+Splatting. This is the operation of projecting a Gaussian primitive γk to a camera
+pixel space via
+
+
+==========================================================================================
+### 2404.09591_3DGS_MCMC  (pages=16, img=2404.09591_3DGS_MCMC_p1.png)
+==========================================================================================
+3D Gaussian Splatting as
+Markov Chain Monte Carlo
+Shakiba Kheradmand1, Daniel Rebain1, Gopal Sharma1,
+Weiwei Sun1, Yang-Che Tseng1, Hossam Isack2, Abhishek Kar2,
+Andrea Tagliasacchi3, 4, 5, Kwang Moo Yi1
+1University of British Columbia, 2Google Research,
+3Google DeepMind, 4Simon Fraser University, 5University of Toronto
+https://ubc-vision.github.io/3dgs-mcmc
+Abstract
+While 3D Gaussian Splatting has recently become popular for neural rendering,
+current methods rely on carefully engineered cloning and splitting strategies for
+placing Gaussians, which can lead to poor-quality renderings, and reliance on a
+good initialization. In this work, we rethink the set of 3D Gaussians as a random
+sample drawn from an underlying probability distribution describing the physical
+representation of the scene—in other words, Markov Chain Monte Carlo (MCMC)
+samples. Under this view, we show that the 3D Gaussian updates can be converted
+as Stochastic Gradient Langevin Dynamics (SGLD) update by simply introducing
+noise. We then rewrite the densification and pruning strategies in 3D Gaussian
+Splatting as simply a deterministic state transition of MCMC samples, removing
+these heuristics from the framework. To do so, we revise the ‘cloning’ of Gaussians
+into a relocalization scheme that approximately preserves sample probability. To
+encourage efficient use of Gaussians, we introduce a regularizer that promotes the
+removal of unused Gaussians. On various standard evaluation scenes, we show that
+our method provides improved rendering quality, easy control over the number of
+Gaussians, and robustness to initialization.
+1
+Introduction
+Neural Radiance Fields (NeRF) have been at the forefront of these advancements, providing impres-
+sive results through implicit modeling via neural networks, the landscape is further evolving with the
+introduction of 3D Gaussian splatting.
+Neural rendering has seen a significant advancement with the introduction of Neural Radiance
+Fields (NeRF) [28], and more recently, 3D Gaussian Splatting (3DGS) [19]. 3D Gaussian Splatting
+became highly popular thanks to its speed and efficiency—it can render high-quality images in a
+fraction of the time required by NeRF. Unsurprisingly, various extensions to 3D Gaussian Splatting
+have been proposed, such as extending 3D Gaussians to dynamic scenes [43, 41], making them robust
+to aliasing effects [48, 42], and generative 3D content creation [52, 49, 36].
+However, despite the various extensions, a common shortcoming of these methods is that they mostly
+rely on the same initialization and densification strategy for placing the Gaussians: either the one
+originally suggested by [19], or other recently proposed variations [4]. Specifically, they rely on
+carefully engineered cloning and splitting heuristics for placing Gaussians [19, see “adaptive density
+control”]. Depending on the state of each Gaussian, they are cloned, split, or pruned, which is
+the primary way to control the number of Gaussians within the 3DGS representation. Moreover,
+38th Conference on Neural Information Processing Systems (NeurIPS 2024).
+arXiv:2404.09591v3 [cs.CV] 12 Feb 2025
+
+Gaussians are regularly ‘reset’ by setting their opacities to small values to remove floaters in the
+representations. This heuristic-based approach requires multiple hyperparameters to be carefully
+tuned and, as we will show later on in the paper, can fail in some scenes.
+These heuristics further lead to various problems. It causes the method to heavily rely on good initial
+point clouds for it to work well, especially when applied to real-world scenes. It is also nontrivial to
+estimate how many 3D Gaussians will be used for a given scene from just the hyperparameters, making
+it difficult to control the computation and memory budget in advance without affecting reconstruction
+quality during inference time. Concurrent works [10, 9] thus focus on having better initialization to
+solve the former, or study the latter problem [4]. However, even these recent concurrent solutions still
+rely on heuristics, and they do not always generalize well. In some cases, this leads to sub-optimal
+placement of Gaussians resulting in poor quality renderings and wasted compute.
+To solve this problem, we take a step back and rethink the set of 3D Gaussians as random samples—
+more specifically, as Markov Chain Monte Carlo (MCMC) samples—drawn from an underlying
+probability distribution that is proportional to how faithfully these Gaussians reconstruct the scene.
+With this considered, we show in Section 3.2 that the conventional 3D Gaussian Splatting update
+rule is very similar to a Stochastic Gradient Langevin Dynamics update [3, 20], where the only
+term missing is a noise term that promotes the exploration of samples. We thus reformulate 3D
+Gaussian Splatting into an SGLD framework, an MCMC algorithm, which naturally explores the
+scene landscape, and samples Gaussians that are effective in reproducing the scene faithfully. It is
+important to note that while we assume an underlying distribution, this distribution does not need to
+be explicitly modelled, as the Gaussians themselves are already representing it.
+Given this view, the heuristics involved in the densification and pruning of Gaussians, as well
+as resetting their opacities, are no longer necessary. 3D Gaussians are simply the samples used
+for MCMC, thus exploring their sample locations is naturally dealt through SGLD updates. Any
+modification to the set of Gaussians, including increasing or decreasing their cardinality, can be
+reformulated as a deterministic state transition—relocation of Gaussians—where we move our sample
+(the set of Gaussians) to another sample (another set of Gaussians with different configuration).
+Importantly, to minimally disturb the MCMC sampling chain, we make sure that the two states,
+before and after the move, are of similar probability. This implies that the training loss value
+does not change as we alter combinatorial properties, such as the number of Gaussians within the
+representation, preventing the training process from becoming unstable. This simple strategy, under
+the MCMC framework, is enough to provide renderings of high quality, beyond what is provided by
+the conventional heuristics.
+In more detail, we propose to relocate Gaussians using a ‘cloning’ strategy, where we move ‘dead’
+Gaussians (with low opacity) to where other ‘live’ Gaussians exist, but in a way that has minimal
+impact on the rendering, and thus on the probability distribution of the Gaussians. In other words, we
+set the composition of the cloned Gaussians to render the same images as before cloning. While a
+modification of cloning [4] was recently suggested as a way to ensure the rendering is equal at the
+Gaussian centers, we show that this is not enough—the whole Gaussian must be considered. Without
+our careful strategy MCMC sampling provides sub-optimal training. Finally, to encourage efficient
+use of the Gaussians, we apply L1-regularization. As the extent of a Gaussian is defined both the
+opacity and the scale of Gaussians, we apply our regularization to both of them. This effectively
+encourages them to ‘disappear’ if unnecessary.
+We evaluate our method on standard scenes evaluated in [19] (NeRF Synthetic [28], MipNeRF 360 [2],
+Tank & Temples [22], Deep Blending [16]), as well as the OMMO [27] dataset that exhibit large
+scene context. With our method, one does not need to initialize the Gaussians carefully. Our method
+provides high-quality renderings, regardless of whether Gaussians are initialized randomly or from
+Structure-from-Motion points.
+To summarize, our contributions are:
+• we reveal the link between 3DGS and MCMC sampling, leading to a simpler optimization;
+• we replace the heuristics in 3D Gaussian Splatting with a principled relocation strategy;
+• we introduce regularizer to encourage parsimonious use of Gaussians;
+• we improve robustness to initialization;
+• we provide higher rendering quality.
+2
+
+2
+Related Work
+Novel-view synthesis via Neural Radiance Fields. Since the introduction of Neural Radiance Fields
+(NeRF) [28], it has become extremely popular for building and representing 3D scenes. The core
+idea behind the method is to learn a neural field that encodes radiance values in the modeling volume,
+which is then used to render via volume rendering with light rays. Since its first introduction, it has
+been extended to deal with few views [47], to generalize to new scenes without training [34, 47], to
+dynamic [12] and unbounded scenes [2], to roughly posed images [39], to speed up training [29, 46],
+and even to biomedical applications [7, 51] to name a few. These extensions are by no means an
+exhaustive list and demonstrate the impact that NeRF had. For a more in-depth survey we refer the
+readers to [13].
+Amongst works on NeRF, most relevant to ours is [20], which also employs Stochastic Gradient
+Langevin Dynamics (SGLD) [3] to identify the most promising samples to train with, and allow
+faster training convergence. While we ground ourselves in the same Markov Chain Monte Carlo
+(MCMC) paradigm based on SGLD, the application context is entirely different. In their work, SGLD
+is used to perform a form of ‘soft mining’, so to accelerate NeRF training. In our case, we are instead
+rethinking 3DGS as samples from an underlying distribution that represents the 3D scene.
+Gaussian Splatting. 3D Gaussian Splatting (3DGS) [19] is a recent alternative to NeRF that rely
+on differentiable rasterization instead of volume rendering. In a nutshell, instead of querying points
+along the ray, it stores Gaussians, which can then be rasterized into each view to form images. This
+rasterization operation is highly efficient, as instead of querying hundreds of points along a light
+ray to render a pixel, one can simply rasterize the (few) Gaussians associated with a given pixel.
+Therefore, Gaussian Splatting allows 1080p images to be rendered at 130 frames per second on
+modern GPUs, which catalyzed the research community.
+Unsurprisingly, various extensions immediately followed. These include ones that focus on removing
+aliasing effects [48, 42], allowing reflection [44] or capture of dynamic scenes [41, 43], 3D content
+generation [36, 52, 49], controllable 3D avatars [23], and prediction of 3D representations from
+few-shot images [5]. Methods that focus on more compact representation, thus suitable for rendering
+on mobile devices, have also been proposed. These methods prune/cluster Gaussians, adaptively
+selecting the number of spherical harmonics to encode color [32], and quantize the parameters of the
+representation [31]. All of these extensions are extremely recent, demonstrating the large interest
+sparked within the community. With
+
+
+==========================================================================================
+### 2404.10484_AbsGS  (pages=16, img=2404.10484_AbsGS_fig.png)
+==========================================================================================
+AbsGS: Recovering Fine Details for 3D Gaussian Splatting
+Zongxin Ye∗
+National University of Defense
+Technology
+Changsha, China
+yezongxin21@nudt.edu.cn
+Wenyu Li∗
+National University of Defense
+Technology
+Changsha, China
+wenyu18@nudt.edu.cn
+Sidun Liu
+National University of Defense
+Technology
+Changsha, China
+liusidun@nudt.edu.cn
+Peng Qiao
+National University of Defense
+Technology
+Changsha, China
+pengqiao@nudt.edu.cn
+Yong Dou
+National University of Defense
+Technology
+Changsha, China
+yongdou@nudt.edu.cn
+(d) Ground Truth Image
+(a) Rendered
+(b) Point Cloud
+(c) Ellipsoid
+3D-GS
+Ours
+SSIM: 0.708
+PSNR:22.18
+LPIPS:0.218
+Points: 3636448
+Memory: 901.8MB 
+Points: 3794006
+Memory: 940.9MB
+SSIM: 0.673
+PSNR:21.70
+LPIPS:0.273
+Figure 1: We reveal that the original adaptive density control strategy in 3D Gaussian Splatting (3D-GS) has the flaw of
+gradient collision which results in degradation, and propose homodirectional gradient as the guidance for densification. (a)
+Our method recovers fine details and achieves higher quality novel view synthesis results. SSIM, PSNR, LPIPS are inset. (b) Our
+proposed method yields more reasonable distribution of Gaussion points with comparable number of Gaussians and memory
+consumption with 3D-GS. (c) By adopting our method, the large Gaussians in over-reconstructed regions that lead to blur are
+eliminated.
+ABSTRACT
+3D Gaussian Splatting (3D-GS) technique couples 3D Gaussian
+primitives with differentiable rasterization to achieve high-quality
+novel view synthesis results while providing advanced real-time
+rendering performance. However, due to the flaw of its adaptive
+density control strategy in 3D-GS, it frequently suffers from over-
+reconstruction issue in intricate scenes containing high-frequency
+details, leading to blurry rendered images. The underlying rea-
+son for the flaw has still been under-explored. In this work, we
+present a comprehensive analysis of the cause of aforementioned
+artifacts, namely gradient collision, which prevents large Gaussians
+in over-reconstructed regions from splitting. To address this is-
+sue, we propose the novel homodirectional view-space positional
+gradient as the criterion for densification. Our strategy efficiently
+identifies large Gaussians in over-reconstructed regions, and re-
+covers fine details by splitting. We evaluate our proposed method
+on various challenging datasets. The experimental results indi-
+cate that our approach achieves the best rendering quality with
+reduced or similar memory consumption. Our method is easy to
+∗Both authors contributed equally to this research.
+implement and can be incorporated into a wide variety of most
+recent Gaussian Splatting-based methods. We will open source our
+codes upon formal publication. Our project page is available at:
+https://ty424.github.io/AbsGS.github.io/
+KEYWORDS
+Novel View Synthesis, 3D Gaussian Splatting, Point-based Radiance
+Field, 3D reconstruction
+1
+INTRODUCTION
+High quality novel view synthesis from multiple unordered im-
+ages is a long-standing problem for 3D vision researchers. Recent
+advances on neural rendering have revolutionized this task by learn-
+ing a neural implicit representation instead of explicit point clouds
+or meshes. One of the most effective approach with in this para-
+digm has been reconstructing a set of 3D Gaussian primitives of
+the scene[17]. Coupled with splat-based rasterization, 3D Gauss-
+ian Splatting (3D-GS)[17] produces compelling real-time render-
+ing results with unprecedented fidelity. The remarkable perfor-
+mance of 3D-GS is closely tied to the adaptive density control
+arXiv:2404.10484v1 [cs.CV] 16 Apr 2024
+
+strategy. Initialized solely from a set of sparse point clouds de-
+rived from Structure from Motion (SfM), 3D-GS gradually popu-
+late empty areas by split/cloning existing Gaussians, ultimately
+covering whole scenes with compact and precise representation.
+There have been many interests on extending 3D-GS to other ap-
+plications, e.g., dynamic modeling[9, 29, 37, 42], single-view or
+text-to-view generation[30, 39, 43, 44], mesh extraction[12, 15, 32],
+SLAM[8, 14, 40] and so on.
+However, applying 3D Gaussian Splatting to complex scenes en-
+counters the issue of over-reconstruction, where regions containing
+high frequency details are covered by only a small number of large
+Gaussians. Consequently, the rendering results become blurry and
+cannot accurately reflect the appearance and geometry of the scene
+as validated in Fig. 1. The cause of over-reconstruction is that the
+adaptive density control strategy cannot effectively identify large
+Gaussians in over-reconstructed areas and split them to represent
+details. The deficiency of the strategy has not been well explored.
+In this paper, we find that the deficiency of the original strat-
+egy lies in its failure to consider the negative impact of pixel-wise
+sub-gradient directions on the identification of large Gaussians in
+over-reconstructed areas. Specifically, original 3D-GS proposes to
+use the view-space positional gradient to determine whether if a
+large Gaussian requires split. We observe that for each Gaussian
+primitive the pixel-wise sub-gradients of the view-space positional
+gradient may have different directions. Therefore, the sub-gradients
+cancel each other out during the process of summation, namely gra-
+dient collision. Especially for large Gaussians covering many pixels,
+maintaining consistent gradient directions for each pixel becomes
+exceptionally challenging which results in a small-scale view-space
+positional gradient. Consequently, the magnitude of view-space po-
+sitional gradient fails to surpass the densification threshold, thereby
+hindering the split of over-reconstructed Gaussians.
+Based on the above analysis, we propose homodirectional view-
+space positional gradient as criteria for densification. Homodirec-
+tional view-space positional gradient is designed as the sum of the
+absolute values of pixel-wise sub-gradients covered by a Gaussian
+primitive, based on the rationale that the representation quality is
+solely dependent on the magnitude of the gradient, irrespective of
+its direction. The absolute operation can mitigate the influence of
+gradient direction while retaining the influence of gradient magni-
+tude. The homodirectional view-space positional gradient therefore
+avoids the gradient collision and facilitates the split of large Gaus-
+sians in over-reconstructed regions that were unrecognized by
+original strategy. An overview of our method (dubbed as AbsGS) is
+shown in Fig. 2.
+We evaluate AbsGS on previously published real-world datasets.
+The experiment results show that our method consistently yields
+high quality novel view synthesis and exhibits better results on
+PSNR, SSIM, and LPIPS. At the same time, our method keeps similar
+or less memory consumption compared with 3D-GS. From the
+visualization of Gaussian ellipsoids, we observe that our method
+eliminates over-reconstruction areas and recovers fine details while
+3D-GS fails and leads to blur, as illustrated in Fig. 1. In summary,
+our contributions are as follows:
+• First, we analyze the deficiency of the original strategy that
+results in over-reconstruction is caused by gradient collision.
+• Second, a straightforward yet effective strategy is proposed
+to utilize homodirectional view-space positional gradient as
+guidance for densification throughout training.
+• Third, our proposed method can effectively eliminate large
+Gaussians in over-reconstructed regions, and achieves better
+novel view synthesis quality with similar or less memory
+consumption.
+2
+RELATED WORKS
+Neural Implicit 3D Representation. In contrast to widely adopted
+classic explicit 3D representaiton, e.g., point cloud, voxels and
+mesh, more recent learning-based neural implicit representations
+do not require complex regularization, attract more attention and
+achieve more accurate rendering results. As a revolutionary pi-
+oneer, Neural Radiance Fields (NeRF)[20] couples differentiable
+ray-marching with continuous radiance field to enable end-to-end
+optimization from images. NeRF has been broadly receiving massive
+interest towards more photo-realistic novel view synthesis[1, 2, 4]
+and its follow-up methods have been providing impressive results
+to other applications, e.g, dynamic modeling[11, 24, 25], surface
+reconstruction[35, 36, 38, 41], 3D asset generation[16, 26, 34]. How-
+ever, with expensive volumetric ray-marching which densely sam-
+ple point locations along the camera rays, NeRF is inefficient for
+training at the beginning of design. Though notable NeRF-variants
+[5, 10, 21, 27] have been proposed to alleviate the training/inference
+computation burden by introducing spatial datastructures to store
+neural features instead of large MLPs, the plenty of sampling and
+queries can not be avoided due to the inherit requirement of volu-
+metric rendering. Instead, point based representations with learn-
+able attributes support more efficient forward rasterization for real-
+time rendering. More recently, 3D Gaussian Splatting (3D-GS)[17],
+revisit fast point-based rendering engine with learnable Gaussian
+primitives. Starting from initial sparse point clouds from Structure
+from Motion (SfM)[23, 28, 33], the optimization procedure moves
+the Gaussians to correct positions, creates new Gaussians to cover
+empty space, removes invalid Gaussians and finally produces a
+set of Gasussions to precisely represent underlying scenes. As an
+unstructured and discrete representation that supports forward
+rasterzation, it fundamentally avoid the shortcomings of expensive
+sampling and queries and provide real-time rendering performance,
+along with high quality for novel-view synthesis. Nowadays there
+have been many subsequent extensions of 3D Gaussian splatting,
+e.g, surface reconstruction[6, 12, 15], generation[7, 22, 31, 39] and
+dynamic modeling[19, 37].
+3
+METHOD
+In this section, we first review the basic background of 3D-GS in
+Section 3.1; then, we describe the gradient collision phenomenon
+that prevent large Gaussions in over-reconstructed regions from
+splitting in Section 3.2; finally, we propose the homodirectional gra-
+dient as guidance for splitting and present the details in Section 3.3.
+3.1
+Preliminary
+3D Gaussian Splatting (3D-GS)[17] proposes to represent scenes by
+a set of learnable 3D Gaussians 𝐺0,𝐺1, ...,𝐺𝑁. Each 3D Gaussian
+primitive 𝐺𝑖is explicitly parameterized via center position 𝜇3𝑑
+𝑖
+and
+
+𝜇𝜇i
+3𝑑𝑑
+Splatting
+ෝ𝑔𝑔𝑖𝑖
+Densify
+𝑔𝑔𝑖𝑖
+∑||𝑔𝑔𝑖𝑖||
+𝑛𝑛
+< 𝜏𝜏𝑔𝑔𝑔𝑔𝑔𝑔𝑔𝑔
+∑||ෞ
+𝑔𝑔𝑖𝑖||
+𝑛𝑛
+> 𝜏𝜏𝑔𝑔𝑔𝑔𝑔𝑔𝑔𝑔
+𝜇𝜇i
+ෝ𝑔𝑔𝑖𝑖=
+෍
+𝑗𝑗
+𝑚𝑚
+𝜕𝜕𝐿𝐿𝑗𝑗
+𝜕𝜕𝜇𝜇𝑖𝑖,𝑥𝑥
+, ෍
+𝑗𝑗
+𝑚𝑚
+𝜕𝜕𝐿𝐿𝑗𝑗
+𝜕𝜕𝜇𝜇𝑖𝑖,𝑦𝑦
+(a) Splatting
+(b) 3D-GS
+(c)AbsGS
+𝑔𝑔𝑖𝑖=
+෍
+𝑗𝑗
+𝑚𝑚
+𝜕𝜕𝐿𝐿𝑗𝑗
+𝜕𝜕𝜇𝜇𝑖𝑖,𝑥𝑥
+, ෍
+𝑗𝑗
+𝑚𝑚
+𝜕𝜕𝐿𝐿𝑗𝑗
+𝜕𝜕𝜇𝜇𝑖𝑖,𝑦𝑦
+Figure 2: Overview of our method. (a) The splat-based rendering technique project Gaussian 𝐺𝑖with mean position 𝜇3𝑑
+𝑖
+to 2D
+coordinate 𝜇𝑖in pixel-space. The number of covered pixels by Gaussian 𝐺𝑖is 𝑚. (b) By backpropagating, the view-space gradient
+𝑔𝑖of Gaussian 𝐺𝑖under viewpoint 𝑘is caculated as the sum of all view-space gradients of pixels that are covered by 𝐺𝑖. Since the
+gradients 𝜕𝐿𝑗
+𝜕𝜇𝑖have different directions, the overall sum 𝑔𝑖will have a small scale, which do not satisfy the gradient threshold
+for densification. (c) Motivated by above analysis, we redesign densitifaction scheme by taking the absolute value of each
+component | 𝜕𝐿𝑗
+𝜕𝜇𝑖,𝑥| and | 𝜕𝐿𝑗
+𝜕𝜇𝑖,𝑦| before summing. This enables to identify large Gaussians in over-reconstructed regions for split.
+(a) GT
+(b) Rendered
+(c) L1
+(d) Gradients
+Figure 3: We analyze gradient collision for view-space posi-
+tional gradient, by optimizing single Gaussian to fit a image.
+We show the x-axis direction of pixel-wise gradient in (d),
+where red represents positive and green represents negative.
+full 3D covariance matrix Σ3𝑑
+𝑖:
+𝐺𝑖(𝑥) = 𝑒−1
+2 (𝑥−𝜇3𝑑
+𝑖)𝑇(Σ3𝑑
+𝑖)−1(𝑥−𝜇3𝑑
+𝑖)
+(1)
+3D Gaussian primitive also has two additional learnable attributes:
+opacity 𝑜𝑖and spherical harmonics coefficients 𝑆𝐻𝑖to model view
+dependent color. To render an image, the 3D Gaussian primitive 𝐺𝑖
+is first transformed into the camera coordinate and projected onto
+image plane, resulting the 2D Gaussian 𝐺2𝑑
+𝑖
+with center position 𝜇𝑖
+and 2D covariance matrix Σ2𝑑
+𝑖:
+𝐺2𝑑
+𝑖(𝑥) = 𝑒−1
+2 (𝑥−𝜇𝑖)𝑇(Σ2𝑑
+𝑖)−1(𝑥−𝜇𝑖)
+(2)
+then differentiable alpha blending is employed to integrate colors
+from front-to-back:
+𝑐(𝑥) =
+N
+∑︁
+𝑖
+𝑐𝑖𝛼𝑖
+𝑖−1
+Ö
+𝑗=1
+(1 −𝛼𝑗)
+(3)
+𝛼𝑖= 𝜎(𝑜𝑖) × 𝐺2𝑑
+𝑖(𝑥)
+(4)
+where 𝜎(·) is the sigmoid function and N is the number of Gaus-
+sians that participate in alpha blending. 3D-GS initializes 3D Gaus-
+sians with the free sparse point clouds produced from SfM[28],
+and
+
+
+==========================================================================================
+### 2406.15643v1_Taming3DGS  (pages=13, img=2406.15643v1_Taming3DGS_fig.png)
+==========================================================================================
+TAMING 3DGS: HIGH-QUALITY RADIANCE FIELDS WITH
+LIMITED RESOURCES
+Saswat Subhajyoti Mallick∗1
+Rahul Goel∗3
+Bernhard Kerbl1
+Francisco Vicente Carrasco1
+Markus Steinberger2
+Fernando De La Torre1
+1Carnegie Mellon University
+2Graz University of Technology
+3International Institute of Information Technology, Hyderabad
+ABSTRACT
+3D Gaussian Splatting (3DGS) has transformed novel-view synthesis with its fast, interpretable,
+and high-fidelity rendering. However, its resource requirements limit its usability. Especially
+on constrained devices, training performance degrades quickly and often cannot complete due to
+excessive memory consumption of the model. The method converges with an indefinite number of
+Gaussians—many of them redundant—making rendering unnecessarily slow and preventing its usage
+in downstream tasks that expect fixed-size inputs.
+To address these issues, we tackle the challenges of training and rendering 3DGS models on a budget.
+We use a guided, purely constructive densification process that steers densification toward Gaussians
+that raise the reconstruction quality. Model size continuously increases in a controlled manner towards
+an exact budget, using score-based densification of Gaussians with training-time priors that measure
+their contribution.
+We further address training speed obstacles: following a careful analysis of 3DGS’ original pipeline,
+we derive faster, numerically equivalent solutions for gradient computation and attribute updates,
+including an alternative parallelization for efficient backpropagation. We also propose quality-
+preserving approximations where suitable to reduce training time even further. Taken together, these
+enhancements yield a robust, scalable solution with reduced training times, lower compute and
+memory requirements, and high quality. Our evaluation shows that in a budgeted setting, we obtain
+competitive quality metrics with 3DGS while achieving a 4–5× reduction in both model size and
+training time. With more generous budgets, our measured quality surpasses theirs. These advances
+open the door for novel-view synthesis in constrained environments, e.g., mobile devices.
+Keywords Rasterization · Reconstruction · Interest point and salient region detections · Scene understanding
+1
+Introduction
+Novel View Synthesis (NVS) predicts unseen views from multi-view datasets, enabling users to freely explore 3D
+content from as little as a handful of easy-to-obtain photographs. State-of-the-art NVS solutions can yield photo-realistic
+results that produce high-quality user experiences for e-commerce, entertainment, and immersive telecommunication.
+Recently, NVS methods have also emerged as a powerful conditioning tool for high-quality 3D surface reconstruction.
+The extensive research body on NVS covers various methodologies, ranging from image- and mesh-based to purely
+neural representations. Within this domain, 3D Gaussian Splatting (3DGS) has been gaining popularity, since it
+combines high-quality image synthesis, fast real-time rendering, and amenable training times [1]. 3DGS leverages
+an explicit, point-based scene representation, a differentiable rendering pipeline, and GPU-optimized rasterization to
+achieve photo-realistic image synthesis at high frame rates. However, its optimization procedure is difficult to control;
+this process—although it includes several heuristics—is often wasteful and can lead to excessive memory overheads.
+Starting from a sparse set of input points, many of the eventual optimized primitives are redundant: Gaussians often
+make only minor contributions in areas where fewer would suffice, while other regions remain under-reconstructed and
+∗Equal contribution
+arXiv:2406.15643v1 [cs.CV] 21 Jun 2024
+
+Taming 3DGS: High-Quality Radiance Fields with Limited Resources
+3DGS
+Ours
+Size:1,450 MB
+#Gaussians: 6 M
+PSNR: 25.2 dB
+47 mins 
+#Gaussians: 0.8 M
+PSNR: 24.97 dB
+Size:196 MB 
+9 mins 
+0
+1
+2
+3
+4
+5
+6
+#Gaussians (M)
+Training Garden
+25.5
+26.0
+26.5
+27.0
+27.5
+PSNR (dB)
+Ours
+3DGS
+Mini-Splaing*
+C3DGS
+R-VQ
+Papantonakis et al. (2024)
+Figure 1: Our method makes 3DGS optimization fast and flexible, achieving high rendering quality on a budget. Left
+and middle: model size and training time are reduced by more than 5×. Right: Our method produces models with an
+exact, user-specified target size, surpassing 3DGS quality as the target increases.
+blurry. This inefficient distribution of Gaussian primitives impacts not only training time but also the practical aspects
+of the representation. A typical 3DGS model can yield several millions of Gaussians for a single unbounded scene
+and require more than one gigabyte of disk space. Such substantial memory usage and geometry workload complicate
+real-time rendering on low-end devices, preventing application in constrained settings like network streaming or AR/VR
+on embedded systems.
+In addition to being excessive, the memory consumption of 3DGS is also hard to predict: even when starting from the
+same number of input points, the difference between two reconstructed scenes w.r.t. the number of Gaussians (and thus
+required storage) can be as much as one order of magnitude. This hinders its usability for downstream applications that
+require a fixed number of inputs (e.g., classifier networks), preventing them from exploiting an otherwise efficient and
+explicit representation. Similarly, training time—although acceptable—fluctuates strongly and overall fails to reflect
+the much higher rendering speed of 3DGS.
+In order to tame 3DGS, we propose a strict moderation in the Gaussian densification process to provide close control
+over its resource consumption (see Fig. 1). Given a user-defined model size, we ensure a deterministic training schedule
+that can yield the exact number of desired Gaussians. To achieve high quality with fewer primitives (less than 5× on
+average), we tackle the suboptimal distribution and high redundancy of the original method. We propose an alternate
+densification algorithm, guided by a flexible, score-based sampling of Gaussian primitives. Our suggested scoring
+scheme for high quality at a budget combines loss-relevant components that we collect per Gaussian, and across multiple
+sampled training views. Densification occurs according to the pre-defined budget in the vicinity of the top-scoring
+Gaussians. In contrast to previous work, our densification uses a purely constructive schedule: we do not require
+substantial pruning or culling of Gaussians during training. Therefore, we avoid unnecessary peaks in the optimization
+that could violate the user’s hardware or budget constraints.
+Redundancy in 3DGS is not limited to its eventual primitive distribution. Therefore, we closely analyze the time cost
+and quality tradeoff for individual steps in the training pipeline and propose alternative, more efficient substitutes. This
+includes revisiting the parallelization opportunities of backpropagation, which we change from a per-pixel to a per-splat
+approach. We achieve a significant speedup of 4–5× on average (see Fig. 1), with training times reduced to just a few
+minutes on consumer-grade hardware. Our contributions to taming 3DGS can thus be summarized as follows:
+1. A purely constructive, budget-constrained optimization, enabling full control over model size and resources.
+2. A flexible framework for score-based densification, allowing for use case-specific behavior and prioritization,
+e.g., by indicating important regions of interest.
+3. Analysis and significant speedup of relevant training steps, using both equivalent and approximate substitute
+methods.
+2
+Related work
+An extensive body of previous work focuses on novel-view synthesis: we first provide a brief overview of the most
+common approaches to this problem, before delving into solutions that focus specifically on raising the efficiency and
+portability of 3D Gaussian Splatting. Finally, we discuss point cloud downsampling approaches, from which we draw
+inspiration in our score-based densification.
+2
+
+Taming 3DGS: High-Quality Radiance Fields with Limited Resources
+l1
+edges
+,
+,
+Weighted 
+Sampling 
+Set of Rendered 
+Views
+Pixel Scores
+Gaussians (G)
+vN
+Sv1
+SvN
+v1
+Gaussian Scores (SG)
+Budget
+Sampled Gaussians
+Densiﬁcation
+Clone
+Split
+Gradient
+Pixel Score
+Gaussian 
+Properties
+Sg = Σ F( 
+)
+(a) Score-based Sampling for Densification
+0
+3
+6
+9
+12
+15
+Training iterations (1000)
+0.2
+0.4
+0.6
+0.8
+1.0
+Normalized Gaussian Primitive Count
+3DGS
+Our Schedule
+(b) Predictable Growth
+Figure 2: Overview of our method. (a) We propose a systematic redesign of 3DGS densification. To select Gaussians to
+densify, we sample training views and compute per-pixel saliency. A scoring function F combines gradient, saliency,
+and primitive properties into a per-Gaussian score Sg. (b) The addition of new Gaussians follows a predictable schedule.
+We follow a growth curve that mimics 3DGS’ behavior and can be fitted to yield any desired model size after training.
+Novel-View Synthesis. Previous work has explored a wide range of solutions for reconstructing or predicting the
+appearance of scenes, ranging from small-scale models [2, 3, 4] to unbounded environments [5, 6, 7]. In contrast,
+Neural Radiance Fields (NeRFs) [8] use an implicit representation, which is trained using gradient descent to recover a
+volumetric, continuous radiance field. While the initially proposed method was limited to single objects—taking over a
+day to process them—several follow-up works raised the scope and speed of NeRF scene reconstruction [9, 10, 11, 12].
+To address the high rendering times, voxel-based representations [13, 14] have been proposed to complement or replace
+select components of the NeRF architecture.
+Significant breakthroughs for both training and rendering performance were marked by the use of hash grids [15] and
+space warping [16], at the cost of introducing quality caps. State-of-the-art NeRF-based techniques [17, 18, 19, 20, 21]
+are capable of reconstructing unbounded scenes with high quality and render at interactive frame rates, however, training
+them requires significant time and compute effort. The recently introduced 3D Gaussian Splatting (3DGS) uses an
+initial point cloud—a common side product of calibration—and converts it to optimizable 3D Gaussian primitives [1].
+3DGS achieves high quality and extremely fast rendering; however, it suffers from exorbitant, unpredictable storage
+demands and fluctuating training times, making it a poor choice for performing novel-view synthesis at a budget.
+3D Gaussian Splatting and Compression. Several recent works have managed to considerably reduce the on-disk
+storage requirements of 3DGS. Compressing a model’s feature space is a widely adopted technique [22, 23]; the
+parameters of the Gaussians (geometry, color, opacity) can be clustered and indexed using codebooks. This reduces
+the compute and storage footprint per primitive, alleviating total memory consumption without significant quality
+degradation. Niedermayr et. al. [24] follow a similar recipe, but use thorough, sensitivity-aware clustering on Gaussian
+parameters, followed by a quantization-aware fine-tuning and entropy encoding. Fan et. al. [25] weight Gaussians
+on their volume and opacity to prune the less significant ones, followed by distillation from synthetic (pseudo-)views
+and quantization of parameters. Papantonakis et. al. [26] cull Gaussian primitives based on their spatial density and
+adaptively prune view-dependent color coefficients on demand.
+While these methods are effective in reducing the storage requirements of 3DGS, they do little to make the process
+more controllable. Furthermore, although several approaches consider the decimation of Gaussian primitives, they
+usually cause modest reductions of ≈2×. Other aspects of previously proposed on-disk compression techniques, such
+as code-booking or entropy minimization, are directly compatible with our method,
+
+
+==========================================================================================
+### 2411.10133_EfficientDensityControl  (pages=10, img=2411.10133_EfficientDensityControl_fig.png)
+==========================================================================================
+Efficient Density Control for 3D Gaussian Splatting
+Xiaobin Deng
+Changyu Diao*
+Min Li
+Ruohan Yu
+Duanqing Xu*
+Zhejiang University
+{dengxiaobin, dcy, lmin, yuruohan, xdq}@zju.edu.cn
+3DGS
+Ours
+GT
+PSNR: 30.71
+FPS: 144
+Num: 3.3M
+PSNR: 32.36
+FPS: 364
+Num: 1.5M
+Figure 1. By improving adaptive density control of 3DGS [11], our EDC achieves superior rendering quality while using less Gaussians.
+Benefiting from Long-Aixs Split, we successfully recover details of the ceiling lights and smoke detectors in the drjohnson [9] scene.
+Abstract
+3D Gaussian Splatting (3DGS) has demonstrated outstand-
+ing performance in novel view synthesis, achieving a bal-
+ance between rendering quality and real-time performance.
+3DGS employs Adaptive Density Control (ADC) to increase
+the number of Gaussians. However, the clone and split op-
+erations within ADC are not sufficiently efficient, impacting
+optimization speed and detail recovery. Additionally, over-
+fitted Gaussians that affect rendering quality may exist, and
+the original ADC is unable to remove them. To address
+these issues, we propose two key innovations: (1) Long-
+Axis Split, which precisely controls the position, shape, and
+opacity of child Gaussians to minimize the difference be-
+fore and after splitting. (2) Recovery-Aware Pruning, which
+leverages differences in recovery speed after resetting opac-
+ity to prune overfitted Gaussians, thereby improving gener-
+alization performance. Experimental results show that our
+method significantly enhances rendering quality.
+Due to resubmission reasons, this version has been aban-
+doned.
+The improved version is available at: https:
+//xiaobin2001.github.io/improved-gs-web
+1. Introduction
+Novel view synthesis (NVS) is a classical problem in com-
+puter vision, with widespread applications in virtual real-
+*Corresponding authors.
+ity, cultural heritage preservation, autonomous driving, and
+other fields. Neural Radiance Field (NeRF) [19] introduced
+the use of neural networks to learn the structure and fea-
+tures of a scene, requiring only multi-view 2D images as
+training data to synthesize high-quality novel views. How-
+ever, NeRF suffers from long synthesis times for individual
+views [7, 21], making real-time rendering challenging.
+Recently, 3D Gaussian Splatting (3DGS) [11] has at-
+tracted attention due to its explicit representation and real-
+time rendering performance. 3DGS represents a scene us-
+ing a large number of 3D Gaussian ellipsoids. The proper-
+ties of these Gaussians include position, size, shape, opac-
+ity, and color, all of which can be optimized through differ-
+entiable rendering. 3DGS generates an initial set of Gaus-
+sians from the sparse points obtained through Structure
+from Motion (SfM) [23], and subsequently refines the scene
+representation by increasing Gaussian density via adaptive
+density control.
+The goal of 3DGS is to achieve high-quality rendering
+by finely fitting the scene using a large number of 3D Gaus-
+sian ellipsoids. Its training process can be divided into two
+parts: (1) Increasing the number of Gaussians through adap-
+tive density control. (2) Optimizing the parameters of the
+Gaussians via backpropagation. Densification operations
+are interleaved within the optimization process. To improve
+optimization efficiency, we should minimize their negative
+impact as much as possible. However, the clone and split
+operations used in 3DGS fail to meet this requirement. The
+1
+arXiv:2411.10133v4 [cs.CV] 22 Aug 2025
+
+Optimization
+Continues
+Long-Aixs Split
+Figure 2. Our proposed Long-Axis Split can minimize the differ-
+ences before and after splitting, thereby improving the optimiza-
+tion speed post-split.
+clone operation relies on parameter updates from the current
+iteration to separate it from its clone. However, this method
+does not always work effectively. Since two overlapping
+Gaussians may receive similar gradients, they cannot be in-
+dividually optimized to fit the scene accurately. The split
+operation generates child’s coordinates using probabilistic
+sampling without altering the shape of the children, leading
+to a significant discrepancy between the overall shape distri-
+bution before and after splitting. Since the parent’s shape is
+optimized through backpropagation and closely aligns with
+the scene geometry, the shape changes introduced by split-
+ting negatively impact the optimization process.
+To minimize the adverse effects of densification opera-
+tions, we propose Long-Axis Split (see Figure 2), a more
+precise alternative, to replace the original clone and split
+operations.
+Long-Axis Split adjusts the position, shape,
+opacity of the child Gaussians to minimize discrepancies
+before and after splitting while avoiding Gaussian over-
+laps. As Long-Axis Split reduces the negative impact of
+the densification process, it significantly improves the final
+rendering quality (see Figure 1). During the training pro-
+cess, we discover overfitted Gaussians that perform well
+in certain views but negatively impact rendering quality
+in other views. To mitigate the influence of those Gaus-
+sians, we propose Recovery-Aware Pruning, which lever-
+ages the difference in recovery rates between overfitted
+and normal Gaussians for pruning. The newly generated
+Gaussians contain both overfitted and normally fitted com-
+ponents. After multiple rounds of Recovery-Aware Prun-
+ing, the proportion of overfitted Gaussians among the re-
+maining ones becomes significantly reduced, which notably
+improves generalization performance. On the challenging
+Mip-NeRF 360 dataset, EDC (TamingGS-Abs) achieves a
+notable improvement in PSNR from 27.48 to 28.15 com-
+pared to 3DGS, while also reducing the number of Gaus-
+sians from 3.3M to 2.1M.
+Our contributions are summarized as follows:
+• We propose Long-Axis Split, a more accurate densifi-
+cation operation, significantly enhancing reconstruction
+quality.
+• We introduce Recovery-Aware Pruning, which elimi-
+nates overfitted Gaussians that harm generalization per-
+formance.
+• Our method is plug-and-play and brings substantial im-
+provements across multiple 3DGS variants.
+2. Related Works
+3D Gaussian Splatting (3DGS) [11] demonstrates outstand-
+ing performance in both rendering quality and speed, rep-
+resenting the current state-of-the-art in novel view syn-
+thesis.
+3DGS has been widely adopted across fields in-
+cluding dynamic scenes [15, 27], simultaneous localization
+and mapping (SLAM) [10, 18, 28], 3D content generation
+[3, 25, 26, 31], autonomous driving [36], and high-fidelity
+human avatars [13, 16, 20, 24].
+Numerous studies have focused on improving 3DGS ren-
+dering quality. For instance, Mip-Splatting [32] introduces
+a 3D smoothing filter and a 2D mipmap filter to eliminate
+aliasing artifacts present in 3DGS during scaling. To mit-
+igate the impact of defocus blur on reconstruction qual-
+ity, Deblurring 3DGS [14] applies a small multi-layer per-
+ceptron (MLP) to the covariance matrix, learning spatially
+varying blur effects. GaussianPro [4] leverages optimized
+depth and normal maps to guide densification, filling gaps
+in areas initialized via structure-from-motion (SfM) [23].
+Spec-Gaussian [29] employs anisotropic spherical Gaussian
+appearance fields for Gaussian color modeling, enhancing
+3DGS rendering quality in complex scenes with specular
+and anisotropic surfaces. Notably, all these enhancements
+rely on the original density control and could benefit from
+our proposed work.
+3DGS increases Gaussians in a scene through a basic
+density control mechanism, yet the optimized scene still ex-
+hibits blurred regions that are challenging to refine merely
+by adding more Gaussians. MiniGS [6] addresses this by
+generating depth maps for trained scenes to reinitialize the
+sparse points, and identifies blurred Gaussians with large
+rendering areas during training, splitting them as needed.
+Pixel-GS [35] addresses blur by using the average gradi-
+ent weighted by the pixel area covered by Gaussians in
+each view. AbsGS [30] and GOF [33] attribute blur in re-
+constructions to conflicts in gradient direction across pix-
+els when computing Gaussian coordinate gradients. This
+conflict leads to larger Gaussians, which represent blur, re-
+ceiving insufficient average gradients. To resolve this, they
+compute Gaussian coordinate gradients by taking the mod-
+ulus of pixel coordinate gradients before summing. Tam-
+ingGS [17] proposes a densification judgment condition
+that employs a weighted combination of multiple scores.
+The above studies propose improvements for initialization
+and densification criteria but do not address the densifica-
+tion operation itself. RevisingGS [22] optimizes the opacity
+bias of Gaussians after cloning. VCR-GauS [2] replaces the
+probabilistic sampling used in split operation with a method
+along the longest axis of the Gaussian, aiming to alleviate
+surface protrusions caused by the clustering of Gaussians
+after splitting. Although these improvements target the den-
+2
+
+sification operation, they do not reduce the negative impact
+introduced by densification. We are the first to analyze the
+adverse effects of densification operations and propose cor-
+responding improvements.
+There are also many optimization-based pruning meth-
+ods. LightGaussian [5] calculates a global importance score
+for each Gaussian and prunes those with lower scores. EA-
+GLES [8] uses the average contribution of Gaussians to ren-
+dering across all views as the pruning criterion, where the
+rendering contribution is determined by opacity and render-
+ing order. MiniGS [6] first optimizes the scene structure and
+then applies binary pruning to retain only the Gaussians that
+intersect with rays at their first hit point. Previous pruning
+methods have focused on significantly reducing the number
+of Gaussians to lower storage and rendering costs, whereas
+our Recovery-Aware Pruning focuses on mitigating the ef-
+fects of overfitting.
+3. Methods
+3.1. Preliminaries
+3DGS defines the scene as a set of anisotropic 3D Gaussian
+primitives:
+G(x) = exp
+
+−1
+2(x)T Σ−1(x)
+
+,
+(1)
+where Σ is the 3D covariance matrix and x represents the
+position relative to the Gaussian mean coordinates. To en-
+sure the semi-definiteness of the covariance matrix, 3DGS
+reparameterizes it as a combination of a rotation matrix R
+and a scaling matrix S:
+Σ = RSST RT .
+(2)
+The scaling matrix S can be represented using a 3D vector
+s, while the rotation matrix R is obtained from the quater-
+nion q. To render an image from a specified viewpoint, the
+color of each pixel p is obtained by blending N ordered
+Gaussians {Gi | i = 1, . . . , N} that cover pixel p, with the
+following formula:
+C =
+N
+X
+i=1
+ciαi
+i−1
+Y
+j=1
+(1 −αj),
+(3)
+where αi is the value obtained by projecting Gi onto p and
+multiplying by the opacity of Gi, while ci represents the
+color of Gi, expressed by SH coefficients.
+3DGS initializes the scene using sparse points generated
+by SfM, and then increases the number and density of Gaus-
+sians in the scene through adaptive density control. Specif-
+ically, 3DGS calculates the cumulative average view-space
+positional gradients of Gaussians every 100 iterations, with
+each iteration training a single viewpoint. The formula for
+calculating the average gradient is as follows:
+PM i
+k=1
+r
+∂Lk
+∂µi
+k,x
+2
++
+
+∂Lk
+∂µi
+k,y
+2
+M i
+> τpos,
+(4)
+where M i represents the number of viewpoints in which the
+Gaussian participates during a cycle, τpos is the given den-
+sification threshold,
+∂Lk
+∂µi
+k,x and
+∂Lk
+∂µi
+k,y represent the gradients
+of the Gaussian with respect to the x and y for the current
+viewpoint, obtained by summing the gradients of each pixel
+with respect to the coordinates:
+∂Lk
+∂µi
+k,x
+=
+m
+X
+j=1
+∂Lj
+∂µi,x
+,
+∂Lk
+∂µi
+k,y
+=
+m
+X
+j=1
+∂Lj
+∂µi,y
+.
+(5)
+Gaussians with average gradients exceeding a predefined
+threshold undergo densification using either clone or split,
+depending on their size.
+3.2. Analysis of Original ADC
+Clone: Duplicate a small
+
+
+==========================================================================================
+### 2411.12788_MiniSplatting2  (pages=18, img=2411.12788_MiniSplatting2_fig.png)
+==========================================================================================
+1
+Efficient Scene Modeling via Structure-Aware and
+Region-Prioritized 3D Gaussians
+Guangchi Fang, Bing Wang∗
+Abstract—Reconstructing 3D scenes with high fidelity and
+efficiency remains a central pursuit in computer vision and
+graphics. Recent advances in 3D Gaussian Splatting (3DGS)
+enable photorealistic rendering with Gaussian primitives, yet
+the modeling process remains governed predominantly by photo-
+metric supervision. This reliance often leads to irregular spatial
+distribution and indiscriminate primitive adjustments that largely
+ignore underlying geometric context. In this work, we rethink
+Gaussian modeling from a geometric standpoint and introduce
+Mini-Splatting2, an efficient scene modeling framework that
+couples structure-aware distribution and region-prioritized opti-
+mization, driving 3DGS into a geometry-regulated paradigm. The
+structure-aware distribution enforces spatial regularity through
+structured reorganization and representation sparsity, ensuring
+balanced structural coverage for compact organization. The
+region-prioritized optimization improves training discrimination
+through geometric saliency and computational selectivity, fos-
+tering appropriate structural emergence for fast convergence.
+These mechanisms alleviate the long-standing tension among rep-
+resentation compactness, convergence acceleration, and rendering
+fidelity. Extensive experiments demonstrate that Mini-Splatting2
+achieves up to 4× fewer Gaussians and 3× faster optimization
+while maintaining state-of-the-art visual quality, paving the way
+towards structured and efficient 3D Gaussian modeling.
+Index Terms—Gaussian Splatting, Point Clouds, Scene Repre-
+sentation, Scene Reconstruction.
+I. INTRODUCTION
+T
+HE growing demand for compact, scalable, and high-
+fidelity 3D scene modeling is driving progress across
+domains such as autonomous systems [1], [2], digital twins
+[3], [4], mixed reality [5], [6], and immersive content cre-
+ation [7], [8]. These scenarios require not only visually ac-
+curate scene representations, but also modeling frameworks
+that are memory-conscious, computationally lightweight, and
+amenable to fast training and deployment. While neural ren-
+dering approaches [9]–[11] have achieved impressive results
+under image supervision, their reliance on high-capacity dense
+representations incurs substantial computational overhead, lim-
+iting their suitability for real-time and large-scale use. This
+highlights the need for scene modeling paradigms that balance
+accuracy with efficiency, enabling expressive yet lightweight
+representations that scale across tasks and environments.
+Among recent advances, 3D Gaussian Splatting (3DGS)
+[12] has emerged as a promising alternative for novel view
+This work is jointly supported by Young Scientists Fund of the National
+Natural Science Foundation of China (42301520), Research Grants Council
+of Hong Kong (25206524).
+Guangchi Fang and Bing Wang are with The Spatial Intelligence Group,
+The Hong Kong Polytechnic University, HKSAR. Corresponding author: Bing
+Wang (bingwang@polyu.edu.hk).
+Mini-Splatting2 
+2min48s, 0.7mil, 25.2dB
+GT
+3DGS-accel
+11min47s, 4.0mil, 25.2dB
+3DGS (6.1mil, 66 FPS)
+Train: 35min, PSNR: 25.2dB
+Mini-Splatting (0.6mil, 430 FPS)
+Train: 17min, PSNR: 25.2dB
+Fig. 1.
+Gaussians in 3DGS exhibit a highly irregular spatial distribution,
+which inherently limits its representational capability. To address this, Mini-
+Splatting introduces a structure-aware distribution scheme that mitigates such
+irregularity, substantially reducing the number of Gaussians while improving
+rendering speed, training efficiency, and visual quality. Building on this
+foundation, Mini-Splatting2 incorporates a region-prioritized optimization
+scheme to further accelerate training. In a comparative evaluation on the
+bicycle scene, Mini-Splatting2 demonstrates substantial improvements over
+the latest official accelerated 3DGS implementation, referred to as 3DGS-
+accel [12], [13], requiring 5.7× fewer Gaussians and achieving a 4.2×
+speedup in optimization, while maintaining state-of-the-art visual quality.
+synthesis, representing scenes as collections of spatially an-
+chored and view-dependent Gaussians. This formulation com-
+bines the geometric interpretability of explicitly parameterized
+primitives with the representational flexibility of optimizable
+attributes, enabling parallelized rasterization and fast conver-
+gence. Despite these advantages, the scene modeling process
+still exhibits inefficiencies in both spatial distribution and
+training dynamics, particularly under multiview photometric
+supervision without explicit geometric context. These ineffi-
+ciencies hinder modeling scalability and quality, motivating a
+closer investigation into their fundamental causes.
+A key source of inefficiency lies in the absence of geometric
+principles governing how Gaussians are spatially managed. In
+standard 3DGS pipelines, the spatial distribution of Gaussians
+is adjusted through an adaptive density control strategy, which
+measures the positional gradient magnitude of Gaussians to
+trigger threshold-based split, clone, or prune operations. This
+arXiv:2411.12788v2 [cs.CV] 5 Feb 2026
+
+2
+locally gradient-driven process can adaptively refine high-
+contrast regions, often geometric edges or high-frequency
+textures, while reducing redundancy in smooth areas, such
+as plain walls and flat floors. However, without considering
+Gaussians as the essential underlying structure, this strategy
+over-concentrates on those with high positional gradients
+and under-represents structurally important yet low-contrast
+regions, as illustrated in Fig. 1. Such irregularity results in
+imbalanced scene coverage, degraded reconstruction fidelity,
+increased rasterization cost, and inflated memory consumption.
+A parallel inefficiency arises from the absence of geometric
+criteria guiding how Gaussians are dynamically optimized.
+In most existing 3DGS pipelines, the optimization process
+is driven solely by photometric consistency across views,
+typically by per-pixel loss metrics (e.g., PSNR) and structural
+similarity measures (e.g., SSIM). To maintain stability under
+such weak supervision, these pipelines adopt conservative
+progressive growth schedules, incrementally increasing the
+number of Gaussians over time, and apply uniform updates to
+all Gaussians, regardless of their visibility or contribution to
+the rendered views. However, without a geometric relevance
+assessment across Gaussians, they cannot effectively trigger
+early activation or guide targeted attribute updates of struc-
+turally informative regions. Such indiscrimination disregards
+regionally geometric priority, wastes computation on occluded
+or uninformative Gaussians, delays coherent scene structure
+emergence, and prolongs the optimization process.
+Inspired by these sources of inefficiency, we propose Mini-
+Splatting2, a rearchitected 3DGS framework that improves
+modeling performance through structure-aware distribution
+and region-prioritized optimization. Our approach is built
+on two core assumptions. First, imposing spatial regularity
+on Gaussians in regions with pronounced image gradients
+ensures balanced coverage, thereby supporting compact or-
+ganization. Second, applying training discrimination to geo-
+metrically informative areas accelerates structural emergence,
+thus promoting fast convergence. Our method introduces two
+mechanisms to jointly regulate the spatial distribution and
+training dynamics of Gaussian primitives, thereby improving
+both modeling efficiency and reconstruction fidelity.
+To mitigate the irregularity in spatial distribution, we pro-
+pose a structure-aware distribution scheme that explicitly
+regulates the spatial arrangement of Gaussians. This scheme
+comprises two synergistic modules that jointly improve rep-
+resentation efficiency. First, adaptive Gaussian organization
+improves coverage balance through blur split and depth reini-
+tialization. Blur split identifies low-contrast and blurry regions
+that lack sufficient coverage and adaptively increases their
+local density. Depth reinitialization consolidates multi-view
+depth estimates to reposition Gaussians in under-reconstructed
+regions. Second, redundant Gaussian simplification reduces
+memory overhead via intersection preserving and primitive
+sampling. Intersection preserving models ray-mesh intersec-
+tions to retain structurally critical Gaussians. Primitive sam-
+pling introduces stochastic sampling to maintain a sparse yet
+informative set of primitives. In combination, these mod-
+ules arrange Gaussians into a spatially coherent distribution,
+lowering both memory usage and rasterization cost without
+sacrificing reconstruction fidelity.
+To alleviate the indiscrimination in training dynamics, we
+propose a region-prioritized optimization scheme that steers
+the optimization process toward geometrically salient regions
+of the scene. This scheme consists of two complementary
+components that collectively accelerate convergence. First,
+aggressive model growth hastens early structure emergence
+through critical Gaussian identification and aggressive Gaus-
+sian clone. Critical Gaussian identification pinpoints primitives
+with high reconstruction significance. Aggressive Gaussian
+clone selectively duplicates them to rapidly expand scene
+coverage in the initial optimization stage. Second, occluded
+Gaussian culling reduces update overhead via visibility iden-
+tification and view-dependent culling. Visibility identification
+quantifies per-view primitive visibility derived from blended
+rendering weights, serving as a proxy for geometric relevance.
+View-dependent culling discards occluded or low-visibility
+Gaussians during rasterization, avoiding unnecessary updates.
+Working in tandem, these components reconfigure standard
+discriminative optimization into a geometry-prioritized pro-
+cess, achieving faster convergence while preserving rendering
+quality and maintaining modeling compactness.
+Our main contributions are as follows:
+• We provide a comprehensive analysis of 3D Gaussians
+from a geometric perspective and identify two key ineffi-
+ciencies, irregular spatial distribution and indiscriminate
+training dynamics, that limit modeling compactness and
+convergence. These insights motivate Mini-Splatting2,
+a unified framework for efficient scene modeling that
+improves both memory and computational efficiency.
+• We propose a structure-aware distribution scheme to
+enhance representation compactness by enforcing spatial
+regularity among Gaussians. It integrates adaptive Gaus-
+sian organization to address coverage imbalance and re-
+dundant Gaussian simplification to eliminate superfluous
+Gaussians. This design yields compact and expressive
+representations, thereby reducing memory consumption.
+• We present a region-prioritized optimization scheme to
+accelerate convergence by emphasizing geometrically dis-
+criminative regions. It combines aggressive model growth
+for rapid structural emergence and occluded Gaussian
+culling to suppress less informative updates. This scheme
+delivers a targeted and streamlined optimization process,
+thus reducing computational overhead.
+• Extensive experiments on various public benchmarks
+demonstrate that Mini-Splatting2 achieves a 4× reduction
+in Gaussian numbers and delivers a 3× acceleration
+in optimization time, while preserving rendering quality
+comparable to state-of-the-art 3DGS implementations.
+These results position it as a strong and practical baseline
+for efficient real-world scene modeling.
+A preliminary version of this work was published at ECCV
+2024 as Mini-Splatting [14]. This extended version introduces
+substantial methodological and empirical advancements be-
+yond the original. First, we provide a comprehensive analysis
+of the geometry modeling process in 3DGS, offering new
+insights into the structural capacity of Gaussians and demon-
+
+3
+strating their potential for dense point cloud reconstruction.
+Second, we propose a region-prioritized optimization scheme
+that incorporates two effective acceleration mechanisms, ag-
+gressive model growth and occluded Gaussian culling, which
+significantly enhance optimization efficiency by emphasizing
+geometrically informative regions. Third, we integrate these
+advances into a unified and rearchitected framework, Mini-
+Splatting2, which delivers a favorable trade-off among rep-
+resentation compactness, optimization speed, and rendering
+fidelity. This extension reflects a major expansion in technical
+contribution and experimental validation. Code Available.
+II. RELATED WORK
+A. Gaussian Splatting
+3D Gaussian Splatting (3DGS) [12] was originally devel-
+oped for novel view synthesis, with a strong emphasis on real-
+world immersive rendering. Early methods in this domain [9]
+employed multi-layer perceptrons to implicitly model scenes
+as neural radiance fields. More recent approaches have moved
+towards explicit representations, including voxel grids [15],
+[16], hash grids [17], and point clouds [18], [19], which
+enhance representation capacity and consequently improve
+both training efficiency and rendering quality. Expanding on
+classical 3D representations, elliptical Gaussians [20] offer ro-
+bust capabilities for modeling scene geometry and appearance
+while inherently supporting parallel rasterization [12]. This
+approach eliminates the need for ray marching required by
+previous volume rendering techniques [9], thereby accelerating
+both optimization and rendering.
+Owing to the strong scalability of Gaussian representations,
+3DGS has demonstrated promising potential across a wide
+range of applications. Studies from diverse fields, including 3D
+reconstruction, computer graphics, and robotics, have applied
+this work to downstream tasks such as surface reconstruction
+[3], [4], content generation [7], [8], and localization and
+mapping [5], [6].
+
+
+==========================================================================================
+### 2412.00578v3_SpeedySplat  (pages=14, img=2412.00578v3_SpeedySplat_fig.png)
+==========================================================================================
+Speedy-Splat: Fast 3D Gaussian Splatting with
+Sparse Pixels and Sparse Primitives
+Alex Hanson
+Allen Tu
+Geng Lin
+Vasu Singla
+Matthias Zwicker
+Tom Goldstein
+University of Maryland, College Park
+https://speedysplat.github.io
+2.6M Gaussians 25.39 PSNR 184.87 FPS
+GT
+3DGS
+Ours
+0.26M Gaussians 25.34 PSNR 1148.77 FPS
+Figure 1. We reduce the number of Gaussians by over 90%, only marginally decrease PSNR, and accelerate rendering speed by 6.2× in
+the Tanks & Temples truck scene when compared to 3D Gaussian Splatting (3D-GS). Additionally, we speed up training time by 1.38×.
+Abstract
+3D Gaussian Splatting (3D-GS) is a recent 3D scene re-
+construction technique that enables real-time rendering of
+novel views by modeling scenes as parametric point clouds
+of differentiable 3D Gaussians.
+However, its rendering
+speed and model size still present bottlenecks, especially
+in resource-constrained settings. In this paper, we iden-
+tify and address two key inefficiencies in 3D-GS to substan-
+tially improve rendering speed. These improvements also
+yield the ancillary benefits of reduced model size and train-
+ing time. First, we optimize the rendering pipeline to pre-
+cisely localize Gaussians in the scene, boosting rendering
+speed without altering visual fidelity. Second, we introduce
+a novel pruning technique and integrate it into the train-
+ing pipeline, significantly reducing model size and training
+time while further raising rendering speed. Our Speedy-
+Splat approach combines these techniques to accelerate av-
+erage rendering speed by a drastic 6.71× across scenes
+from the Mip-NeRF 360, Tanks & Temples, and Deep Blend-
+ing datasets.
+1. Introduction
+Fast rendering of photorealistic novel views has been a
+long-standing goal in computer vision and graphics. Neural
+Radiance Fields (NeRF) [23] and its variants have made sig-
+nificant strides in photorealistic 3D scene reconstruction by
+representing scenes as continuous neural volumetric models
+that encode scene density and color at spatial coordinates.
+However, despite recent efforts [4, 24, 29], fast rendering
+in NeRF remains challenging because the volumetric sam-
+pling used in ray-marching is computationally expensive.
+Recently, 3D Gaussian Splatting (3D-GS) [14] has emerged
+as a promising alternative that enables real-time rendering
+by modeling scenes as parametric point clouds of differ-
+entiable 3D Gaussians. Nevertheless, its rendering speed
+is still limited by high parameter counts and certain algo-
+rithmic inefficiencies. Efficient rendering is essential in ap-
+plications such as virtual reality, networked systems, and
+multi-view streaming.
+Real-time rendering on resource-
+constrained edge devices, such as mobile phones, has yet
+to be achieved [19].
+Although recent works on compressing 3D-GS models
+[6, 7, 11, 25] achieve some speed-ups by reducing the num-
+ber of parameters, few approaches directly target rendering
+speed [8, 19]. In this paper, we specifically address this gap
+by demonstrating that the rendering speed of 3D-GS models
+can be drastically increased while maintaining competitive
+image quality. Additionally, we show that our methods re-
+duce training time and substantially decrease model size.
+We begin by observing that the cost of 3D-GS rendering
+1
+arXiv:2412.00578v3 [cs.CV] 14 Aug 2025
+
+is proportional to both the number of Gaussians in the scene
+and the number of pixels processed per Gaussian. Our ap-
+proach optimizes both factors. First, we reduce the number
+of pixels that are processed for each Gaussian by efficiently
+and accurately localizing it in the rendered image.
+Sec-
+ond, we reduce the total number of Gaussians in the model
+through a novel approach that maintains rendering quality.
+3D-GS implements tile rendering to localize Gaussians
+in the image plane by assigning each Gaussian to the tiles
+that it intersects. We find the existing algorithm to be overly
+conservative; in Section 4.1.1, we address this by intro-
+ducing our SnugBox algorithm to precisely localize Gaus-
+sians by computing a tight bounding box around their ex-
+tent.
+Then, in Section
+4.1.2, we extend SnugBox with
+our AccuTile algorithm to identify exact tile intersections.
+Both approaches are plug-and-play, lead to respective infer-
+ence speed-ups of 1.82× and 1.99× on average, and do not
+change the 3D-GS renderings.
+To reduce the total number of Gaussians while pre-
+serving visual fidelity, we extend an existing pruning
+method [11] by reducing its memory requirement by 36×
+and incorporating it into the 3D-GS training pipeline. Dur-
+ing the densification stage of 3D-GS training, Gaussians are
+regularly replicated and pruned. In Section 4.2.2, we aug-
+ment the densification stage with our Soft Pruning method
+to prune 80% of Gaussians at regular intervals. After the
+densification stage, our Hard Pruning method, described in
+Section 4.2.3, prunes an additional 30% of Gaussians at set
+intervals.
+Our Speedy-Splat approach integrates both techniques
+into the 3D-GS training pipeline. On average, rendering
+speed is accelerated by 6.71×, model size is reduced by
+10.6×, and training speed is improved by 1.4× across all
+evaluated scenes while maintaining high image quality.
+In summary, we propose the following contributions:
+1. SnugBox: A precise algorithm for computing Gaussian-
+tile bounding box intersections.
+2. AccuTile: An extension of SnugBox for computing ex-
+act Gaussian-tile intersections.
+3. Soft Pruning: An augmentation for pruning Gaussians
+during densification.
+4. Hard Pruning: An augmentation for pruning Gaussians
+post-densification.
+2. Related work
+The real-time rendering speed of 3D-GS [14] on desktop
+GPUs has inspired research focused on further accelerating
+both its training and inference in resource-constrained en-
+vironments. In this section, we review related works that
+specifically target these performance improvements.
+2.1. Pruning
+A large portion of Gaussians in vanilla 3D-GS mod-
+els are redundant [6, 7, 25], motivating a recent line of
+work focused on pruning Gaussians from 3D-GS models to
+boost rendering speed with minimal loss of visual fidelity
+[1, 2, 6, 7, 10, 11, 18, 19, 25]. Nearly all approaches assign
+a significance score to each Gaussian that is used to rank
+and prune them.
+Several works compute the aggregated
+ray contribution for each Gaussian across all input images
+[6, 7, 18, 25], while others combine opacity with additional
+information, such as gradients per Gaussian, to calculate
+their pruning criterion [1, 2, 20]. Papantonakis et al. [26]
+use resolution and scale-aware redundancy metrics, EA-
+GLES [10] calculates the total transmittance per Gaussian,
+and Lin et al. [19] accelerate inference speed through an
+efficiency-aware strategy and foveated rendering.
+PUP 3D-GS [11] introduces a more principled approach
+by deriving a Hessian for each Gaussian that represents its
+sensitivity to the reconstruction error. While PUP 3D-GS
+achieves state-of-the-art post-hoc pruning results, comput-
+ing its sensitivity score incurs considerable storage require-
+ments that limit its viability for use during training. Our
+pruning approach directly extends PUP 3D-GS by improv-
+ing its memory efficiency by 36×.
+2.2. Other Methods
+In addition to pruning, several other strategies have been
+explored to enhance the rendering and training speed of 3D-
+GS. Mini-Splatting [7] modifies its densification strategies
+and adds a simplification stage to constrain the number of
+Gaussians. 3DGS-MCMC [15] models training dynamics
+as an MCMC process. Revisiting Densification [30] intro-
+duces an error-based densification strategy. 3DGS-LM [13]
+replaces Adam [16] with a tailored Levenberg-Marquardt
+optimizer [9]. Taming 3DGS [22] proposes a constructive
+optimization process that limits the number of Gaussians to
+a pre-defined threshold set by the user. DISTWAR [5] dives
+into the low-level implementation of GPU thread schedul-
+ing and optimizes atomic processing with a novel primi-
+tive. StopThePop [27] introduces a precise tile intersection
+method, but we find that our approach is notably faster in
+Appendix A.4. FlashGS [8] implements a tile intersection
+method similar to StopThePop. Several works reduce train-
+ing time and memory requirements by enforcing geometric
+constraints [21, 28, 31, 32]. Most of these approaches are
+orthogonal to ours and can be applied alongside it.
+3. Background
+3.1. 3D Gaussian Splatting Overview
+3D Gaussian Splatting (3D-GS) [14] models scenes as
+parametric, point-based representations that use differen-
+tiable 3D Gaussians as primitives. Given a set of ground
+2
+
+Table 1. Average execution time (milliseconds) of each function across all scenes in Section 5.1. The operation in each row is applied
+cumulatively to all of the following rows. For each model, accurate measurements are collected by averaging execution times across three
+runs that each render the test set 20 times to reduce variance. The fastest and second fastest times are color coded.
+Method
+Preprocess
+Inclusive Sum
+Duplicate with Keys
+Radix Sort
+Identify Tile Ranges
+Render
+Overall
+Baseline
+0.665
+0.045
+0.570
+1.551
+0.082
+4.483
+7.478
++SnugBox
+0.656
+0.046
+0.208 (2.738×)
+0.729 (2.126×)
+0.041 (1.980×)
+2.344 (1.913×)
+4.102 (1.823×)
++AccuTile
+0.668
+0.046
+0.221 (2.575×)
+0.612 (2.533×)
+0.035 (2.326×)
+2.062 (2.175×)
+3.748 (1.995×)
++Soft Pruning
+0.370 (1.798×)
+0.030 (1.494×)
+0.146 (3.906×)
+0.404 (3.843×)
+0.024 (3.422×)
+1.337 (3.354×)
+2.381 (3.141×)
++Hard Pruning
+0.091 (7.293×)
+0.016 (2.769×)
+0.090 (6.325×)
+0.215 (7.217×)
+0.013 (6.537×)
+0.619 (7.247×)
+1.114 (6.712×)
+truth training images Igt = {Ii ∈RH×W }K
+i=1, the scene is
+initialized by using Structure from Motion (SfM) to produce
+a sparse point cloud that serves as the initial means for the
+3D Gaussians. The estimated camera poses Pgt = {ϕi ∈
+R3×4}K
+i=1 are paired with their corresponding images and
+are used to optimize the scene.
+Each 3D Gaussian primitive Gi is parameterized by three
+geometry parameters – mean µi ∈R3, scale si ∈R3,
+and rotation ri ∈R4 – and two color parameters – view-
+dependent spherical harmonics hi ∈R16×3 and opacity
+σi ∈R. The set of all parameters can be described as:
+ \Se t {G} = \{\ Set {G}_
+i = \{\mu _i, s_i, r_i, h_i, \sigma _i\}\}_{i=1}^N, 
+(1)
+where N is the number of Gaussians in the model.
+Given camera pose ϕ, the scene is rendered by projecting
+all Gaussians to image space and applying alpha blending
+to each pixel. Models are optimized via stochastic gradient
+descent on image reconstruction losses:
+ L(\S et { G } | \ph i , I_{ g t} ) = ||I_{\S et {G}}(\phi )-I_{gt}||_1 + L_{\text {D-SSIM}}(I_\Set {G}(\phi ),I_{gt}), \label {eq:gs_loss} (2)
+where IG(ϕ) is the rendered image for pose ϕ.
+During optimization, the scene is periodically densified
+by cloning and splitting uncertain Gaussians and pruned by
+removing large and transparent Gaussians. The opacities of
+the Gaussians are also periodically reset.
+3.2. 3D Gaussian Splatting Rendering Specifics
+3D-GS uses a tile-based rendering strategy that divides
+the rendered image into 16×16 pixel tiles. Each Gaussian is
+projected into image space, where its intersection with these
+tiles is computed. Then, these Gaussian-to-tile mappings
+are sorted to collect and order the Gaussians by depth for
+pixel-wise rendering.
+Rendering runtime is dominated by six key functions.
+Table 1 empirically analyzes the execution time of each
+function and highlights the improvements achieved by our
+methods. Descriptions of each function are provided in the
+following sections.
+3.2.1. Preprocessing
+The preprocess kernel is parallelized such that each
+thread processes a single Gaussian Gi. It computes a 2D
+projection
+
+
+==========================================================================================
+### 2503.10148v4_3DStudent  (pages=24, img=2503.10148v4_3DStudent_fig.png)
+==========================================================================================
+3D Student Splatting and Scooping
+Jialin Zhu1, Jiangbei Yue2, Feixiang He1, He Wang 1,3*
+1University College London, UK
+2University of Leeds, UK
+3AI Centre, University College London, UK
+Abstract
+Recently, 3D Gaussian Splatting (3DGS) provides a new
+framework for novel view synthesis, and has spiked a new
+wave of research in neural rendering and related appli-
+cations.
+As 3DGS is becoming a foundational compo-
+nent of many models, any improvement on 3DGS itself can
+bring huge benefits. To this end, we aim to improve the
+fundamental paradigm and formulation of 3DGS. We ar-
+gue that as an unnormalized mixture model, it needs to
+be neither Gaussians nor splatting. We subsequently pro-
+pose a new mixture model consisting of flexible Student’s
+t distributions, with both positive (splatting) and negative
+(scooping) densities. We name our model Student Splatting
+and Scooping, or SSS. When providing better expressivity,
+SSS also poses new challenges in learning. Therefore, we
+also propose a new principled sampling approach for opti-
+mization. Through exhaustive evaluation and comparison,
+across multiple datasets, settings, and metrics, we demon-
+strate that SSS outperforms existing methods in terms of
+quality and parameter efficiency, e.g. achieving matching
+or better quality with similar numbers of components, and
+obtaining comparable results while reducing the component
+number by as much as 82%.
+1. Introduction
+Presented initially as a neural rendering technique, 3D
+Gaussian Splatting (3DGS) [14] has quickly become a ver-
+satile component in various systems, e.g. geometry recon-
+struction, autonomous driving [3, 6]. Given its importance
+as a foundational component, very recently researchers start
+to investigate possible alternatives to the basic framework of
+3DGS, e.g. more expressive distributions instead of Gaus-
+sians [8, 19], more principled optimization [15], which all
+focus on improving the model expressivity. Our research is
+among these attempts.
+The key to 3DGS’ success lies in its name: Gaussian
+and splatting. 3DGS can be seen as a (unnormalized) Gaus-
+*Corresponding author, he wang@ucl.ac.uk
+sian mixture, which provides two advantages. As a general-
+purpose distribution, Gaussians can approximate an arbi-
+trary density function hence good expressivity. Also, Gaus-
+sians have analytical forms under e.g. affine transformation,
+enabling quick evaluation in 3D-2D projection, thus quick
+learning from images. Meanwhile, splatting provides a flex-
+ible way of identifying only the relevant Gaussians to an
+image for learning. Despite the success, the framework can
+still suffer from insufficient expressivity [17, 35], and low
+parameter efficiency, i.e. needing a large number of compo-
+nents [18, 29]. Therefore, we re-examine the three key com-
+ponents in 3DGS: Gaussian, splatting, and the optimization.
+Since its underlying principle is essentially to fit a 3D mix-
+ture model to a radiance field, we argue it needs not to be
+restricted to Gaussians or splatting.
+To this end, we propose a simple yet effective general-
+ization of 3DGS. We first replace Gaussians with Student’s
+t distribution with one degree of freedom, referred to sim-
+ply as t-distribution.
+Similar to Gaussians, t-distribution
+also enjoys good properties such as analytical forms un-
+der affine transformation. More importantly, t-distribution
+can be seen as a generalization of Gaussians and therefore
+is more expressive. t-distribution has a control parameter
+for the tail fatness, representing distributions ranging from
+Cauchy distribution to Gaussian distribution, and any dis-
+tribution inbetween. Compared with Gaussians, Cauchy is
+fat-tailed, i.e. a single Cauchy can cover a larger area with
+comparatively higher densities than a Gaussian. Further-
+more, by making this control parameter learnable, we learn
+components with a wide range of varying tail thicknesses.
+Next, we extend the splatting scheme which only oper-
+ates in the positive density space. Inspired by mixture mod-
+els with negative components [21], we propose to employ
+both positive and negative components to splat (adding) and
+scoop (subtracting) densities from the model. This leads to
+more complex mathematical forms than 3DGS but we de-
+rive their close-form gradients for learning.
+Finally, as the increased model complexity, optimiza-
+tion methods based on naive stochastic gradient descent be-
+come insufficient, due to parameter coupling. Therefore, we
+propose a principled sampling scheme based on Stochastic
+1
+arXiv:2503.10148v4 [cs.CV] 11 Apr 2025
+
+Gradient Hamiltonian Monte Carlo (SGHMC).
+We refer to our model as Student Splatting and Scoop-
+ing (SSS). SSS is evaluated on multiple datasets and com-
+pared with existing methods. Experiments show that SSS
+achieves higher quality often with fewer number of compo-
+nents, demonstrating more expressivity and higher parame-
+ter efficiency. Formally, our contributions include:
+• A new model named Student Splatting and Scooping
+(SSS), which is highly expressive and parameter efficient.
+• A new mixture model with flexible components learned
+from a set of distribution families for neural rendering.
+• A mixture model with negative components, which ex-
+tends the learning into the negative density space.
+• A principled sampling approach to tackle parameter cou-
+pling during learning.
+2. Related Work
+3D Reconstruction and Novel View Synthesis
+3D re-
+construction and Novel View Synthesis have been long-
+standing research topics in computer vision.
+Traditional
+methods mainly include Multi-View Stereo (MVS) [28] and
+Structure from Motion (SFM) [31]. Recently, the advent of
+Deep Learning has brought important changes to the field.
+In particular, the techniques based on Neural Radiance Field
+(NeRF) [23] and 3D Gaussian Splatting (3DGS) [14] have
+set new state-of-the-art (SOTA) benchmarks.
+NeRF methods
+NeRF [23] proposes to implicitly encode
+the radiance field of a 3D object/scene into a neural network
+and renders the 3D geometry and textures through a contin-
+uous volume rendering function. Since then, a large num-
+ber of methods based on NeRF have been proposed, namely
+NeRF++ [40], Mip-NeRF [2] and Mip-NeRF360 [2] to im-
+prove rendering quality, Plenoxels [7] and Instant-NGP [24]
+to accelerate NeRF training, D-NeRF [26] to extend NeRFs
+to dynamic scenes, DreamFusion [25] and Zero-1-to-3 [20]
+to employ it for text-to-3d generation models, etc. How-
+ever, the biggest drawback of NeRF is that the ray casting
+process for rendering is time consuming. Despite the effort
+in improving its rendering efficiency e.g. SNeRG [11] and
+mobileNeRF [5], it still cannot be used for real-time render-
+ing in most cases.
+Splatting methods
+3DGS [14] solves the above problem
+for real-time rendering, by replacing the volume rendering
+with a differentiable rasterization method, which achieves
+the SOTA render quality. 3DGS uses 3D Gaussian as the
+primitive for the splatting method [42, 43].
+It directly
+projects 3D Gaussians onto the 2D image plane through
+view/projective transformation for rasterization.
+Similar
+to NeRFs, prolific follow up research has been conducted
+based on 3DGS. GS++ [13] and Mip-Splatting [38] aim
+to improve rendering quality, 4D Gaussian Splatting [34]
+and Deformable 3D Gaussians [36] extend 3DGS to dy-
+namic scenes, Dreamgaussian [30] employs 3DGS for text-
+to-3D tasks.
+One particular line of research is to im-
+prove the fundamental paradigm of 3DGS. This includes
+FreGS [39], 3DGS-MCMC [15] and Bul`o et al. [27] which
+optimize the training process and adaptive density control
+in 3DGS, Scaffold-GS [22] and Implicit Gaussian Splat-
+ting [35] which combine grid representation with 3DGS for
+better rendering quality. More recently, there is also re-
+search exploring different primitives other than 3D Gaus-
+sians. 2DGS [12] obtains better surface reconstruction by
+changing the primitives from 3D Gaussian to 2D Gaussian
+for aligning the 3D scene. GES [8] uses a generalized ex-
+ponential kernel to increase the expression ability of prim-
+itives and reduce memory cost. 3DHGS [19] decomposes
+one Gaussian into two half-Gaussians to obtain asymmetry
+and better expressivity.
+Our research is among the few recent efforts in improv-
+ing the fundamental formulation of 3DGS. Different from
+them, we propose to use more expressive and flexible dis-
+tributions, 3D Student’s t distribution, as the basic primitive.
+In addition, we also use both positive and negative densities
+to extend the optimization into the negative density space
+for better representation. Finally, we propose a principled
+sampling approach for learning, deviating from most of the
+above research.
+3. Methodology
+3.1. Preliminaries: 3DGS as a mixture model
+3DGS essentially fits a (unnormalized) 3D Gaussian mix-
+ture model to a radiance field [14]:
+P(x) =
+X
+wiGi(x), G(x) = e−1
+2 (x−µ)T Σ−1(x−µ)
+(1)
+where wi > 0. µ is the center position of Gaussian. Σ ∈
+R3×3 is the covariance matrix, parameterized by a scaling
+matrix S and a rotation matrix R to maintain its positive
+semi-definiteness: Σ = RSST RT . Additionally, every 3D
+Gaussian is associated with opacity o ∈[0, 1] and color c ∈
+R27 which is represented by spherical harmonics and view-
+dependent [14].wi is determined by o, c and compositing
+values after projection.
+Since the mixture can only be evaluated in 2D, when ren-
+dering an image, a 3D Gaussian is projected onto the 2D im-
+age plane, G2D, via integrating it in the camera view space
+along a ray, for computing a pixel color:
+C(u) =
+N
+X
+i=1
+cioiG2D
+i
+(u)
+i−1
+Y
+j=1
+(1 −ojG2D
+j (u)).
+(2)
+where N is the number of the Gaussians that intersect with
+the ray cast from the pixel u. Finally, the Gaussian param-
+eters, opacity, and colors are learned based on the observed
+2
+
+Figure 1. Student’s t with varying degrees of freedom ν. (standard
+deviation is 5).
+2D images. Eq. (2) reveals that C(u) can be seen as a 2D
+Gaussian mixture, except that now a component weight is
+also a function of other components, introducing additional
+cross-component interactions.
+Numerically, Gaussians, as the mixture component, are
+closed under affine transformation and marginalization of
+variables, so that the forward/backward pass can be quickly
+computed. 3DGS is a monotonic mixture as it is additive,
+i.e. wi > 0. Due to the success of 3DGS, existing works
+have since followed this paradigm [13, 22, 38, 39].
+3.2. Student’s t as a basic component
+We propose an unnormalized t-distribution mixture model,
+where a t-distribution is defined by a mean (location) µ ∈
+R3, a covariance matrix (shape) Σ = RSST RT ∈R3×3,
+a degree of freedom (tail-fatness) ν ∈[1, +∞), associated
+with opacity o, and color c:
+P(x) =
+X
+wiTi(x) , wi > 0
+T(x|ν) = [1 + 1
+ν (x −µ)T Σ−1(x −µ)]−ν+3
+2 ,
+(3)
+where we can drop the scalar
+Γ(ν+3)/2
+Γ(ν/2)ν
+3
+2 π
+3
+2 |Σ|
+1
+2 in the origi-
+nal t-distribution safely to facilitate learning. The choice is
+driven by two main factors. First, t-distribution is a strong
+generalization of Gaussians.
+As shown in Fig. 1, when
+ν →1, T →Cauchy; when ν →∞, T →Gaussian. So
+t-distribution can capture what Gaussians capture and be-
+yond. Furthermore, since Cauchy is
+
+
+==========================================================================================
+### 2503.18402v2_DashGS  (pages=14, img=2503.18402v2_DashGS_fig.png)
+==========================================================================================
+DashGaussian: Optimizing 3D Gaussian Splatting in 200 Seconds
+Youyu Chen1#
+Junjun Jiang1
+Kui Jiang1
+Xiao Tang2
+Zhihao Li2
+Xianming Liu1
+Yinyu Nie2
+1Harbin Institute of Technology
+2Huawei Noah’s Ark Lab
+Figure 1. We propose DashGaussian, a fast 3D Gaussian Splatting (3DGS) optimization method that can be easily plugged into existing
+3DGS backbones. DashGaussian significantly boosts the training speed of various 3DGS backbones by 45.7% on average without trading
+off rendering quality. Equipping DashGaussian to prior-art 3DGS methods, we reduce the optimization time of a 3DGS model with millions
+of primitives to 200 seconds on a consumer-grade GPU. The figures above show the scene “stump” in the Mip-NeRF 360 dataset.
+Abstract
+3D Gaussian Splatting (3DGS) renders pixels by rasteriz-
+ing Gaussian primitives, where the rendering resolution and
+the primitive number, concluded as the optimization com-
+plexity, dominate the time cost in primitive optimization. In
+this paper, we propose DashGaussian, a scheduling scheme
+over the optimization complexity of 3DGS that strips redun-
+dant complexity to accelerate 3DGS optimization. Specifi-
+cally, we formulate 3DGS optimization as progressively fit-
+ting 3DGS to higher levels of frequency components in the
+training views, and propose a dynamic rendering resolution
+scheme that largely reduces the optimization complexity
+based on this formulation. Besides, we argue that a specific
+rendering resolution should cooperate with a proper primi-
+tive number for a better balance between computing redun-
+dancy and fitting quality, where we schedule the growth of
+the primitives to synchronize with the rendering resolution.
+Extensive experiments show that our method accelerates the
+optimization of various 3DGS backbones by 45.7% on av-
+erage while preserving the rendering quality. Project page
+is available at dashgaussian.github.io.
+1. Introduction
+Novel view synthesis has long been investigated as an im-
+portant branch of 3D scene reconstruction. Neural Radi-
+ance Field (NeRF) [32] as a milestone work has largely im-
+proved the visual quality of novel views, but at the cost of
+days to optimize a single scene. Though many efforts [6–
+8, 11, 16, 29, 33, 43] have been made to improve the effi-
+ciency, NeRF-based methods still face challenges in balanc-
+ing the optimization time and rendering quality. In contrast,
+3D Gaussian Splatting (3DGS) [21] utilizes Gaussian prim-
+itives to model a scene, achieving equivalent novel view
+rendering quality as NeRF while reducing the optimization
+time of one scene to tens of minutes. Nevertheless, there
+remains a high demand for further acceleration to enable
+3DGS applications on devices with limited computational
+power or in large-scale, time-intensive scene reconstruction
+tasks [26, 28, 30, 48].
+Given a specific 3DGS backbone, there are multiple
+strategies to accelerate its optimization, which can be col-
+lected into two major categories. From an engineering per-
+#This work was done during he was an intern at Huawei.
+Corresponding author. E-mail: jiangjunjun@hit.edu.cn.
+1
+arXiv:2503.18402v2 [cs.CV] 26 Mar 2025
+
+spective, some works [10, 12, 14, 31, 44] accelerate the op-
+timization by refining the rendering pipeline to enable high-
+efficiency computation. From an algorithmic perspective,
+some works [13, 34] propose to prune redundant Gaussian
+primitives after primitive densification. While these algo-
+rithmic methods perform effectively, the rendering quality
+noticeably declines when a considerable number of param-
+eters are excluded to speed up the optimization.
+Instead of eliminating redundant Gaussian primitives,
+we pursue an effective strategy for allocating computational
+resources, which smartly leverages each Gaussian primitive
+to be more time-efficiently optimized. This is based on three
+key observations. First, in 3DGS optimization, computa-
+tional resources are primarily consumed by three main op-
+erations — forward rendering, gradient back-propagation,
+and primitive update — all of which have their computa-
+tional complexity commonly relying on the rendering res-
+olution and the number of Gaussian primitives. Second,
+rendering high-resolution images at the beginning of opti-
+mization is thriftless because the primitives are sparse at this
+stage. Third, the late stage of the optimization consumes
+a huge portion of time cost because of the large primitive
+number while bringing limited rendering quality improve-
+ment (see the curves of backbones in Fig. 1). These ob-
+servations inspire us to propose a more effective allocation
+of computational resources for current 3DGS methods. For
+simplicity, we refer to the rendering resolution and the num-
+ber of primitives collectively as the ‘optimization complex-
+ity’. By manipulating the optimization complexity on dif-
+ferent optimization stages, one can arbitrarily customize the
+computational resource distribution. Naively reducing op-
+timization complexity can promisingly achieve acceleration
+though, it usually trades off the rendering quality.
+One way to manipulate the optimization complexity is to
+reduce the rendering resolution in the early stage of 3DGS
+optimization. However, simply reducing the resolution in
+training results in 3D aliasing [27, 46], which sacrifices the
+rendering fidelity in the original resolution. Nevertheless,
+according to image processing theory, when comparing two
+images — one downsampled from the other — the key dif-
+ference between them lies in the residual frequency com-
+ponents involved in the high-resolution image but absent
+in the low-resolution one [17]. This indicates that increas-
+ing the rendering resolution during the optimization process
+is equivalent to gradually fitting 3DGS to higher levels of
+frequency components in the training views (see Fig. 2).
+Inspired by this, we propose a scene-adaptive frequency-
+based resolution scheduling scheme that progressively in-
+creases the rendering resolution throughout the entire opti-
+mization process while ensuring its fidelity at the end.
+Given the scheduled rendering resolution, we point out
+that a specific rendering resolution should be paired with
+an appropriate number of Gaussian primitives to better bal-
+ance the computational redundancy and fitting quality of
+3DGS. To this end, we design a primitive number sched-
+uler that tames the primitives to grow simultaneously with
+the rendering resolution by coupling them with a numeri-
+cal constraint. This scheduler produces a concave-up curve
+depicting the growth of the primitive, which spans over the
+entire optimization process (see Fig. 2). Such a concave-up
+growth curve possesses significant advantage over the ones
+in existing works that are either concave-down [21, 31] or
+reach their peak at half of the optimization iterations [5, 21].
+Moreover, we introduce a momentum-based primitive bud-
+geting method to adaptively estimate the maximum num-
+ber of primitives in the growth curve, rather than relying on
+dataset priors as in existing methods [5, 13, 22, 31].
+We integrate the proposed resolution scheduler and the
+primitive scheduler, presenting DashGaussian, which sig-
+nificantly accelerates the optimization process across vari-
+ous 3DGS backbones by 45.7% on average without trading
+off the rendering quality. To summarize our contributions,
+• We speed up the optimization of 3DGS by reasonably dis-
+tributing the computational resources throughout the op-
+timization process.
+• We propose a scheduling method to corporately control
+the growth of rendering resolution and Gaussian primi-
+tives, ensuring that the rendering quality is maintained.
+• We design an adaptive Gaussian primitive budgeting
+method to determine the primitive number demanded by
+the scene, releasing primitive growth scheduling from ap-
+pointing the final primitive number heuristically.
+2. Related Work
+Novel View Synthesis.
+Among the vast amount of inves-
+tigations on novel view synthesis [4, 9, 15, 35, 37], Neu-
+ral Radiance Fields (NeRF) [32] have achieved particu-
+lar success, but at the cost of tens of hours to optimize
+for a single scene [1, 2, 18, 32, 33, 41]. Although there
+have been many works focusing on improving NeRF’s ef-
+ficiency [6, 8, 16, 29, 33, 43, 50], they still struggle with
+balancing the optimization efficiency and rendering quality.
+Alternatively, 3D Gaussian Splatting (3DGS) [21] emerges
+as a solution that possesses comparable rendering quality to
+NeRF together with significant advancement in terms of the
+speed of both optimization and rendering. The efficiency
+of 3DGS benefits from its GPU-friendly rendering pipeline,
+which largely reduces the computational burden for its opti-
+mization. 3DGS has been widely applied in different tasks,
+such as large scene reconstruction [28, 30, 48], digital hu-
+man [25, 45], and 3D segmentation [19, 39]. Improving
+the performance of 3DGS is fundamental and significant to
+benefit the downstream tasks.
+Acceleration for 3DGS Optimization.
+Since the success
+of 3DGS is largely driven by its computational efficiency, it
+2
+
+Figure 2. The pipeline of DashGaussian. DashGaussian determines the rendering resolution for each 3DGS optimization step with our
+resolution scheduling method. The insight of the resolution scheduling is to gradually fit 3DGS to higher level of frequency components
+in the training views throughout the entire optimization process. By directing the downsampling of training views with our scheduler,
+we significantly reduce the time cost for 3DGS optimization while preserving the rendering quality. We further manage the growth of
+Gaussian primitives, which cooperates with the scheduled rendering resolution. It prevents possible over-densification issues during the
+low-resolution optimization phase and further accelerates the optimization with suppressed primitive growth.
+is intuitive to further improve its speed with high-efficiency
+computation. By refining the implementation of forward-
+pass, backward-pass and parameter update of 3DGS, recent
+works [12, 14, 31, 44] accelerate the optimization of 3DGS
+by a large margin. Meanwhile, reducing the parameters of
+3DGS is also a promising option to accelerate the optimiza-
+tion. For example, Fang and Wang [13] propose to reduce
+the number of Gaussian primitives by pruning the crowded
+primitives. Papantonakis et al. [34] further propose to strip
+the redundant appearance descriptors of each primitive to
+reduce the optimized parameters. However, these methods
+inevitably hinder the rendering quality because of their hard
+cropping operation to shrink the size of the original 3DGS
+model. In contrast, DashGaussian ingeniously suppresses
+the optimization complexity and densifies Gaussian prim-
+itives without hard cropping, thus holding the potential to
+preserve the rendering quality.
+Scheduled 3DGS Optimization
+3DGS [21] densifies the
+Gaussian primitives, which results in an unpredictable size
+of the optimized Gaussians. To make the densification con-
+trollable, Mallick et al. [31] propose to mimic the primi-
+tive growth of 3DGS [21] with a constructive densification
+process. Bul`o et al. [5] propose to densify the Gaussian
+primitive by a constant ratio until the predetermined prim-
+itive budget is met. On the other hand, 3DGS with Level
+of Details (LoD) [38, 40] is optimized with multiple render-
+ing resolutions for seamlessly rendering at varying levels of
+details. However, these methods are time-consuming in op-
+timization while their levels of resolution are fixed. Dash-
+Gaussian corporately schedules
+
+
+==========================================================================================
+### 2511.04283v3_FastGS  (pages=19, img=2511.04283v3_FastGS_fig.png)
+==========================================================================================
+FastGS: Training 3D Gaussian Splatting in 100 Seconds
+Shiwei Ren*
+Tianci Wen*
+Yongchun Fang
+Biao Lu
+NanKai University
+renshiwei, wentc, lubiao@mail.nankai.edu.cn, fangyc@nankai.edu.cn
+https://fastgs.github.io
+Figure 1. We propose FastGS, a general acceleration framework for 3D Gaussian Splatting (3DGS) that significantly reduces training
+time without sacrificing rendering quality. In static scenes, our method completes training on the Tanks & Temples train scene within 100
+seconds. Furthermore, our method achieves 2.82× and 2.24× faster training for dynamic and surface reconstruction, respectively.
+Abstract
+The dominant 3D Gaussian splatting (3DGS) acceleration
+methods fail to properly regulate the number of Gaus-
+sians during training, causing redundant computational
+time overhead. In this paper, we propose FastGS, a novel,
+simple, and general acceleration framework that fully con-
+siders the importance of each Gaussian based on multi-view
+consistency, efficiently solving the trade-off between train-
+ing time and rendering quality. We innovatively design a
+densification and pruning strategy based on multi-view con-
+sistency, dispensing with the budgeting mechanism. Exten-
+sive experiments on Mip-NeRF 360, Tanks & Temples, and
+Deep Blending datasets demonstrate that our method signif-
+icantly outperforms the state-of-the-art methods in training
+speed, achieving a 3.29× training acceleration and com-
+parable rendering quality compared with DashGaussian on
+the Mip-NeRF 360 dataset and a 15.45× acceleration com-
+pared with vanilla 3DGS on the Deep Blending dataset. We
+demonstrate that FastGS exhibits strong generality, deliver-
+ing 2-6× training acceleration across various tasks, includ-
+ing dynamic scene reconstruction, surface reconstruction,
+sparse-view reconstruction, large-scale reconstruction, and
+simultaneous localization and mapping.
+1. Introduction
+Novel view synthesis (NVS) is a fundamental problem in
+computer vision and graphics, with broad applications in
+augmented reality [46], virtual reality [40], and autonomous
+driving [38]. Neural Radiance Field (NeRF) [26] methods
+model scenes as continuous volumetric functions and render
+photorealistic views, but require hours of training per scene.
+Recently, 3D Gaussian Splatting (3DGS) [17] has achieved
+rendering quality comparable to NeRF while offering sig-
+nificantly faster training and rendering speed. It models 3D
+scenes via explicit Gaussian primitives and employs a tile-
+based rasterizer. Benefiting from its efficiency, 3DGS has
+been successfully applied to a wide range of tasks, includ-
+ing dynamic scene reconstruction, surface reconstruction,
+and simultaneous localization and mapping (SLAM). How-
+ever, a major bottleneck in its current practical application
+is the extended training time, which often requires tens of
+minutes per scene, hindering user-friendly deployment.
+∗Equal contribution.
+Corresponding author.
+1
+arXiv:2511.04283v3 [cs.CV] 6 Dec 2025
+
+A detailed analysis of the vanilla 3DGS [17] training
+pipeline reveals two primary limitations: (1) its adaptive
+density control (ADC) of Gaussians often introduces nu-
+merous redundant Gaussians and (2) inefficiencies in the
+rendering pipeline.
+While recent works [9, 11, 12, 24]
+have significantly optimized the rendering pipeline, ADC
+remains a major area for improvement.
+ADC in vanilla 3DGS [17] comprises two main com-
+ponents. The first is Gaussian densification, which clones
+or splits a Gaussian based on its positional gradient. The
+second is Gaussian pruning, which removes Gaussians with
+low opacity or oversized scales. Existing 3DGS accelera-
+tion methods [4, 6, 8, 10, 12, 13, 18, 24, 27, 35] have in-
+troduced improvements to ADC. One direction of improve-
+ment focuses on designing mechanisms to constrain Gaus-
+sian densification, aiming to minimize the growth of re-
+dundant Gaussians. For example, Taming-3DGS [24] em-
+ploys a budget-constrained optimization to control Gaus-
+sian growth.
+Similarly, DashGaussian [4] leverages an
+adaptive Gaussian primitive budgeting method to maintain
+continuous densification throughout training. The other di-
+rection involves refining the pruning strategy to accelerate
+training by deleting a greater number of Gaussians. For
+example, Speedy-Splat [12] applies a soft pruning strategy
+during densification and a hard pruning strategy afterward.
+One major drawback of these methods is the limited
+effectiveness of their densification and pruning strategies,
+which fail to maintain rendering quality while avoiding ex-
+cessive Gaussian redundancy, resulting in an inefficient rep-
+resentation, as illustrated in Fig. 2.
+This indicates that
+their Gaussian control strategies are suboptimal.
+Based
+on our observations, some densification and pruning meth-
+ods [4, 10, 18, 33] do not leverage multi-view consistency,
+while others [12, 13, 24] exploit it suboptimally. Specifi-
+cally, they enforce multi-view consistency merely through
+Gaussian-associated scores, which we argue is insufficient.
+It may lead to the excessive growth of redundant Gaussians
+that provide only marginal improvements to the rendering
+quality from a few viewpoints while contributing little to
+others.
+On one hand, for certain densification methods
+such as Taming-3DGS [24], Gaussian importance is con-
+sidered across views. However, it fully relies on Gaussian-
+associated scores rather than their actual contribution to ren-
+dering quality, resulting in weak multi-view constraints and
+leading to redundancy. Moreover, it lacks a dedicated re-
+design of the pruning strategy. On the other hand, for some
+pruning methods, such as Speedy-Splat [12], multi-view in-
+formation is also considered, but it uses the gradients of
+Gaussian rather than evaluating each Gaussian’s contribu-
+tion to multi-view rendering quality. This indirect enforce-
+ment of multi-view consistency leads to significant degra-
+dation in rendering quality.
+To address the above issues, we propose FastGS, a new,
+Figure 2.
+Gaussian count over training iterations.
+Benefit-
+ing from the efficient VCD and VCP strategies, FastGS keeps the
+number of Gaussians consistently low throughout the entire train-
+ing process on the treehill scene of Mip-NeRF 360 [2].
+simple, and general 3DGS acceleration framework, capable
+of training a scene in around 100 seconds while maintain-
+ing comparable rendering quality, as shown in Fig. 1. In
+fact, nearly every Gaussian primitive participates in render-
+ing the same region across multiple viewpoints. Our insight
+is similar to the concept behind bundle adjustment in tradi-
+tional 3D reconstruction, where each 3D Gaussian should
+maintain multi-view consistency. This implies that the 3D
+Gaussian should enhance rendering quality across multi-
+ple views of the same region. Therefore, we introduce a
+multi-view consistent densification (VCD) strategy, which
+uses a multi-view reconstruction quality importance score
+to evaluate whether a Gaussian contributes beneficially to
+the improvement of multi-view rendering quality. Based on
+the same idea, we propose a multi-view consistent pruning
+(VCP) strategy, which removes redundant Gaussians that
+are useless to multi-view rendering quality. Notably, be-
+cause VCD and VCP accurately identify which Gaussians
+need to be densified or pruned, our method does not require
+a budget mechanism, making it easily applicable to other
+tasks. To summarize our contributions,
+1. New, simple, and general framework for 3DGS accel-
+eration that can train a scene in around 100 seconds while
+achieving comparable rendering quality.
+2. Efficient densification and pruning strategy strictly
+controlling the addition and removal of each Gaussian
+based on its contribution to multi-view reconstruction
+quality, greatly accelerating the training process.
+3. General and state-of-the-art performance across var-
+ious tasks.
+Our method outperforms state-of-the-art
+(SOTA) methods in training speed while maintaining
+comparable rendering quality on static scenes. It general-
+izes well to dynamic scene reconstruction, surface recon-
+struction, sparse-view reconstruction, large-scale recon-
+2
+
+struction, and SLAM.
+2. Related Work
+In this section, we review related works that focus on accel-
+erating both the training and inference of 3DGS [17].
+Gaussian Densification.
+A key bottleneck of 3DGS is
+the excessive Gaussians that significantly slow down the
+training process. Recent works [4, 6, 18, 24, 32] attempt
+to address this issue by refining the densification strat-
+egy to control the primitive count. Specifically, Taming-
+3DGS [24] employs a budgeting mechanism to control
+Gaussian growth, primarily computing importance scores
+based on Gaussian-associated properties. DashGaussian [4]
+introduces a resolution-guided primitive scheduler that pro-
+gressively reconstructs the scene throughout the entire train-
+ing process.
+Nevertheless, they still require millions of
+Gaussians to maintain rendering quality, resulting in heavy
+optimization overhead.
+Gaussian Pruning. Besides modifying densification, some
+methods [1, 8, 10, 12, 13, 27, 33] achieve acceleration by
+designing pruning strategies to remove a large number of
+Gaussians.
+Some of them design importance scores ac-
+cording to Gaussian-associated properties to guide prun-
+ing, discarding less critical Gaussians [1, 10, 33]. Mini-
+Splatting [8] removes a large number of Gaussians through
+a simplification strategy based on intersection preserving
+and sampling. PUP 3DGS [13] and Speedy-Splat [12] re-
+move Gaussians by computing a Gaussian-associated Hes-
+sian approximation across all training views. Nonetheless,
+some of them fail to fully remove redundant Gaussians,
+while others remove many Gaussians at the cost of signifi-
+cantly degraded rendering quality.
+Other Methods. Some works focus on optimizing 3DGS
+rasterization or optimization strategies. Taming-3DGS [24]
+replaces per-pixel with per-splat parallel backpropagation,
+which significantly speeds up the optimization process
+and serves as a strong baseline for subsequent research.
+StopThePop [30], FlashGS [9], and Speedy-Splat [12] use
+precise tile intersection to reduce Gaussian-tile pairs and
+accelerate rasterization.
+3DGS-LM [15] replaces Adam
+with Levenberg-Marquardt for faster convergence, and
+3DGS² [21] achieves near second-order convergence via
+prioritized per-kernel updates.
+3. Background: 3D Gaussian Splatting
+3DGS models a scene as an explicit point-based representa-
+tion composed of a set of anisotropic 3D Gaussians:
+
+Gi(x) = exp
+ −1
+2(x −µi)⊤Σ−1
+i3D(x −µi)
+ N
+i=1 .
+(1)
+To construct this representation, a sparse point cloud ob-
+tained from SfM is used to initialize the positions of Gaus-
+sian primitives. Each primitive Gi is parameterized by mean
+µi ∈R3, rotation ri ∈R4, scale si ∈R3, opacity σi ∈R,
+and color coefficients ci ∈R16×3 represented in view-
+dependent spherical harmonics (SH). The rotation and scale
+together define the covariance matrix as
+Σi3D = RiSiS⊤
+i R⊤
+i .
+(2)
+To render from a given camera viewpoint, all 3D Gaus-
+sians need to be projected into the 2D image plane. Given a
+viewing transformation W, the covariance matrix in camera
+coordinates is computed as
+Σ′
+i3D = JW Σi3D W ⊤J⊤,
+(3)
+where J denotes the Jacobian of the affine approximation
+of the projective transformation. The projected 3D Gaus-
+sian is then approximated as a 2D elliptical Gaussian on the
+image plane, with covariance Σi2D obtained by marginal-
+izing Σ′
+i3D along the viewing direction. Each 2D Gaussian
+contributes to pixels within its footprint using α-blending:
+given Gaussians {Gi}N
+i=1 sorted by depth, the accumulated
+color of pixel p is computed as
+C(p) =
+X
+i∈N
+ciαi
+i−1
+Y
+j=1
+(1 −αj),
+αi = σiG′
+i(p),
+(4)
+where
+G′
+i(p) = exp
+
+−1
+2(p −µi2D)⊤Σ−1
+i2D(p −µi2D)
+
+,
+(5)
+with µi2D and Σi2D denoting the mean and covariance of
+the projected 2D Gaussian, respectively.
+4. FastGS
+4.1. Overview
+The framework of our method is shown in Fig. 3.
+We
+initialize 3D Gaussians using SfM point clouds and train
+the 3DGS model on multi-view images. The addition and
+removal of 3D Gaussians are controlled via the proposed
+multi-view consistent densification and pruning strategies.
+As illustrated in Fig. 3b and Fig. 3c, Taming-3DGS [24]
+and

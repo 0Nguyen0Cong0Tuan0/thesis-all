@@ -1,0 +1,352 @@
+[
+  {
+    "cat": "00_foundational",
+    "stem": "2003.08934_NeRF_Mildenhall2020",
+    "pages": 25,
+    "img": "2003.08934_NeRF_Mildenhall2020_fig.png",
+    "err": null
+  },
+  {
+    "cat": "00_foundational",
+    "stem": "2111.12077_MipNeRF360_Barron2022",
+    "pages": 18,
+    "img": "2111.12077_MipNeRF360_Barron2022_fig.png",
+    "err": null
+  },
+  {
+    "cat": "00_foundational",
+    "stem": "2112.05131_Plenoxels",
+    "pages": 21,
+    "img": "2112.05131_Plenoxels_fig.png",
+    "err": null
+  },
+  {
+    "cat": "00_foundational",
+    "stem": "2201.05989_InstantNGP_Muller2022",
+    "pages": 15,
+    "img": "2201.05989_InstantNGP_Muller2022_fig.png",
+    "err": null
+  },
+  {
+    "cat": "00_foundational",
+    "stem": "2203.09517_TensoRF",
+    "pages": 33,
+    "img": "2203.09517_TensoRF_fig.png",
+    "err": null
+  },
+  {
+    "cat": "00_foundational",
+    "stem": "2304.06706_ZipNeRF",
+    "pages": 16,
+    "img": "2304.06706_ZipNeRF_fig.png",
+    "err": null
+  },
+  {
+    "cat": "00_foundational",
+    "stem": "2308.04079_3DGS_Kerbl2023",
+    "pages": 14,
+    "img": "2308.04079_3DGS_Kerbl2023_p1.png",
+    "err": null
+  },
+  {
+    "cat": "00_foundational",
+    "stem": "[2016] COLMAP",
+    "pages": 10,
+    "img": "[2016] COLMAP_fig.png",
+    "err": null
+  },
+  {
+    "cat": "00_foundational",
+    "stem": "[2017] Structure-from-Motion survey",
+    "pages": 40,
+    "img": "[2017] Structure-from-Motion survey_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2311.13681_Compact3DGaussian",
+    "pages": 14,
+    "img": "2311.13681_Compact3DGaussian_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2311.17245_LightGaussian",
+    "pages": 19,
+    "img": "2311.17245_LightGaussian_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2312.04564_EAGLES",
+    "pages": 20,
+    "img": "2312.04564_EAGLES_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2402.14650_GaussianPro",
+    "pages": 11,
+    "img": "2402.14650_GaussianPro_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2403.14166_MiniSplatting",
+    "pages": 25,
+    "img": "2403.14166_MiniSplatting_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2403.15530_PixelGS",
+    "pages": 21,
+    "img": "2403.15530_PixelGS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2404.06109_RevisingDensification",
+    "pages": 21,
+    "img": "2404.06109_RevisingDensification_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2404.09591_3DGS_MCMC",
+    "pages": 16,
+    "img": "2404.09591_3DGS_MCMC_p1.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2404.10484_AbsGS",
+    "pages": 16,
+    "img": "2404.10484_AbsGS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2406.15643v1_Taming3DGS",
+    "pages": 13,
+    "img": "2406.15643v1_Taming3DGS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2411.10133_EfficientDensityControl",
+    "pages": 10,
+    "img": "2411.10133_EfficientDensityControl_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2411.12788_MiniSplatting2",
+    "pages": 18,
+    "img": "2411.12788_MiniSplatting2_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2412.00578v3_SpeedySplat",
+    "pages": 14,
+    "img": "2412.00578v3_SpeedySplat_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2503.10148v4_3DStudent",
+    "pages": 24,
+    "img": "2503.10148v4_3DStudent_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2503.18402v2_DashGS",
+    "pages": 14,
+    "img": "2503.18402v2_DashGS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "01_fast_densification",
+    "stem": "2511.04283v3_FastGS",
+    "pages": 19,
+    "img": "2511.04283v3_FastGS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2112.03907_RefNeRF",
+    "pages": 14,
+    "img": "2112.03907_RefNeRF_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2311.16043_Relightable3DGaussians",
+    "pages": 17,
+    "img": "2311.16043_Relightable3DGaussians_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2311.16473_GS-IR",
+    "pages": 14,
+    "img": "2311.16473_GS-IR_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2311.17977_GaussianShader",
+    "pages": 13,
+    "img": "2311.17977_GaussianShader_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2312.13102_SpecNeRF",
+    "pages": 18,
+    "img": "2312.13102_SpecNeRF_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2402.15870v2_SpecGaussian",
+    "pages": 24,
+    "img": "2402.15870v2_SpecGaussian_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2404.18454_3DGS_DeferredReflection",
+    "pages": 10,
+    "img": "2404.18454_3DGS_DeferredReflection_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2405.14871_NeRF-Casting",
+    "pages": 16,
+    "img": "2405.14871_NeRF-Casting_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2406.18544_GS-ROR",
+    "pages": 30,
+    "img": "2406.18544_GS-ROR_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2412.15867_IRGS",
+    "pages": 15,
+    "img": "2412.15867_IRGS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2412.19282_ReflectiveGaussian_RefGaussian",
+    "pages": 17,
+    "img": "2412.19282_ReflectiveGaussian_RefGaussian_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2501.17978_VoD-3DGS",
+    "pages": 10,
+    "img": "2501.17978_VoD-3DGS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "02_specular_reflection",
+    "stem": "2507.07733_RTR-GS",
+    "pages": 16,
+    "img": "2507.07733_RTR-GS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "03_quality_structure",
+    "stem": "2311.16493_MipSplatting",
+    "pages": 19,
+    "img": "2311.16493_MipSplatting_fig.png",
+    "err": null
+  },
+  {
+    "cat": "03_quality_structure",
+    "stem": "2312.00109_ScaffoldGS",
+    "pages": 14,
+    "img": "2312.00109_ScaffoldGS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "03_quality_structure",
+    "stem": "2403.17888_2DGS",
+    "pages": 13,
+    "img": "2403.17888_2DGS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "03_quality_structure",
+    "stem": "2403.19615_SA-GS",
+    "pages": 30,
+    "img": "2403.19615_SA-GS_fig.png",
+    "err": null
+  },
+  {
+    "cat": "03_quality_structure",
+    "stem": "2404.10772_GaussianOpacityFields",
+    "pages": 15,
+    "img": "2404.10772_GaussianOpacityFields_fig.png",
+    "err": null
+  },
+  {
+    "cat": "04_method_blocks",
+    "stem": "1512.03385_ResNet_DeepResidualLearning",
+    "pages": 12,
+    "img": "1512.03385_ResNet_DeepResidualLearning_p1.png",
+    "err": null
+  },
+  {
+    "cat": "04_method_blocks",
+    "stem": "1710.04773v2",
+    "pages": 14,
+    "img": "1710.04773v2_p1.png",
+    "err": null
+  },
+  {
+    "cat": "04_method_blocks",
+    "stem": "2006.09661_SIREN",
+    "pages": 35,
+    "img": "2006.09661_SIREN_fig.png",
+    "err": null
+  },
+  {
+    "cat": "04_method_blocks",
+    "stem": "2106.09685_LoRA",
+    "pages": 26,
+    "img": "2106.09685_LoRA_p1.png",
+    "err": null
+  },
+  {
+    "cat": "04_method_blocks",
+    "stem": "2409.19606v3",
+    "pages": 37,
+    "img": "2409.19606v3_p1.png",
+    "err": null
+  },
+  {
+    "cat": "05_surveys",
+    "stem": "2403.11134_3DGS_Survey_Fei",
+    "pages": 28,
+    "img": "2403.11134_3DGS_Survey_Fei_fig.png",
+    "err": null
+  },
+  {
+    "cat": "05_surveys",
+    "stem": "[2025] A Survey on 3D Gaussian Splatting",
+    "pages": 22,
+    "img": "[2025] A Survey on 3D Gaussian Splatting_fig.png",
+    "err": null
+  }
+]

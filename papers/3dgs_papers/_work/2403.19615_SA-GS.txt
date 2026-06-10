@@ -1,0 +1,1000 @@
+SA-GS: Scale-Adaptive Gaussian Splatting for
+Training-Free Anti-Aliasing
+Xiaowei Song*1,2, Jv Zheng*1,3, Shiran Yuan1,4, Huan-ang Gao1, Jingwei
+Zhao5, Xiang He5, Weihao Gu5, and Hao Zhao†1
+1 Institute for AI Industry Research (AIR), Tsinghua University
+2 Tongji University
+3 Ocean University of China
+4 Duke Kunshan University
+5 Haomo.ai
+kevin729@tongji.edu.cn, zhengju@stu.ouc.edu.cn
+zhaohao@air.tsinghua.edu.cn
+Need training
+GT
+3D GS
+Mip-Splatting
+SA-GSint
+SA-GSsup
+Zoom in (8x)
+Zoom out (1/8x)
+PSNR:17.16
+PSNR:26.37
+PSNR:25.80
+PSNR:29.67
+PSNR:15.28
+PSNR:21.81
+PSNR:21.33
+PSNR:21.35
+Training-free
+Training-free
+Need training
+Training-free
+Training-free
+Fig. 1: Under zoom-in, 3D Gaussian Splatting [10] (3DGS) exhibits significant erosion
+artefacts, while under zoom-out, it undergoes dramatic dilation. Mip-Splatting [24]
+utilizes 3D smoothing and 2D Mip filters to regularize primitives during training. In
+contrast, our method is training-free and maintains scale consistency using solely a
+single 2D scale-adaptive filter. Scale adaptation allows us to use super-sampling
+(named as SA-GSsup later in the paper) and its limiting case integration (named as
+SA-GSint later in the paper) to obtain more accurate results when zooming out.
+Abstract. In this paper, we present a Scale-adaptive method for Anti-
+aliasing Gaussian Splatting (SA-GS). While the state-of-the-art method
+Mip-Splatting needs modifying the training procedure of Gaussian splat-
+ting, our method functions at test-time and is training-free. Specifically,
+SA-GS can be applied to any pretrained Gaussian splatting field as a
+plugin to significantly improve the field’s anti-alising performance. The
+core technique is to apply 2D scale-adaptive filters to each Gaussian dur-
+ing test time. As pointed out by Mip-Splatting, observing Gaussians at
+* Indicates Equal Contribution. † Indicates Corresponding Author.
+arXiv:2403.19615v1  [cs.CV]  28 Mar 2024
+
+2
+Song et al.
+different frequencies leads to mismatches between the Gaussian scales
+during training and testing. Mip-Splatting resolves this issue using 3D
+smoothing and 2D Mip filters, which are unfortunately not aware of
+testing frequency. In this work, we show that a 2D scale-adaptive filter
+that is informed of testing frequency can effectively match the Gaussian
+scale, thus making the Gaussian primitive distribution remain consistent
+across different testing frequencies. When scale inconsistency is elimi-
+nated, sampling rates smaller than the scene frequency result in conven-
+tional jaggedness, and we propose to integrate the projected 2D Gaussian
+within each pixel during testing. This integration is actually a limiting
+case of super-sampling, which significantly improves anti-aliasing perfor-
+mance over vanilla Gaussian Splatting. Through extensive experiments
+using various settings and both bounded and unbounded scenes, we show
+SA-GS performs comparably with or better than Mip-Splatting. Note
+that super-sampling and integration are only effective when our scale-
+adaptive filtering is activated. Our codes, data and models are available
+at https://github.com/zsy1987/SA-GS.
+Keywords: 3D Vision, Novel View Synthesis, Rasterization, Scale Con-
+sistency, Super-Sampling
+1
+Introduction
+Novel View Synthesis (NVS) has played an important role in fields such as visu-
+alization [12], simulation [20,21], automation [26,27], and VR/AR [16,19]. The
+advent of Neural Radiance Fields (NeRFs) [13,25] has significantly enhanced the
+quality of view synthesis while bypassing the need of reconstructing geometry,
+texture, material and lighting (which is typically a very under-determined in-
+verse problem). Recently, another method, 3D Gaussian Splatting (3DGS) [10]
+has garnered attention from both academia and industry for its high synthesis
+quality and fast rendering speed. Gaussian primitive-based representation and
+its corresponding efficient CUDA implementation enable 3DGS [10] to render
+scenes in real-time with intricate details, greatly accelerating NVS systems in-
+tended for tasks such as gaming, simulation and multimedia.
+Problem. Unlike implicit representations like NeRFs, 3DGS [10] utilizes
+Gaussian primitives to represent 3D scenes in an explicit manner. This is achieved
+by optimizing the position, scale, transparency, rotation and spherical harmonic
+coefficients of each Gaussian primitive to fit input images, producing a continu-
+ous 3D signal with a complex Gaussian mixture distribution. However, as pointed
+out by a recent study Mip-Splatting [24], there is a trick in 3DGS not mentioned
+in the paper, which is introduced to ensure numerical stability. Specifically, 2D
+dilation is added during training to expand the distribution over a planar region
+to eliminate the case in which the region is smaller than one single pixel (thus
+causing instability). This operation guarantees steady updating of the Gaussian
+primitives, but results in inconsistencies in the degree of dilation and the degree
+of change in Gaussian scale if the intrinsic and extrinsic parameters of the cam-
+era are not equal to the training situation, with artefacts illustrated in Fig. 1.
+
+SA-GS
+3
+This is due to the fact that 2D dilation is fixed on the pixel space and is not
+informed of the scale variation of the Gaussian, as illustrated in Fig. 3.
+Cause & Solution. Training data is typically produced using consistent
+camera settings. Therefore, the use of a fixed dilation operation during the train-
+ing phase does not result in variations in the dilated scale at the same location.
+In this case, the Gaussian primitives can still learn a reasonable 2D projection
+distribution. However, during the rendering phase, the Gaussian scene may be
+observed at various resolutions and distances. This can compromise the other-
+wise good 2D projection distribution, resulting in a different α-blending process
+than during the training phase, which ultimately affects the rendering quality.
+In this paper, we name this phenomenon as Gaussian scale mismatch, which
+is a property specific to 3DGS and absent in NeRFs. We believe that the 2D pro-
+jection distribution of Gaussian primitives in the rendering phase should be con-
+sistent with the training phase. We correct the 2D dilation operation (in 3DGS)
+and the 3D smoothing+2D Mip filter (in Mip-Splatting) via a 2D scale-adaptive
+filter to enforce scale consistency at different rendering parameter settings.
+Anti-aliasing. When the projected 2D Gaussian distribution remains con-
+sistent with the training at different rendering settings, anti-aliasing is simplified
+to ensure the synergy of the sampling frequency and the scene frequency. As the
+sampling frequency decreases, the Nyquist sampling theorem [15,18] may not be
+satisfied at a certain frequency level, resulting in aliasing effects in the image.
+Therefore, we introduce conventional anti-aliasing ideas, super-sampling and its
+limiting case integration, into 3DGS so that the Nyquist sampling theorem is
+satisfied when zooming out. Notably, super-sampling and integration only make
+sense after the Gaussian scale mismatch issue is addressed.
+Significance. As shown in Fig. 1, our method can well address the artefacts
+of vanilla 3DGS while being training-free. Under the zoom-in and zoom-out set-
+tings, vanilla 3DGS shows severe visual quality degradation because of erosion
+and dilation. The quality degradation is actually caused by an intertwined effect
+of Gaussian scale mismatch and aliasing, which is different from the case that,
+in NeRFs, artefacts under zoom-in and zoom-out are solely caused by alias-
+ing. While Mip-Splatting [24] can address these artefacts, our method is: (1)
+More flexible. Mip-Splatting needs to modify the training procedure of 3DGS,
+but our method is a training-free plugin; (2) More elegant. Mip-Splatting re-
+solves the Gaussian scale mismatch issue with 3D smoothing and 2D Mip filter,
+but our method exploits a single 2D scale-adaptive filter; (3) More accurate.
+Our method performs comparably with Mip-Splatting but out-performs it un-
+der zoom-out because our scale-adaptive formulation can unleash the power of
+simple and effective strategies super-sampling (and its limiting case integration).
+In summary, our contributions are as follows:
+1. We introduce a training-free approach that can be directly applied to the
+inference process of any pretrained 3DGS [10] model to resolve its visual arte-
+facts at drastically changed rendering settings. The method itself is named
+as scale-adaptive Gaussian splatting (SA-GS) as a whole.
+
+4
+Song et al.
+2. Technically, we propose a 2D scale-adaptive filter that keeps the Gaussian
+projection scale consistent with the training phase scale at different rendering
+settings. This scale-adaptive filter also allows simple anti-aliasing techniques
+(super-sampling and its limiting case integration) to work effectively.
+3. Extensive qualitative and quantitative experiments were conducted on the
+Mip-NeRF 360 [2] and Blender [13] datasets. Our method achieves superior
+or comparable performance compared to the state-of-the-art Gaussian anti-
+aliasing methods, while being training-free.
+2
+Related Works
+2.1
+Anti-aliased Neural Radiance Fields
+Aliasing is a common issue in conventional computer graphics that occurs when
+the rendering frequency drastically changes, resulting in visual artefacts such as
+jagged edges or moiré patterns. These artefacts are caused by the discrete sam-
+pling of continuous physical signals. Neural rendering, which is represented by
+neural radiance fields (NeRFs) [13] or other techniques [4,9,11], is also troubled
+by aliasing. Anti-aliasing neural radiance fields are an active research direction,
+with notable milestones like Mip-NeRF [1], Mip-NeRF 360 [2], Zip-NeRF [3] and
+Tri-MipRF [7]. Mip-NeRF [1] featurizes the 3d frustum with an approximate el-
+lipse such as the view-dependent distance-aware visual effects are captured by a
+closed-form geometric encoding of the (approximate) ellipse. Mip-NeRF 360 [2]
+accelerates Mip-NeRF [1] with a density proposal network and addresses un-
+bounded scenes using a heuristic contraction rule. Zip-NeRF [3] designs a spiral
+sampling pattern, instead of volume encoding, for the anti-aliasing of radiance
+fields based on hash grids. Tri-MipRF [7] interpolates down-sampled tri-planes
+(at corresponding scales) to build a mipmap-like representation. Despite various
+techniques designed for different NeRF backbones (MLP-based, triplane-based
+or grid-based), most of them are motivated by two old ideas: super-sampling and
+mipmap. Our method SA-GS is also motivated by super-sampling, but as will
+be discussed in the next section, in Gaussian splatting fields, other issues need
+to be addressed before the power of super-sampling can be fully unleashed.
+2.2
+Gaussian Splatting
+3D Gaussian Splatting (3DGS) [10] is a recently proposed neural1 rendering
+paradigm that is primitive-based (like Point-NeRF [23] or ADOP [17]), uses
+spherical harmonics as the color representation (like Plenoxels [5]), and renders
+at a very fast rate (faster than Instant-NGP [14]). While this new paradigm has
+recently seen much progress in terms of physical integration (PhysGaussian [22])
+and geometrical alignment (SuGaR [6]), anti-aliasing for 3DGS [10] is not yet
+well addressed. We note that one fundamental challenge is that when 3DGS [10]
+1 This is somewhat inaccurate because many people argue that 3DGS does not involve
+typical neural networks but only matrix multiplication.
+
+SA-GS
+5
+is rendered at different distances (i.e., resolutions), the Gaussian scale might
+not match the training-time scale. This mismatch issue entangles with aliasing,
+making the problem extremely complicated. This has been pointed out by a
+recent study Mip-Splatting [24], showing that the dilation and erosion issues were
+caused by this mismatch. In this paper, we demonstrate that classical super-
+sampling (and its limiting case of integration) is effective for 3DGS [10] anti-
+aliasing, but only under the case of matched Gaussian scales. Unlike the heuristic
+and problematic Gaussian scale filtering techniques used by 3DGS [10] and Mip-
+Splatting [24], our adaptive solution well addresses the mismatch issue, thus fully
+unleashing the power of super-sampling for anti-aliasing.
+3
+Method
+Training
+Testing
+3D Gaussians
+Camera Plane
+Pixel Space
+α-blending
+(c) 3D-GS Inconsistent 2D Dilation
+ 
+(d) SA-GS Consistent 2D Adaptive Filter
+ 
+(a) Mip-Splatting 3D Smoothing Filter
+ 
+(b) Mip-Splatting 2D Mip Filter
+ 
+(f) SA-GS Super Sampling
+(e) SA-GS Integration
+Test View
+Train Views
+Training Flow
+Testing Flow
+Fig. 2: Paradigm Comparison of Gaussian Rasterization Process. All Gaussian
+Splatting methods share this framework for training and rendering, but different models
+use different strategies to process Gaussian primitives. During training, 3DGS [10] uses
+(c) in pixel space for training stability, but results in scale inconsistencies at different
+rendering settings; Mip-Splatting utilises (a) to restrict the Gaussian frequency upper
+bound in 3D space, and (b) to emulate box filtering in pixel space. But Mip-Splatting
+[24] still suffers from scale inconsistency and needs to modify the training procedure
+of 3DGS. Our approach is training-free and only operates on the testing flow. We use
+(d) in pixel space to maintain the scale consistency of the Gaussian primitives, and
+further enhance the anti-aliasing capability of 3DGS by applying (e) and (f) to the
+α-blending process. Note that (e) and (f) only make sense with (d) activated.
+A Paradigm comparison is presented in Fig. 2. Overall, our SA-GS method
+aims to mitigate the artefacts of 3DGS when rendered at different settings (e.g.,
+8× zoom-in and 1/8× zoom-out shown in Fig. 1). A notable fact is that in
+
+6
+Song et al.
+NeRFs [1–3,8,13], artefacts under zoom-in/out are caused by aliasing, while for
+3DGS these artefacts are caused by the intertwined effects of Gaussian scale
+mismatch and aliasing. Thus, anti-aliasing techniques make sense only after the
+Gaussian scale mismatch issue is addressed. The root of Gaussian scale mismatch
+in vanilla 3DGS, as pointed out by [24], is not described in the paper of [10].
+The root is shown in Fig. 2-(c), which is designed to expand projected 2D Gaus-
+sians so that the case of the region is smaller than one single pixel is eliminated.
+To alleviate the mismatch, Mip-splatting introduces 3D smoothing (Fig. 2-(a))
+and 2D Mip filter (Fig. 2-(b)), during training. Unfortunately, these heuristic
+methods (Fig. 2-(a/b/c)) do not address the mismatch issue in principle, so that
+conventional anti-alising techniques fail to work for 3DGS and Mip-splatting.
+Our SA-GS features a 2D scale adaptive filter (Fig. 2-(d)) that resolves the mis-
+match issue in principle and is a training-free plugin. It also unleashes the power
+of simple anti-aliasing techniques like super-sampling (Fig. 2-(f)) and its limiting
+case integration (Fig. 2-(e)) to work for 3DGS.
+Training Sample Rate
+2× Sample Rate 
+1/2× Sample Rate 
+≈1.64 pixel
+≈1.64 pixel
+≈1.64 pixel
+≈1.64*r pixel
+r=1/2
+r=1
+r=2
+≈1.64*r pixel
+r=1/2
+r=1
+r=2
+Training Distance
+2× Distance
+1/2× Distance
+≈1.64 pixel
+≈1.64 pixel
+≈1.64 pixel
+≈1.64*r pixel
+≈1.64*r pixel
+Original Projected 2D Gaussian Scale
+Vanilla 3DGS Dilation Scale
+Our Adaptive Scale
+(a)
+(b)
+Fig. 3: Scale ambiguity. The heuristic 2D dilation process in vanilla 3DGS code
+(pointed out by [24]) operates on the pixel space and enlarges the projected 2D Gaus-
+sian by a fixed amount (around 1.64 pixel). However, a fixed 2D dilation (1.64 pixel)
+can result in scale ambiguities when representing the same scene at different rendering
+settings, as shown by the green expansion area. (a) When the Gaussian scale is held
+constant and the resolution changes, the dilation scale (green) changes inconsistently.
+(b) When the Gaussian scale changes and the resolution remains constant, the dilation
+scale (green) does not change with the Gaussian. Our 2D scale-adaptive filter ensures
+that the Gaussian scale remains consistent across different rendering settings, as shown
+by the red expansion area. This keeps the scale consistent with the training setup.
+3.1
+2D Scale-adaptive Filter
+The dilation operation (heuristic and fixed at 1.64 pixel) used by 3DGS [10]
+during training introduces scale ambiguity to the 3D scene, as shown in Fig. 3.
+As mentioned above, it is crucial to maintain the scale of the Gaussian in the
+training setup consistent at different rendering settings.
+We propose a 2D scale-adaptive filter that bridges the scale gap between the
+rendering stage and the training setup, whose effects are shown in Fig. 4. In pixel
+
+SA-GS
+7
+Dilation & Erosion Effects in Each Frequency
+(Vanilla 3DGS Heuristic 2D Dilation)
+Scale Consistency Effect in Both Frequencies
+(Our Scale-adaptive Filter)
+Fig. 4: 3DGS heuristic dilation and our scale-adaptive filter. Our 2D scale-
+adaptive filter maintains the structure of the scene at any resolution, whereas 3DGS [10]
+dilation (fixed at 1.64 pixel) leads to erroneous dilation at low frequencies and erosion
+at high frequencies. (Note dilation refers to method and artefacts in different contexts.)
+space, a 2D Gaussian primitive can be expressed parametrically by its mean pk
+and covariance Σk as follows:
+  \
+b egi n  { a
+l igned} \ma
+t hcal {G}^{2D}_k(\mathbf {x})=e^{-\frac {1}{2}(\mathbf {x}-\mathbf {p}_k)^T\boldsymbol {\Sigma }_k^{-1}(\mathbf {x}-\mathbf {p}_k)} \end {aligned} 
+(1)
+Problem. During the training of vanilla 3DGS, a low-pass Gaussian kernel
+function Gl is applied for dilation. This is formally expressed as a convolution
+between two Gaussians and can eventually be written as Mk:
+  \
+b egin {a l
+i
+gne d } \ ma
+thca
+l {G}_k ^{2 D }(x)_{ 3D G S} &= 
+\ sqrt { \f r ac  {|\boldsymbol {\Sigma }_k+\sigma _l\cdot \mathbf {I}|}{|\boldsymbol {\Sigma }_k|}}(\mathcal {G}_k(\mathbf {p}_k,\boldsymbol {\Sigma }_k) \ast \mathcal {G}_{l}(\mathbf {p}_k,\sigma _l\cdot \mathbf {I}))(x)\\ &= \mathcal {M}_k(\mathbf {p}_k,\boldsymbol {\Sigma }_k+\sigma _l\cdot \mathbf {I})(x) \end {aligned} 
+(2)
+Here, σl is a fixed hyperparamter that controls the scale of Gl, while I is
+2D unit matrix. Here the problem of 3DGS is that σl is fixed as 0.3, which
+approximately leads to
+√
+0.3 × 3 ≈1.64 dilation as shown in Fig. 3.
+Solution. During rendering, the scale of the Gaussian primitive in camera
+space should remain constant, regardless of any changes in rendering frequency.
+This is achieved by calculating the ratio r = ∆Rp
+∆Dc . ∆Rp is the resolution ratio
+between training and rendering, solving the problem described in Fig. 3-(a). ∆Dc
+is the distance(focal length) ratio between the rendering camera and the closest
+orientated training camera, solving the problem described in Fig. 3-(b).
+  \
+b egi n {alig n
+e
+d} \ math c al
+ {G}
+_k^{2D} (x, r )_{SA\t ex t  {-}GS
+}  &= \s qr t  {\f r ac {|\boldsymbol {\Sigma }_k+\sigma _lr^2\cdot \mathbf {I}|}{|\boldsymbol {\Sigma }_k|}}(\mathcal {G}_k(\mathbf {p}_k,\boldsymbol {\Sigma }_k) \ast r\mathcal {G}_{l}(\mathbf {p}_k,\sigma _l\cdot \mathbf {I}))(x)\\ &= \mathcal {M}_k(\mathbf {p}_k,\boldsymbol {\Sigma }_k+\sigma _lr^2\cdot \mathbf {I})(x) \end {aligned} 
+(3)
+Via this operation (named as 2D scale-adaptive filter), we can ensure a con-
+sistent scale and distribution of 2D Gaussian projections in camera space at
+different rendering settings, such that we can match the training settings.
+
+8
+Song et al.
+y
+x
+Rotate
+Pixel
+Pixel
+Render Color
+∫
+∫
+           (a) Super Sampling
+(b) Integration
+Fig. 5: Super Sampling and Integration applied on a Gaussian primitive. Our
+super sampling method, denoted as (a), involves dividing each pixel into 9 sub-pixels
+when traversing the order-sorted Gaussians within a tile. Each sub-pixel independently
+undergoes α-blending and weights the Gaussian spherical harmonic coefficient accord-
+ing to the sub-pixel sampling locations. (b) is our integration method that diagonalizes
+the Gaussian covariance matrix by pixel rotation. This decomposes the integration op-
+eration into the product of two marginal Gaussian distributions.
+3.2
+Making Conventional Anti-Aliasing Great Again for Gaussians
+Our 2D scale-adaptive filter ensures that the Gaussian distribution remains con-
+sistent via matching arbitrary rendering settings with the training setting. Only
+after this scale adaptation, we can tackle the aliasing issue. Specifically, due to
+the Nyquist sampling theorem [15], the image will show aliasing effects as the ren-
+dering frequency decreases. In the conventional graphics literature, there are two
+techniques that can be used to deal with this problem of aliasing: super-sampling
+and pre-filtering. 3DGS [10] cannot leverage these old techniques to deal with
+anti-aliasing due to the aforementioned issue of Gaussian scale mismatch. Our
+method maintains consistent Gaussian scale across different resolutions, allowing
+for effective removal of scene aliasing. We chose to use super-sampling and its
+limiting case, integration, instead of pre-filtering, because the pre-filtering affects
+the α-blending procedure of 3DGS which may be a future pursuit.
+Super-sampling Given a pixel Pt, when traversing Gaussian primitives that
+have been order-sorted within a tile, we compute the distance between the centers
+of the S × S sub-pixels and the center of the Gaussian primitive separately, as
+shown in Fig. 5(a). These sub-pixels have independent α-blending processes and
+cumulative transparency Ts.The color of a pixel Ct is determined by averaging
+the color of these sampled sub-pixels:
+  \ b
+eg
+i
+n
+ {a
+li
+g
+ned
+} 
+C _ { t
+}  &= \fr
+a c
+ {
+1}{ S ^ 2
+}\su
+m _{i = 1}
+^G\ s u m _{s=1}^{S^2}\alpha _s^i\times T_s^i \times \mathcal {F}(SH_i)\\ T_s^i &= \left \{\begin {array}{lr} 1, i=1\\ \prod _{j=1}^{i-1}(1-\alpha _s^j),i>1 \end {array} \right . \end {aligned} 
+(4)
+
+SA-GS
+9
+SA-GS fil
+SA-GS int
+SA-GS sup
+3D GS(MS)
+3D GS
+GT
+Mip-splatting
+1/8x
+1x
+1x
+1/8x
+1x
+1/8x
+Fig. 6: Single-scale Training and multi-scale testing on the Mip-NeRF 360
+Dataset [2] for zoom-out effect. 3DGS [10] has dilation artefacts (red boxes) at
+low resolutions. Our 2D scale-adaptive filter maintains the Gaussian scale consistency
+at low resolutions, and the super-sampling and integration methods further remove the
+aliasing artefacts (yellow boxes), yielding results that surpass Mip-Splatting [24].
+where G is the number of Gaussian primitives on the z-buffer, αi
+s is the opacity
+calculated based on the distance between sth sub-pixel and ith Gaussian, and SHi
+is the spherical harmonic coefficient of the ith Gaussian. The function F(·) is used
+for the spherical harmonic coefficient to color conversion. For fast convergence,
+we set S = 3 in all experimental settings.
+Integration When the super-sampling hyperpameter of S goes to infinity, it
+becomes integration. Consider a single Gaussian’s projection on the 2D camera
+plane, a 2D Gaussian whose PDF we can represent as f(x, y), where x and
+y are coordinates on the camera plane, and we take axes of the 2D Gaussian
+Projection as the coordinate system axes, thus making the correlation of the
+projected Gaussians zero. As the correlation is zero we have that f(x, y) can
+further be factored into the product gx(x)gy(y), where g(t) = exp(−1
+2 ( t
+σ )2)
+√
+2πσ
+. Let
+Φ(t) =
+R t
+−∞g(t)dt (subscripts x or y omitted) be the Gaussian integral. Let the
+
+10
+Song et al.
+region inside the pixel be P. Hence when calculating α during the traversal of
+the Gaussian z-buffer, we need to find the following double integral:
+  
+\l
+a
+bel {double_int} \alpha = \iint \limits _Pf(x,y)dxdy 
+(5)
+Axis-aligned Case. When the axes of the pixel are parallel to the 2D Gaus-
+sian Projection’s axes, the evaluation of (5) is simple because it can be calculated
+as the product of two Gaussian single integrals:
+ [t
+] 
+\
+labe l {factorize_int} \iint \limits _Pf(x,y)dxdy&=(\int \limits _{P_x}g_x(x)dx)(\int \limits _{P_y}g_y(y)dy) \nonumber \\ &=(\Phi _x(P_{x\max })-\Phi _x(P_{x\min }))(\Phi _y(P_{y\max })-\Phi _y(P_{y\min }))
+(6)
+where Px min and Px max are marginal Gaussian intervals on the x-axis, Py min
+and Py max are the same on the y-axis. However, when the pixel’s sides is not
+aligned with the axes, x and y will be related. In the evaluation of (5) this is
+reflected as the inner integral containing variable instead of constant limits, and
+therefore the factorization carried out in (6) will no longer be applicable.
+Pixel Rotation. In our implementation, we solve this problem by rotating
+the pixel such that it aligns with the Gaussian’s axes, as shown in Fig. 5(b).
+Thus, the integral can be easily computed using this approach as described in
+(6). However, rotating the pixel causes a deviation between the integral region
+and the original pixel region. We prove that for any pixel close enough to the
+center of the Gaussian to be affected during α-blending, there exists a theoretical
+upper bound for the error. We also verify through numerical experimentation
+that this is empirically a good approximation. Detailed proofs and experimental
+results are provided in the supplementary material.
+PSNR ↑
+SSIM ↑
+LPIPS↓
+1 Res. 1/2 Res. 1/4 Res. 1/8 Res. Avg. 1 Res. 1/2 Res. 1/4 Res. 1/8 Res. Avg. 1 Res. 1/2 Res. 1/4 Res. 1/8 Res Avg.
+3DGS [10]
+29.26
+26.84
+22.16
+19.63
+24.47 0.877
+0.863
+0.726
+0.612
+0.769 0.185
+0.148
+0.198
+0.223
+0.189
+3DGS(MS) [10]
+20.11
+23.50
+32.51
+23.72
+24.96 0.604
+0.774
+0.956
+0.832
+0.792 0.389
+0.212
+0.051
+0.118
+0.192
+Mip-Splatting [24] 29.26
+30.23
+30.56
+29.61
+29.91 0.875
+0.909
+0.929
+0.934
+0.911 0.187
+0.116
+0.080
+0.066
+0.113
+SA-GSfil(ours)
+29.26
+29.80
+28.29
+25.58
+28.23 0.877
+0.901
+0.875
+0.809
+0.866 0.185
+0.123
+0.126
+0.171
+0.151
+SA-GSint(ours)
+29.14
+30.06
+30.13
+28.81
+29.53 0.873
+0.905
+0.921
+0.919
+0.904 0.188
+0.118
+0.086
+0.078
+0.118
+SA-GSsup(ours)
+29.26
+30.45
+31.75
+32.53
+31.00 0.876
+0.912
+0.938
+0.951
+0.919 0.186
+0.114
+0.073
+0.053
+0.106
+Table 1: Single-scale training and multi-scale testing on the Mip-NeRF 360
+Dataset [2]. Except for 3DGS(MS) [10], which is trained on multiple scales, all other
+methods are trained on the largest scale (1×) and evaluated across four scales (1×,
+1/2×, 1/4×, and 1/8×), simulating zoom-out effect. SA-GSfil means we only use the
+2D scale-adaptive filter. All our variants significantly surpass 3DGS at low resolutions,
+and SA-GSsup yields better results than Mip-Splatting [24].
+
+SA-GS
+11
+4
+Experiments
+We first present the implementation details of SA-GS. We then evaluate its
+performance on the the unbounded Mip-NeRF 360 dataset [2] and the bounded
+Blender dataset [13]. Finally, we discuss some limitations of our approach.
+4.1
+Implementation
+In our SA-GS framework, an advantage over Mip-splatting is that modifications
+are exclusively performed during the testing phase of 3DGS [10]. Therefore,
+in the training phase, we kept all the settings of the original Gaussian model,
+including training rounds, hyperparameter settings and densification strategy.
+In our super-sampling method, we synchronize all pixel threads8 within the
+same block before performing the alpha calculation to initialize the cumulative
+transparency in the shared memory. In our integration method, we project the
+pixel corner points towards the Gaussian axis to obtain an interval of Gaussian
+distribution for the marginal distributions. To simulate the pixel rotation, we
+multiply the pixel region area by a weight of
+1
+sinθ+cosθ to compensate the error
+caused by rotation, where θ is the angle between the long Gaussian axis and the
+x-axis of the pixel plane. Please refer to the supplementary material for details.
+4.2
+Evaluation on the Mip-NeRF 360 Dataset
+Single-scale Training and Multi-scale Testing: We simulated the effect
+of zoom-out and zoom-in on this dataset and retrained all the baseline models
+for comparison. The same setup of Mip-Splatting [24] is used. Specifically, for
+zoom-out, we trained 3DGS [10] using full resolution images and then plug in
+our method to test on progressively lower resolutions (1×, 1/2×, 1/4×, 1/8×). For
+zoom-in, we trained 3DGS [10] using 1/8× resolution images and then plug in
+our method to test on progressively higher resolutions (1×, 2×, 4×, 8×). Table
+1 and Table 2 show the quantitative results for these two experiments.
+When zooming out, our method gives comparable results at the training
+resolution and better performance at lower resolutions. The (heuristic and fixed)
+dilation operation of 3DGS [10] leads to severe degradation at low resolutions.
+Mip-Splatting [24] replaces 3DGS’s dilation operation with 3D smoothing and
+a 2D Mip filter, but still suffers from scale ambiguity at different resolutions.
+As depicted in Figure 6, our 2D scale-adaptive filter ensures that the Gaussian
+distribution is consistent with the training settings. Our integration and super-
+sampling modules further enhance the anti-aliasing effect. The super-sampling
+version of our method gives the best results for this setting, which exceeds Mip-
+Splatting [24] by 1.1dB in PSNR (see Tab. 1).
+When zooming in, 3DGS [10] shows severe erosion artefacts at high reso-
+lution. Mip-Splatting [24] uses the 3D smoothing filter to reduce the effects of
+scale ambiguity of 2D filtering. As depicted in Figure 7, our method keeps the
+8 In 3DGS, each pixel is associated with a thread.
+
+12
+Song et al.
+Mip-splatting
+3D GS
+3D GS(MS)
+ fil
+SA-GS
+GT
+8x
+8x
+8x
+Fig. 7: Single-scale Training and multi-scale testing on the Mip-NeRF 360
+Dataset [2] for zoom-in effect. 3DGS [10] sees erosion artefacts (red boxes) at
+high resolution. By using only 2D scale-adaptive filters, we achieve a stable quality
+improvement at high resolutions without any re-training.
+Gaussian scales consistent and greatly reduces erosion artefacts. Note that inte-
+gration and super sampling are only designed to address the decrease in sampling
+frequency (zoom-out). The most significant contribution is made by 2D scale-
+adaptive filter, which produces results comparable to Mip-Splatting [24].
+PSNR ↑
+SSIM ↑
+LPIPS↓
+1 Res. 2 Res. 4 Res. 8 Res. Avg. 1 Res. 2 Res. 4 Res. 8 Res. Avg. 1 Res. 2 Res. 4 Res. 8 Res Avg.
+3DGS [10]
+33.96 22.47 18.69 17.32 23.11 0.974 0.747 0.514 0.460 0.674 0.028 0.204 0.410 0.504 0.286
+3DGS(MS) [10]
+23.72 32.51 23.50 20.11 24.96 0.832 0.956 0.774 0.604 0.792 0.118 0.051 0.212 0.389 0.192
+Mip-Splatting [24] 34.62 28.86 25.99 24.95 28.60 0.977 0.872 0.718 0.641 0.802 0.025 0.154 0.318 0.430 0.232
+SA-GSfil(ours)
+33.96 27.89 25.32 24.40 27.89 0.974 0.840 0.677 0.615 0.777 0.028 0.189 0.360 0.465 0.260
+Table 2: Single-scale training and multi-scale testing on the Mip-NeRF 360
+Dataset [2]. Except for 3DGS(MS) [10], which is trained on multiple scales, all other
+re-training methods are trained on the 1/8 scale (1×) and evaluated across four scales
+(1×, 2×, 4×, and 8×), simulating zoom-in effect. SA-GSfil means we only use 2D
+Scale-adaptive Filter. Our method significantly surpasses 3DGS [10] at high resolutions
+and produce results comparable to Mip-Splatting [24]. Note that the performance of
+SA-GSfil is achieved without re-training.
+4.3
+Evaluation on the Blender Dataset
+Multi-scale Training and Multi-scale Testing: Following Mip-splatting,
+all baseline models were trained using multi-scale data from the train + test
+section of the dataset and evaluated with multiscale data from the val section.
+We follow the image sampling ratio in Mip-Splatting [24] to train the 3DGS [10].
+Our quantitative evaluation is shown in Table 3. Our approach yields compara-
+ble results with Mip-Splatting [24], and we use vanilla 3DGS [10] on multi-scale
+training only and do not need to modify the training procedure. Meanwhile,
+our approach significantly outperforms 3DGS [10], demonstrating stable perfor-
+mance at different resolutions. 3DGS [10] performance degrades as resolution
+decreases, even in the case that it is trained on multi-scale.
+
+SA-GS
+13
+3D GS
+SA-GS int
+SA-GS sup
+SA-GS fil
+Mip-Splatting
+1/8x
+1/8x
+8x
+GT
+8x
+3D GS
+SA-GS fil
+Mip-Splatting
+GT
+Fig. 8: Single-scale Training and multi-scale testing on the Blender [13]
+Dataset for zoom-in and zoom out effect. Our 2D scale-adaptive filter main-
+tains the consistency of the 2D Gaussian projection when zooming out. Moreover, it
+alleviates erosion artefacts and does not modify the training procedure when zooming
+in. We use super-sampling and integration methods to further address aliasing.
+PSNR ↑
+SSIM ↑
+LPIPS↓
+1 Res. 1/2 Res. 1/4 Res. 1/8 Res. Avg. 1 Res. 1/2 Res. 1/4 Res. 1/8 Res. Avg. 1 Res. 1/2 Res. 1/4 Res. 1/8 Res Avg.
+3DGS [10]
+31.51
+32.66
+31.21
+28.25
+30.91 0.962
+0.972
+0.968
+0.945
+0.962 0.050
+0.031
+0.030
+0.045
+0.039
+Mip-Splatting [24] 32.81
+34.49
+35.45
+35.50
+34.56 0.967
+0.977
+0.983
+0.988
+0.979 0.035
+0.019
+0.013
+0.010
+0.019
+SA-GSint(ours)
+30.84
+32.71
+34.26
+32.80
+32.65 0.956
+0.969
+0.978
+0.979
+0.971 0.055
+0.031
+0.021
+0.019
+0.032
+SA-GSsup(ours)
+30.80
+32.67
+35.06
+35.77
+33.58 0.956
+0.969
+0.980
+0.985
+0.973 0.056
+0.032
+0.020
+0.014
+0.031
+Table 3: Multi-scale Training and Multi-scale Testing on the Blender dataset
+[13]. Our training-free approach yields comparable results compared to Mip-Splatting
+[24]. Meanwhile, our approach significantly outperforms 3DGS [10] and demonstrates
+stable performance at different resolutions.
+PSNR ↑
+SSIM ↑
+LPIPS↓
+1 Res. 1/2 Res. 1/4 Res. 1/8 Res. Avg. 1 Res. 1/2 Res. 1/4 Res. 1/8 Res. Avg. 1 Res. 1/2 Res. 1/4 Res. 1/8 Res Avg.
+3DGS
+35.10
+27.91
+22.42
+18.76
+26.05 0.974
+0.949
+0.862
+0.736
+0.880 0.029
+0.033
+0.069
+0.133
+0.066
+3DGS(MS)
+31.51
+32.66
+31.21
+28.25
+30.91 0.962
+0.972
+0.968
+0.945
+0.962 0.050
+0.031
+0.030
+0.045
+0.039
+Mip-Splatting
+34.59
+35.11
+31.98
+28.14
+32.45 0.973
+0.979
+0.975
+0.952
+0.970 0.032
+0.019
+0.019
+0.029
+0.025
+SA-GSfil(ours) 34.60
+34.33
+31.02
+27.59
+31.89 0.973
+0.977
+0.968
+0.947
+0.966 0.031
+0.022
+0.036
+0.067
+0.039
+SA-GSint(ours) 34.35
+34.39
+30.99
+26.89
+31.65 0.972
+0.978
+0.971
+0.940
+0.965 0.032
+0.020
+0.023
+0.039
+0.029
+SA-GSsup(ours) 34.49
+36.58
+37.50
+35.64
+36.06 0.972
+0.980
+0.985
+0.985
+0.981 0.032
+0.018
+0.014
+0.013
+0.019
+Table 4: Single-scale training and Multi-scale testing on the Blender dataset
+[13] for zoom-out effect. We use the same experiment protocol and model naming
+with the Mip-NeRF 360 [2] experiment (of Table 1). Our method outperforms 3DGS
+[10], while SA-GSsup significantly surpasses all previous works.
+
+14
+Song et al.
+Single-scale Training and Multi-scale Testing: We maintain a experiment
+protocol consistent with the Mip-NeRF 360 [2] experiment mentioned above
+(Section 4.2) to evaluate the zoom-out and zoom-in effects. We also keep the
+same data split as in the multi-scale training experiment described above. Table
+4 and Table 5 show the quantitative results for zoom-out and zoom-in effects.
+The qualitative results are shown in Fig. 8.
+For zoom-out, our method achieves performance close to 3DGS [10] at
+training resolution and a steady increase in performance at lower resolutions.
+The super-sampling version of our method SA-GSsup significantly outperforms
+Mip-Splatting [24] to achieve performance with a gain of 3.61dB in PSNR in
+this setting (see Tab. 4). For zoom-in, Our 2D scale-adaptive filter achieves
+comparable results to Mip-Splatting [24], and our method is training-free.
+PSNR ↑
+SSIM ↑
+LPIPS↓
+1 Res. 2 Res. 4 Res. 8 Res. Avg. 1 Res. 2 Res. 4 Res. 8 Res. Avg. 1 Res. 2 Res. 4 Res. 8 Res Avg.
+3DGS [10]
+36.97 24.33 21.01 19.63 25.44 0.988 0.886 0.820 0.821 0.879 0.013 0.065 0.130 0.159 0.092
+3DGS(MS) [10]
+28.25 31.21 32.66 31.51 30.91 0.945 0.968 0.972 0.962 0.962 0.045 0.030 0.031 0.050 0.039
+Mip-Splatting [24] 36.50 30.72 27.81 26.51 30.39 0.986 0.959 0.920 0.893 0.939 0.015 0.048 0.099 0.130 0.073
+SA-GSfil(ours)
+35.74 30.38 27.63 26.36 30.03 0.984 0.953 0.912 0.885 0.933 0.016 0.059 0.111 0.141 0.082
+Table 5: Single-scale training and Multi-scale testing on the Blender dataset
+[13] for zoom-in effect. We use the experiment and model naming with the Mip-
+NeRF 360 [2] experiment (of Table 2). Our methods yields comparable results with
+Mip-Splatting [24]. SA-GSfil achieves this performance while being training-free.
+5
+Conclusion
+We present SA-GS, a training-free framework that can seamlessly integrate with
+3DGS [10] to enhance its anti-aliasing ability at arbitrary rendering frequen-
+cies. Specifically, we propose a 2D scale-adaptive filter, which maintains the 2D
+Gaussian projection scale’s consistency under different rendering settings. In
+addition, we employ conventional anti-aliasing techniques, super-sampling, and
+integration to significantly reduce image aliasing at lower sampling rates. SA-
+GS demonstrates superior or comparable performance to the state-of-the-art, as
+extensive validation is performed on both bounded and unbounded scenarios.
+Limitations. Our method has no computational burden when zooming in, but
+when zooming out, the application of integration and super-sampling methods
+increases the rendering time. Due to shared memory, the elapsed time for super-
+sampling is comparable to that of integration, making it 15%∼20% slower than
+the vanilla 3DGS [10]. However, integration can still be optimized(approximation
+calculations or table lookups), leading to further speedups. Overall, our approach
+receives a significant anti-aliasing performance boost with minimal trade-offs.
+
+SA-GS
+15
+References
+1. Barron, J.T., Mildenhall, B., Tancik, M., Hedman, P., Martin-Brualla, R., Srini-
+vasan, P.P.: Mip-nerf: A multiscale representation for anti-aliasing neural radiance
+fields. In: Proceedings of the IEEE/CVF International Conference on Computer
+Vision. pp. 5855–5864 (2021) 4, 6
+2. Barron, J.T., Mildenhall, B., Verbin, D., Srinivasan, P.P., Hedman, P.: Mip-
+nerf 360: Unbounded anti-aliased neural radiance fields. In: Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 5470–
+5479 (2022) 4, 6, 9, 10, 11, 12, 13, 14
+3. Barron, J.T., Mildenhall, B., Verbin, D., Srinivasan, P.P., Hedman, P.: Zip-nerf:
+Anti-aliased grid-based neural radiance fields. arXiv preprint arXiv:2304.06706
+(2023) 4, 6
+4. Chen, W., Ling, H., Gao, J., Smith, E., Lehtinen, J., Jacobson, A., Fidler, S.:
+Learning to predict 3d objects with an interpolation-based differentiable renderer.
+Advances in neural information processing systems 32 (2019) 4
+5. Fridovich-Keil, S., Yu, A., Tancik, M., Chen, Q., Recht, B., Kanazawa, A.: Plenox-
+els: Radiance fields without neural networks. In: Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition. pp. 5501–5510 (2022) 4
+6. Guédon, A., Lepetit, V.: Sugar: Surface-aligned gaussian splatting for effi-
+cient 3d mesh reconstruction and high-quality mesh rendering. arXiv preprint
+arXiv:2311.12775 (2023) 4
+7. Hu, W., Wang, Y., Ma, L., Yang, B., Gao, L., Liu, X., Ma, Y.: Tri-miprf: Tri-mip
+representation for efficient anti-aliasing neural radiance fields. In: Proceedings of
+the IEEE/CVF International Conference on Computer Vision. pp. 19774–19783
+(2023) 4
+8. Hu, W., Wang, Y., Ma, L., Yang, B., Gao, L., Liu, X., Ma, Y.: Tri-miprf: Tri-mip
+representation for efficient anti-aliasing neural radiance fields (2023) 6
+9. Kato, H., Ushiku, Y., Harada, T.: Neural 3d mesh renderer. In: Proceedings of
+the IEEE conference on computer vision and pattern recognition. pp. 3907–3916
+(2018) 4
+10. Kerbl, B., Kopanas, G., Leimkühler, T., Drettakis, G.: 3d gaussian splatting for
+real-time radiance field rendering (2023) 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+11. Liu, S., Li, T., Chen, W., Li, H.: Soft rasterizer: A differentiable renderer for image-
+based 3d reasoning. In: Proceedings of the IEEE/CVF International Conference
+on Computer Vision. pp. 7708–7717 (2019) 4
+12. Mildenhall, B., Srinivasan, P.P., Ortiz-Cayon, R., Kalantari, N.K., Ramamoorthi,
+R., Ng, R., Kar, A.: Local light field fusion: Practical view synthesis with pre-
+scriptive sampling guidelines. ACM Transactions on Graphics (TOG) 38(4), 1–14
+(2019) 2
+13. Mildenhall, B., Srinivasan, P.P., Tancik, M., Barron, J.T., Ramamoorthi, R., Ng,
+R.: Nerf: Representing scenes as neural radiance fields for view synthesis. Commu-
+nications of the ACM 65(1), 99–106 (2021) 2, 4, 6, 11, 13, 14
+14. Müller, T., Evans, A., Schied, C., Keller, A.: Instant neural graphics primitives with
+a multiresolution hash encoding. ACM Transactions on Graphics (ToG) 41(4), 1–
+15 (2022) 4
+15. Nyquist, H.: Certain topics in telegraph transmission theory. Transactions of the
+American Institute of Electrical Engineers 47(2), 617–644 (1928) 3, 8
+16. Peng, Z., Hu, W., Shi, Y., Zhu, X., Zhang, X., Zhao, H., He, J., Liu, H., Fan,
+Z.: Synctalk: The devil is in the synchronization for talking head synthesis. arXiv
+preprint arXiv:2311.17590 (2023) 2
+
+16
+Song et al.
+17. Rückert, D., Franke, L., Stamminger, M.: Adop: Approximate differentiable one-
+pixel point rendering. ACM Transactions on Graphics (ToG) 41(4), 1–14 (2022)
+4
+18. Sainz, M., Pajarola, R.: Point-based rendering techniques. Computers & Graphics
+28(6), 869–879 (2004) 3
+19. Straub, J., Whelan, T., Ma, L., Chen, Y., Wijmans, E., Green, S., Engel, J.J., Mur-
+Artal, R., Ren, C., Verma, S., Clarkson, A., Yan, M., Budge, B., Yan, Y., Pan,
+X., Yon, J., Zou, Y., Leon, K., Carter, N., Briales, J., Gillingham, T., Mueggler,
+E., Pesqueira, L., Savva, M., Batra, D., Strasdat, H.M., Nardi, R.D., Goesele, M.,
+Lovegrove, S., Newcombe, R.: The Replica dataset: A digital replica of indoor
+spaces. arXiv preprint arXiv:1906.05797 (2019) 2
+20. Wei, Y., Wang, Z., Lu, Y., Xu, C., Liu, C., Zhao, H., Chen, S., Wang, Y.: Ed-
+itable scene simulation for autonomous driving via collaborative llm-agents. arXiv
+preprint arXiv:2402.05746 (2024) 2
+21. Wu, Z., Liu, T., Luo, L., Zhong, Z., Chen, J., Xiao, H., Hou, C., Lou, H., Chen,
+Y., Yang, R., et al.: Mars: An instance-aware, modular and realistic simulator for
+autonomous driving. In: CAAI International Conference on Artificial Intelligence.
+pp. 3–15. Springer (2023) 2
+22. Xie, T., Zong, Z., Qiu, Y., Li, X., Feng, Y., Yang, Y., Jiang, C.: Physgaus-
+sian: Physics-integrated 3d gaussians for generative dynamics. arXiv preprint
+arXiv:2311.12198 (2023) 4
+23. Xu, Q., Xu, Z., Philip, J., Bi, S., Shu, Z., Sunkavalli, K., Neumann, U.: Point-
+nerf: Point-based neural radiance fields. 2022 IEEE/CVF Conference on Computer
+Vision and Pattern Recognition (CVPR) pp. 5428–5438 (2022), https://api.
+semanticscholar.org/CorpusID:246210101 4
+24. Yu, Z., Chen, A., Huang, B., Sattler, T., Geiger, A.: Mip-splatting: Alias-free 3d
+gaussian splatting. arXiv preprint arXiv:2311.16493 (2023) 1, 2, 3, 5, 6, 9, 10, 11,
+12, 13, 14
+25. Yuan,
+S.,
+Zhao,
+H.:
+Slimmerf:
+Slimmable
+radiance
+fields.
+arXiv
+preprint
+arXiv:2312.10034 (2023) 2
+26. Zhou, Q., Li, W., Jiang, L., Wang, G., Zhou, G., Zhang, S., Zhao, H.: Pad: A
+dataset and benchmark for pose-agnostic anomaly detection. Advances in Neural
+Information Processing Systems 36 (2024) 2
+27. Zhu, Z., Chen, Y., Wu, Z., Hou, C., Shi, Y., Li, C., Li, P., Zhao, H., Zhou, G.:
+Latitude: Robotic global localization with truncated dynamic low-pass filter in city-
+scale nerf. In: 2023 IEEE International Conference on Robotics and Automation
+(ICRA). pp. 8326–8332. IEEE (2023) 2

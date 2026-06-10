@@ -1,0 +1,1032 @@
+% \documentclass[conference]{IEEEtran}
+% \IEEEoverridecommandlockouts
+% % The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+% \usepackage{cite}
+% \usepackage{tikz}
+% \usetikzlibrary{arrows.meta, positioning}
+% \usepackage{amsmath,amssymb,amsfonts}
+% \usepackage{float}
+% \usepackage{algorithmicx}
+% \usepackage{graphicx}
+% \usepackage[utf8]{vietnam}
+% \usepackage[colorlinks=true,linkcolor=blue, citecolor=red]{hyperref}
+% \usepackage{textcomp}
+% \usepackage{xcolor}
+% \usepackage{url}
+% \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+%     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+% \begin{document}
+
+% \title{3D Object Reconstruction based on 3D Gaussian Splatting}
+
+% \author{\IEEEauthorblockN{1\textsuperscript{st} Đinh Nguyễn Gia Bảo - 22127027}
+% \IEEEauthorblockA{
+% \textit{Khoa Công nghệ Thông tin} \\
+% \textit{Trường Đại học Khoa học Tự nhiên, ĐHQG-TPHCM}\\
+% Thành phố Hồ Chí Minh, Việt Nam\\
+% dngbao22@clc.fitus.edu.vn}
+
+% \and
+% \IEEEauthorblockN{2\textsuperscript{nd} Nguyễn Công Tuấn - 22127436}
+% \IEEEauthorblockA{
+% \textit{Khoa Công nghệ Thông tin} \\
+% \textit{Trường Đại học Khoa học Tự nhiên, ĐHQG-TPHCM}\\
+% Thành phố Hồ Chí Minh, Việt Nam\\
+% nctuan22@clc.fitus.edu.vn}
+% }
+
+% \maketitle
+
+% \begin{abstract}
+% 3D Gaussian splatting là một kỹ thuật đột phá của lĩnh vực 3D Reconstruction nhờ ưu thế về tốc độ render. Vậy thì kể từ khi paper gốc lần đầu xuất hiện cho đến thời điểm hiện tại khi mà đã có những survey về đề tài này được công bố thì đã có những đột phá gì mới và đâu là những hướng đi tiềm năng ở thời điểm hiện tại. Bên cạnh đó thì Gaussian splatting là gì và nó khác gì so với những phương pháp trước như Deep Learning (phổ biến là NerF), nhằm trả lời câu hỏi trên thì hãy cùng đọc qua bài báo cáo lần này của nhóm để nắm rõ từng khái niệm.
+
+% \end{abstract}
+
+\section{Giới thiệu đề tài}
+    \subsection{Ý nghĩa ứng dụng} Phương pháp 3D Gaussian splatting (3DGS) mang lại nhiều tiềm năng ứng dụng trong các lĩnh vực thực tiễn nhờ khả năng tái tạo cảnh 3D với tốc độ thời gian thực và độ chi tiết cao. Các ứng dụng nổi bật này được tìm hiểu từ nguồn tài liệu trên mạng và các tài liệu khoa học \cite{b2}, bao gồm có:
+    
+    \begin{enumerate}
+        \item \textit{Thực tế ảo và thực tế tăng cường (VR/AR)} khi 3DGS cho phép tạo ra các mô hình 3D chân thực, \textit{hỗ trợ trải nghiệm nhập vai} trong các ứng dụng như trò chơi điện tử, \textit{mô phỏng đào tạo}, hoặc \textit{thiết kế nội thất ảo}. Khả năng kết xuất thời gian thực đảm bảo trải nghiệm mượt mà, đáp ứng yêu cầu về hiệu suất của các hệ thống VR/AR. 
+        
+        \item \textit{Xây dựng bản đồ 3D} chi tiết cho robot, hỗ trợ các tác vụ như \textit{lập kế hoạch đường đi}, tránh chướng ngại vật, hoặc thao tác trong không gian phức tạp. Việc tích hợp thông tin ngữ nghĩa vào các Gaussian còn giúp cải thiện khả năng nhận thức môi trường của robot. 
+        
+        \item Trong lĩnh vực y tế, 3DGS \textit{hỗ trợ tái tạo các mô hình 3D từ dữ liệu hình ảnh y khoa} (như nội soi hoặc CT), giúp bác sĩ lập kế hoạch phẫu thuật, mô phỏng các thủ thuật, hoặc trực quan hóa các cấu trúc giải phẫu phức tạp với độ chính xác cao. 
+        
+        \item \textit{Tạo và chỉnh sửa các cảnh 3D} trong \textit{sản xuất phim}, \textit{hoạt hình}, hoặc \textit{thiết kế 3D}. Khả năng chỉnh sửa linh hoạt và kết xuất nhanh giúp các nhà sáng tạo nội dung tối ưu hóa quy trình làm việc, giảm thời gian sản xuất. 
+        
+        \item \textit{Tái tạo các công trình kiến trúc}, \textit{hiện vật lịch sử}, hoặc \textit{di sản văn hóa dưới dạng mô hình 3D}, hỗ trợ bảo tồn và nghiên cứu mà không cần tiếp xúc trực tiếp với đối tượng thật.
+    \end{enumerate}
+    
+    Những ứng dụng này không chỉ thể hiện tính linh hoạt của 3DGS mà còn mở ra tiềm năng cho các giải pháp sáng tạo trong nhiều ngành công nghiệp, từ công nghệ, y tế đến văn hóa và giải trí.
+    
+    \subsection{Ý nghĩa khoa học} Phương pháp 3D Gaussian splatting đóng góp quan trọng vào sự phát triển của lĩnh vực thị giác máy tính và đồ họa máy tính, với các ý nghĩa khoa học nổi bật lấy thông tin từ \cite{b2} như sau:
+    \begin{enumerate}
+        \item 3DGS cung cấp một \textit{phương pháp biểu diễn cảnh rõ ràng} (explicit representation) kết hợp ưu điểm của cả \textit{biểu diễn ngầm} (implicit) và \textit{biểu diễn rời rạc} (discrete). Điều này giúp giảm chi phí tính toán so với các phương pháp như NeRF, đồng thời duy trì chất lượng tái tạo cao, mở ra hướng nghiên cứu mới về biểu diễn cảnh hiệu quả. 
+        
+        \item \textit{Sử dụng kỹ thuật splatting và tile-based rasterization} để đạt hiệu suất cao trong việc \textit{kết xuất thời gian thực}, đóng góp vào việc phát triển các thuật toán kết xuất song song và tối ưu hóa tài nguyên tính toán. Đây là một bước tiến quan trọng trong việc đưa các mô hình 3D phức tạp vào các ứng dụng yêu cầu hiệu suất cao. 
+        
+        \item Tận dụng các \textit{kỹ thuật học sâu} để \textit{tối ưu hóa tham số Gaussian}, đồng thời tích hợp các phương pháp như kiểm soát mật độ thích ứng. Điều này không chỉ cải thiện độ chính xác của mô hình mà còn đặt nền tảng cho các nghiên cứu về học sâu trong các bài toán tái tạo 3D với dữ liệu thưa thớt hoặc không đầy đủ. 
+        
+        \item \textit{Tạo điều kiện cho các nghiên cứu liên ngành} giữa thị giác máy tính, đồ họa máy tính và các lĩnh vực như robot, y học, hoặc khoa học vật liệu. Việc tích hợp các thuộc tính như ngữ nghĩa, không-thời gian, hoặc vật liệu vào Gaussian mở ra các hướng nghiên cứu mới về biểu diễn cảnh đa chiều. 
+        
+        \item Đặt nền tảng cho các nghiên cứu về \textit{tối ưu hóa bộ nhớ}, \textit{cải thiện chất lượng hình ảnh} (như chống răng cưa, mô phỏng ánh sáng toàn cục) và phát triển các phương pháp biểu diễn lai (hybrid representation). Những đóng góp này thúc đẩy sự phát triển của các kỹ thuật tái tạo 3D tiên tiến hơn.
+    \end{enumerate}
+
+    \subsection{Phát biểu bài toán}
+    Bài toán tái tạo vật thể 3D dựa trên kỹ thuật 3D Gaussian splatting (3DGS) được định nghĩa như sau: 
+    
+    \textit{Đầu vào:}
+        \begin{enumerate}
+            \item Bộ dữ liệu hình ảnh 2D chụp từ nhiều góc nhìn khác nhau của một vật thể hoặc khung cảnh thật. Các hình ảnh này có thể đi kèm với thông tin về vị trí máy ảnh (camera poses) và thông số nội tại của máy ảnh (intrinsic parameters) được xác định thông qua các phương pháp như Structure-from-Motion (SfM) hoặc COLMAP.
+            \item Đám mây điểm thưa thớt (sparse point cloud) khởi tạo ban đầu, thường được tạo ra từ SfM, đại diện cho các đặc trưng hình học cơ bản của cảnh.
+        \end{enumerate}
+        
+    \textit{Đầu ra:}
+        \begin{enumerate}
+            \item Một biểu diễn cảnh 3D dưới dạng tập hợp các 3D Gaussian, mỗi Gaussian được tham số hóa bởi vị trí, ma trận hiệp phương sai, độ mờ (opacity) và hệ số điều hòa hình cầu (spherical harmonic coefficients) để mô tả màu sắc và ánh sáng.
+            \item Hình ảnh 2D được kết xuất (render) từ bất kỳ góc nhìn nào với độ phân giải cao và tốc độ thời gian thực (real-time), đảm bảo độ chân thực và chi tiết hình học của vật thể 3D. \\
+        \end{enumerate} 
+        
+    \textit{Framework} của 3D Gaussian splatting được thiết kế để tối ưu hóa hiệu suất và chất lượng tái tạo hình ảnh, bao gồm các giai đoạn chính như Hình~\ref{fig:workflow}, lấy cảm hứng từ \cite{b1}
+        
+    \begin{enumerate}
+        \item \textit{Khởi tạo (Initialization)} bằng cách tạo tập hợp các 3D Gaussian ban đầu từ đám mây điểm thưa thớt thu được từ SfM. Mỗi Gaussian được gán các tham số như vị trí, hiệp phương sai đẳng hướng, độ mờ và hệ số điều hòa hình cầu.
+        \item \textit{Tối ưu hóa tham số (Parameter Optimization)} bằng việc sử dụng thuật toán gradient descent để tối ưu hóa các tham số của Gaussian (vị trí, hiệp phương sai, độ mờ, màu sắc) dựa trên hàm mất mát kết hợp giữa $\ell_1$ và D-SSIM. Quá trình này đảm bảo hình ảnh kết xuất khớp với dữ liệu thực.
+        \item \textit{Kiểm soát mật độ thích ứng (Adaptive Density Control)} thông qua điều chỉnh số lượng và phân bố Gaussian bằng cách nhân bản Gaussian ở các vùng thiếu chi tiết và loại bỏ hoặc chia nhỏ Gaussian ở các vùng dư thừa, nhằm tối ưu hóa hiệu quả tính toán và chất lượng tái tạo.
+        \item \textit{Kết xuất (Rendering)} các 3D Gaussian vào không gian ảnh 2D thông qua quy trình splatting, tiling, replication và alpha blending. Quá trình này được thực hiện song song để đạt hiệu suất thời gian thực (khoảng 30 khung hình/giây ở độ phân giải 1080p). 
+    \end{enumerate}
+        
+    Framework này tận dụng ưu điểm của biểu diễn rõ ràng (explicit representation) và kỹ thuật kết xuất song song để đạt được sự cân bằng giữa tốc độ, chất lượng và khả năng chỉnh sửa cảnh 3D.
+    
+    \subsection{Đóng góp}
+    Với sự ưu việt của phương pháp 3D Gaussian Splatting trong tác vụ 3D Reconstructions, nhóm mong muốn đem đến những cải tiến mới trong cấu trúc lưu trữ và xử lý dữ liệu nhằm tối ưu hóa hệ thống, giảm thiểu bộ nhớ yêu cầu vì hầu hết các mô hình hiện tại sử dụng lên đến hàng triệu điểm Gaussians và kích thước lưu trữ lên đến hàng trăm Gigabytes. Ngoài ra thì đề tài còn hy vọng có thể cung cấp cho người đọc dù là mới hay đã có kinh nghiệm trong lĩnh vực khoa học đều có thể dễ dàng nắm bắt được ưu thế của đề tài này trong thời điểm hiện tại. 
+
+\newpage
+\section{Các công trình nghiên cứu liên quan}
+
+    \subsection{A Survey on 3D Gaussian splatting \cite{b2}}
+        \subsubsection{Giới thiệu}
+        Qua survey, hành trình của việc tái tạo cảnh 3D đã bắt đầu từ rất lâu trước khi làn sóng học sâu xuất hiện. Những nỗ lực ban đầu chủ yếu tập trung vào Light Field và các phương pháp biểu diễn hình học. Tuy nhiên, cùng với sự phát triển của thị giác máy tính và các mô hình học sâu, càng ngày càng xuất hiện nhiều công trình nghiên cứu cải thiện độ chính xác, tốc độ thực thi và khả năng khái quát của hệ thống tái tạo cảnh (3D Object Reconstruction).\\
+        
+        Đáng chú ý trong thời gian gần đây đó là mô hình 3D Gaussian splatting(3D GS), nổi lên như một phương pháp đột phá trong việc biểu diễn trường bức xạ một cách rõ ràng (explicit radiance field) nhờ khả năng cho phép dựng lại cảnh 3D với tốc độ rất nhanh trong khi vẫn duy trì chất lượng hình ảnh. \\
+        
+        3D GS được tin rằng là bước đột phá của thế hệ tiếp theo của 3D reconstruction. Khác với những phương pháp Deep Learning - render bằng cách học các kiến thức ngầm của ảnh (implicit radiance field) rồi tái tạo lại bằng quy tắc ánh xạ tọa độ (coordinate-based model) từ miền không gian ảnh vào miền tọa độ pixels (spatial to pixel), 3D GS tận dụng các biểu diễn trực quan của ảnh (explicit) rồi dựa vào đó sinh ra những điểm Gaussians, tận dụng hàng triệu điểm Gaussians để render cùng lúc mà từ đó cho ra hiệu suất tuyệt vời của mình. Nhờ sự ưu việt này mà Survey đã được thực hiện để nhằm cung cấp cái nhìn toàn diện về bức tranh 3DGS để cả người mới bắt đầu lẫn các nhà nghiên cứu giàu kinh nghiệm có thể nắm bắt xu thế đang lên này. \\
+
+        \subsubsection{Bối cảnh hiện tại của 3DGS}
+
+        Trước tiên là về nền tảng lý thuyết cho 3D Gaussian splatting(3DGS), tức bao gồm các khái niệm về trường bức xạ (radiance field), các phương pháp dựng hình và vai trò của 3DGS trong hệ thống 3D Object Reconstruction. Khái niệm đầu tiên được đề cập đến là "Radiance Field" - một cách biểu diễn phân bố ánh sáng trong không gian ba chiều và có thể chia thành hai dạng chính:
+        
+        \begin{itemize}
+        	\item \textit{Implicit Radiance Field:} Biểu diễn ánh sáng một cách ngầm định mà không cần mô hình hình học rõ ràng. Các phương pháp như NeRF sử dụng mạng nơ-ron để ánh xạ từ toạ độ không gian và góc nhìn đến màu sắc và mật độ thể tích. Cách tiếp cận này nhỏ gọn và có thể vi phân, nhưng yêu cầu chi phí tính toán cao do phụ thuộc vào quá trình volumetric ray marching.
+        	
+        	\item \textit{Explicit Radiance Field:} Biểu diễn ánh sáng trực tiếp trong các cấu trúc không gian rời rạc như voxel grids hoặc point clouds. Ưu điểm là truy xuất nhanh, nhưng yêu cầu nhiều bộ nhớ và độ phân giải bị giới hạn.
+        	
+        	\item \textit{3D Gaussian splatting(3DGS):} Là phương pháp kết hợp ưu điểm của cả hai loại trên. 3DGS sử dụng các Gaussian ba chiều có thể học được (learnable 3D Gaussians) để biểu diễn cảnh một cách rõ ràng. Điều này cho phép dựng hình thời gian thực, dễ chỉnh sửa và tối ưu hơn về mặt chi phí tính toán so với NeRF (Mô hình Deep Learning). 
+        \end{itemize}
+        
+        Các khái niệm lý thuyết tiếp theo được đề cập đến bao gồm có "Volumetric Rendering" và "Point-based Rendering":
+        
+        \begin{itemize}
+        	\item \textit{Volumetric Rendering:} Là quá trình tính toán tích phân ánh sáng dọc theo tia camera, được sử dụng phổ biến trong NeRF. Mặc dù kết quả tính toán khi so với thực tế là chính xác, phương pháp này lại yêu cầu nhiều phép lấy mẫu và các phép toán phức tạp, khó áp dụng cho các hệ thống cần dựng hình trong thời gian thực (real-time rendering).
+        	
+        	\item \textit{Point-based Rendering:} Dựng hình dựa trên các điểm (primitives) như Gaussian, sử dụng kỹ thuật alpha blending. Phương pháp này cho phép dựng hình hiệu quả hơn nhờ việc có thể song song hóa các luồng xử lý cùng lúc (tức đa luồng việc render). 3DGS là một ví dụ điển hình của kỹ thuật point-based rendering này.
+        \end{itemize}
+        
+        Tóm lại, ở bối cảnh hiện tại thì 3D Gaussian splatting là một phương pháp kết hợp lợi thế tính chất biểu diễn rõ ràng của ảnh (explicit), có thể cải tiến độ chính xác nhờ khả năng học cách tạo các điểm Gaussians từ mạng học sâu và kế thừa tôc độ dựng hình từ kỹ thuật dựng hình theo điểm (đa luồng). Điều này giúp 3DGS trở thành một giải pháp mạnh mẽ cho các ứng dụng dựng hình thời gian thực mà vẫn giữ nguyên chất lượng của vật thể 3D được render. \\
+
+        \subsubsection{Nguyên lý hoạt động của 3DGS}        
+        Như đã đề cập ở trên, 3DGS là một phương pháp tiên tiến cho phép dựng hình thời gian thực với độ phân giải cao mà không phụ thuộc vào mạng nơ-ron sâu như NerF. Nguyên lý hoạt động của 3DGS dựa trên việc sử dụng các 3D Gaussian học được để biểu diễn cảnh và áp dụng quy trình dựng hình song song. Quá trình tổng thể bao gồm hai thành phần chính là "Dựng hình xuôi (Forward Rendering)" tức tạo ảnh từ các Gaussian đã học. Hai là "tối ưu hóa tham số (Parameter Optimization)" tức học các thuộc tính của Gaussian để khớp với dữ liệu thực.\\
+        
+        Đối với công đoạn đầu tiên là "Forward Rendering", đây là giai đoạn hệ thống sẽ render mô hình 3D nhờ xử lý đầu vào qua một hệ thống đa tầng như Hình~\ref{fig:3dgs_framework} bao gồm các thành phần:
+        
+        \begin{enumerate}
+        	\item \textit{Splatting:} Các 3D Gaussian được chiếu vào không gian ảnh.
+        	\item \textit{Tiling:} Không gian ảnh được chia thành các ô không chồng lắp (tiles).
+        	\item \textit{Replication:} Mỗi Gaussian được nhân bản vào tất cả các tiles mà nó ảnh hưởng.
+        	\item \textit{Sorting \& Rendering:} Gaussian trong từng tile được sắp xếp theo độ sâu và tổng hợp màu sắc sử dụng alpha blending. Quá trình này hoàn toàn song song giữa các tile và giữa các điểm ảnh trong tile.
+        \end{enumerate}
+        
+        \begin{figure*}[htbp]
+        	\centering
+        	\includegraphics[width=\textwidth]{img/Survey framework.png}
+        	\caption{An illustration of the forward process of 3D GS: (a) The splatting step projects 3D Gaussians into image space. (b) 3D GS divides the image into multiple non-overlapping patches, i.e., tiles. (c) 3D GS replicates the Gaussians which cover several tiles. (d) Rendering the sorted Gaussians for each tile independently in parallel.}
+        	\label{fig:3dgs_framework}
+        \end{figure*}
+        
+        
+        Còn với công đoạn tiếp theo "Parameter Optimization", đây là bước mà các thuộc tính của mỗi Gaussian bao gồm vị trí, màu sắc, alpha và ma trận hiệp phương sai, tất cả sẽ được tối ưu hóa theo phương pháp cập nhật trọng số của Machine Learning để tái dựng chính xác hơn hình ảnh đầu ra sau mỗi lần huấn luyện. Hàm mất mát được sử dụng ở bước này là tổ hợp giữa $\ell_1$ và D-SSIM:
+        
+        \[
+        \mathcal{L} = (1 - \lambda)\mathcal{L}_1 + \lambda \mathcal{L}_{\text{D-SSIM}},
+        \]
+        
+        với $\lambda \in [0, 1]$. Các tham số được cập nhật thông qua "Gradient Descent". Ma trận hiệp phương sai $\Sigma$ cần được ràng buộc để giữ tính dương xác định và tránh mất ổn định trong quá trình huấn luyện.
+        
+        Ngoài 2 công đoạn trên thì ta còn có "Adaptive Density Control", một quy trình phụ nhằm kiểm soát số lượng Gaussian được tạo ra, một hệ thống theo dõi mức độ đóng góp của mỗi Gaussian qua nhiều góc nhìn. Nếu tồn tại một Gaussian không có đóng góp đáng kể cho việc render 3D, alpha của nó sẽ được giảm dần về 0, giúp loại bỏ các phần tử dư thừa. Chiến lược này nhằm giúp tăng mật độ Gaussian tại các vùng quan trọng và loại bỏ các điểm Gaussian không cần thiết, giảm chi phí tính toán cũng như bộ nhớ yêu cầu và giữ tập Gaussian gọn nhẹ hiệu quả.
+        
+        \medskip
+        
+        Tổng kết lại, 3D Gaussian splattingđạt được sự cân bằng tối ưu giữa tốc độ dựng hình và chất lượng tái tạo là nhờ pipeline hệ thống dựng hình được thiết kế trên nền tảng xử lý song song và kỹ thuật điều khiển mật độ các điểm Gaussians thông minh để tối ưu hóa. \\
+        
+        \subsubsection{Định hướng phát triển}
+
+        Mặc dù 3D Gaussian splatting(3DGS) ở hiện tại đã đạt được nhiều thành tựu nổi bật, song với đó vẫn còn nhiều hướng nghiên cứu tiềm năng nhằm mở rộng khả năng ứng dụng và cải thiện hiệu suất đang được bỏ ngõ. Phần này sẽ tổng hợp các hướng phát triển chính đã được khám phá trong các nghiên cứu công bố gần đây, những lĩnh vực đó bao gồm có:\\
+
+        \begin{itemize}
+        
+        
+        \item \textit{3DGS với dữ liệu đầu vào thưa thớt (Sparse Input)} - Trong nhiều ứng dụng thực tế thì dữ liệu đầu vào bị giới hạn về số lượng góc nhìn. Chính vì vậy nên khi áp dụng 3DGS sẽ gặp khó khăn trong bước tái dựng cảnh 3D từ dữ liệu như vậy. Các hướng tiếp cận chính cho vấn đề này bao gồm có \textit{Regularization-based methods -} Sử dụng thông tin bổ sung như bản đồ độ sâu để ổn định huấn luyện, ví dụ như DNGaussian hoặc MVSplat. Hoặc là \textit{Learning-based methods -} Sử dụng mạng học sâu để học biểu diễn hình học ẩn của ảnh hoặc đặc trưng Gaussian từ dữ liệu huấn luyện đa cảnh. \\
+        
+        \item \textit{3DGS tiết kiệm bộ nhớ (Memory-efficient 3DGS)} - Việc lưu trữ hàng triệu điểm Gaussian cũng dẫn đến việc yêu cầu bộ nhớ lưu trữ lớn, có thể lến đến hàng trăm hoặc ngàn nghìn Gigabytes. Để giải quyết vấn đề này thì các kỹ thuật như pruning, lượng tử hóa thuộc tính, hoặc gom nhóm Gaussian đã được đề xuất, mục đích là nén mô hình nhờ cắt bỏ các Gaussians có đóng góp thấp, nén các thuộc tính vào các \textit{codebook} rời rạc hay dự đoán xác suất thuộc tính để áp dụng lượng tử hóa (\textit{quantization}).\\
+        
+        \item \textit{Tăng độ chân thực trong dựng hình (Photorealistic 3D Gaussian splatting)} - Nhằm khắc phục một số hạn chế như hiện tượng xuất hiện răng cưa (aliasing) trong model 3D được dựng, thứ mà làm phản xạ không chính xác và nhòe mờ, gây ảnh hưởng lên chất lượng hình ảnh. Các giải pháp đã được đề xuất bao gồm việc áp dụng kỹ thuật lọc đa tỉ lệ (multi-scale filtering) trong quá trình huấn luyện và suy luận, mô hình hóa vật liệu phản xạ thông qua việc mở rộng các thuộc tính của Gaussian và bổ sung thêm thông tin về chiếu sáng hoặc bóng đổ để khả năng tái tạo hình ảnh chân thực hơn.\\
+        
+        \item \textit{Thuật toán tối ưu hóa cải tiến (Improved Optimization Algorithms)} - Nhằm nâng cao hiệu quả huấn luyện trong mô hình 3D Gaussian splatting, các nghiên cứu đã đề xuất nhiều phương pháp như áp dụng regularization hình học dựa trên thông tin về độ sâu, biên cạnh và tần số không gian; giảm sự phụ thuộc vào các cấu trúc tái tạo như Structure-from-Motion (SfM) hoặc COLMAP; phát triển kỹ thuật học biểu diễn meta (meta-representation) để tăng khả năng tổng quát hóa mô hình giữa các cảnh khác nhau.\\
+        
+        \item \textit{Bổ sung thuộc tính cho Gaussian (3D Gaussian splattingwith More Properties)} - Nhằm mở rộng khả năng ứng dụng bằng cách tích hợp thêm các thông tin như ngôn ngữ, ngữ nghĩa hoặc đặc trưng không-thời gian (space-time) vào từng điểm Gaussian. Việc này cho phép thực hiện các tác vụ khác như truy vấn cảnh 3D bằng ngôn ngữ tự nhiên (language-grounded scene retrieval), chỉnh sửa và phân đoạn cảnh theo ngữ nghĩa (semantic editing and segmentation), cũng như biểu diễn các cảnh động thông qua mô hình Gaussian 4D mang đặc tính không-thời gian (spatiotemporal Gaussian representation).\\
+        
+        \item \textit{Biểu diễn lai (Hybrid Representation)} - Là hướng tiếp cận kết hợp Gaussian với các mô hình hình học có cấu trúc như mesh hoặc voxel grid, nhằm tận dụng cả khả năng hiển thị mềm mại của Gaussian và độ chính xác hình học cao của các mô hình truyền thống. Sự kết hợp này mở ra nhiều ứng dụng tiềm năng như dựng avatar có thể điều khiển được (controllable avatar reconstruction), mô hình hóa các biến dạng động học trong không gian chuẩn (deformation in canonical space) và thực hiện chuyển phong cách thời gian thực (real-time style transfer) thông qua đặc trưng của Gaussian.\\
+        
+        \item \textit{Thuật toán dựng hình mới (New Rendering Algorithms for 3D Gaussian splatting)} - Được nghiên cứu nhằm vượt qua giới hạn của phương pháp rasterization cổ điển, bằng cách đề xuất các kỹ thuật như ray tracing hoặc volume rendering chính xác hơn. Những phương pháp này giúp cải thiện các hiệu ứng bậc hai như phản xạ, khúc xạ và bóng đổ, mô phỏng ánh sáng toàn cục (global illumination) và đặc tính vật lý của vật liệu, đồng thời mở ra khả năng thực hiện inverse rendering và tái chiếu sáng cảnh (relighting).
+
+        \end{itemize}
+        Để vắn tắt lại, các hướng mở rộng nêu trên đang tiếp tục thúc đẩy giới hạn của phương pháp 3D Gaussian splattingvề khía cạnh tổng quát hóa, hiệu quả tính toán, mô đun hóa và khả năng ứng dụng vào các bài toán thực tế. Đây đều là những chủ đề thú vị cũng như không kém phần phức tạp với tiềm năng đi kèm của chúng.
+        
+        \subsubsection{Ứng dụng của 3DGS}
+
+        Qua nhiều khảo sát từ nhiều nghiên cứu, 3D Gaussian splatting(3DGS) đã chứng minh tiềm năng vượt trội của bản thân phương pháp. Điều này cũng vô tình đem đến nhiều cầu hỏi về khả năng ứng dụng khái niệm này khi áp dụng vào bài toán thực tế. Ở phần này, survey trình bày các tiêu đề ứng dụng tiêu biểu của 3DGS trong các lĩnh vực khác nhau trong các công bố gần đây..\\
+
+        \begin{itemize}
+        
+        \item \textit{Trong lĩnh vực Robotics} - 3D Gaussian splattingđược ứng dụng nhằm mục đích tăng cường khả năng nhận thức và thao tác của hệ thống robot, đặc biệt trong các bài toán đòi hỏi hiểu biết hình học và xử lý cảnh động. Cụ thể, trong tác vụ mapping, phương pháp này cho phép tạo bản đồ cảnh động hoặc tĩnh với tốc độ và mức độ chi tiết cao hơn so với các phương pháp SLAM truyền thống. Đối với Semantic SLAM, việc tích hợp thông tin ngữ nghĩa vào Gaussian giúp cải thiện độ ổn định và khả năng hiểu ngữ cảnh trong môi trường phức tạp. Ngoài ra, trong tác vụ manipulation, robot có thể thao tác trực tiếp trên mô hình cảnh 3D mà không cần bước trung gian như ước lượng pose, nhờ vào biểu diễn trực tiếp và có khả năng phân biệt của Gaussian.\\
+        
+        \item \textit{Thực tế ảo/tăng cường (VR/AR)} - 3D Gaussian splattingcó thể được mở rộng để tái dựng các cảnh động (Dynamic Scene Reconstruction) thông qua việc học các trường biến dạng (deformation fields) từ không gian chuẩn sang các trạng thái động, cũng như mã hóa chuyển động trực tiếp vào các điểm Gaussian nhằm tạo ra biểu diễn 4D. Khả năng này mở ra nhiều ứng dụng tiềm năng như thực tế ảo và tăng cường (VR/AR), mô phỏng vật lý, hoạt hình thời gian thực và hỗ trợ học robot trong các môi trường có tính chất động.\\
+        
+        \item \textit{Sinh dữ liệu và chỉnh sửa cảnh 3D (Generation and Editing)} - Một ứng dụng khác của 3D Gaussian splattinglà hỗ trợ sinh dữ liệu và chỉnh sửa cảnh 3D (Generation and Editing) thông qua nhiều phương pháp linh hoạt. Trong hướng tối ưu hóa (optimization-based generation), các điểm Gaussian được tinh chỉnh dựa trên gradient tín hiệu từ mô hình khuếch tán hoặc từ mô tả văn bản. Với phương pháp sinh trực tiếp (direct 3D generation), các cảnh 3D mới được tạo ra từ các mô hình học như diffusion models hoặc generative models. Ngoài ra, hệ thống còn cho phép chỉnh sửa cảnh thông qua các đặc trưng ngữ nghĩa, điểm khóa, hoặc hướng dẫn bằng ngôn ngữ tự nhiên, giúp nâng cao tính tương tác và khả năng điều khiển trong quá trình thiết kế 3D.\\
+        
+        \item \textit{Tạo dựng avatar ảo trên nền tảng mạng xã hội}M - 3D Gaussian splattingbất ngờ có một ứng dụng khá thú vị đó là giúp tạo avatar của người dùng với độ chân thực cao và khả năng tương tác linh hoạt. Trong lĩnh vực head avatar, phương pháp này mô hình hóa khuôn mặt chi tiết bằng cách kết hợp Gaussian với các mô hình biến dạng như FLAME. Đối với full-body avatar, toàn bộ cơ thể người được biểu diễn trong không gian chuẩn, kết hợp với mô hình tham số như SMPL và các trường biến dạng để điều khiển chuyển động. Những ứng dụng này đặc biệt hữu ích trong các hệ thống thực tế ảo/tăng cường (AR/VR) cũng như các trò chơi điện tử (3D video games) và các hệ thống AI chatbot có giao diện 3D (embodied AI).\\
+        
+        \item \textit{Tái dựng các cảnh nội soi (Endoscopic Scene Reconstruction)} - Trong lĩnh vực y tế, 3D Gaussian splattingcòn được sử dụng để tái dựng các cảnh nội soi (Endoscopic Scene Reconstruction) từ các video phẫu thuật, với khả năng xử lý hiệu quả dữ liệu có độ biến dạng cao, không gian hẹp và điều kiện ánh sáng phức tạp. Phương pháp này hỗ trợ lập kế hoạch phẫu thuật, mô phỏng và trực quan hóa mô mềm động một cách chính xác và trực quan hơn.\\
+        
+        \item \textit{Tái dựng cảnh quy mô lớn (Large-scale Scene Reconstruction)} - Một ứng dụng khác đó là 3D Gaussian splattingcó khả năng tái dựng các cảnh quy mô lớn như thành phố, công trình kiến trúc hoặc môi trường tự nhiên bằng cách kết hợp nhiều cụm Gaussian theo cấp độ, tận dụng khả năng song song hóa để tăng tốc quá trình dựng hình và đảm bảo giao tiếp hiệu quả giữa các phần cảnh thông qua việc sử dụng các hệ tọa độ cục bộ.\\
+        
+        \item \textit{Trong lĩnh vực Physics and Science} - 3D Gaussian splattingđược áp dụng trong các lĩnh vực này nhằm hỗ trợ các tác vụ như inverse rendering để ước lượng đặc tính vật lý từ dữ liệu thị giác, tái chiếu sáng cảnh (relighting) theo các điều kiện ánh sáng khác nhau và mô phỏng vật liệu cũng như tương tác ánh sáng trong các môi trường vật lý phức tạp.
+
+        \end{itemize}
+        \medskip
+        
+        Tóm lại, 3DGS đang ngày càng mở rộng ảnh hưởng sang nhiều ngành công nghiệp và nghiên cứu, từ robot, y tế đến sáng tạo nội dung và khoa học tính toán, tất cả là nhờ ưu thế cân bằng tuyệt vời trong kết hợp hiệu quả giữa tốc độ, khả năng học và tính mô đun hóa của phương pháp này.
+\newpage
+    \subsection{Paper gốc: 3D Gaussian splatting for Real-Time Radiance Field Rendering \cite{b1}}
+        \subsubsection{Giới thiệu} 3D Gaussian splatting (3DGS) là một phương pháp nâng cao để kết suất hình ảnh  dựa vào trường ánh sáng thông qua việc biểu diễn và kết xuất những khung cảnh 3D bằng việc sử dụng các điểm 3D Gaussian để đại diện cho một điểm ảnh trong khung hình. Phương pháp này được giới thiệu bởi Kerbl et al. (2023) và được ứng dụng  cho việc xây dựng hình ảnh 3D trong thời gian thực. \\
+        
+        Khác với các phương pháp truyền thống trước đó như NeRF (Neural Radience Field) chỉ dựa vào việc biểu diễn các neural 'ngầm', 3DGS thực hiện việc biểu diễn bộ tham số của 3D Gaussian một cách rõ ràng và được tối ưu cho tính toán hiệu quả và kết xuất hình ảnh được chân thực hơn. Phương pháp 3DGS đạt được hiệu suất trong thời gian thực khi kết suất được hơn 30 khung hình trên giây (fps) vs độ phân giải lên đến 1080, nhưng vẫn duy trì được độ chân thực của hình ảnh cao. Do đó, phương pháp này được ứng dụng trong thực tế ảo, thực tế tăng cường, trò chơi điện tử và tái tạo khung cảnh 3D. 
+        
+        \subsubsection{Tổng quan về kỹ thuật 3DGS} 
+        Phương pháp 3DGS biểu diễn một khung cảnh dưới dạng đám máy điểm (point cloud), trong đó mỗi điểm ảnh là một 3D Gaussian được tham số hóa bởi vị trí của điểm trong không gian 3 chiều, hiệp phương sai bất đẳng hướng (anisotropic covariance), độ mờ và hệ số điều hòa hình cầu (spherical harmonic (SH) coefficient).\\
+        
+        Những tham số này cùng nhau mô hình hóa các hình học trong không gian và ngoại cảnh giúp nắm bắt được các hiệu ứng phức tạp trong hình ảnh như ánh sáng (tùy thuộc vào góc nhìn hay view-dependent), phản xạ (reflection) và che khuất (occlusion). 3DGS tích hợp các đầu vào từ kết quả của Structure-from-Motion (SfM) hoặc khởi tạo ngẫu nhiên, tối ưu hóa các tham số Gaussian thông qua một quy trình kết xuất vi phân (differentiable rendering pipeline) và sử dụng phương pháp tile-based rasterizer để tạo ra các hình ảnh nhanh trong thời gian thực. 
+        
+        \subsubsection{Các quá trình chính trong phương pháp 3D Gaussian splatting}
+        Phương pháp 3DGS bao gồm ba quá trính chính (khởi tạo, tối ưu và kết suất) và mỗi quá trình sẽ đóng góp một phần đáng kể vào khả năng mô hình hóa và biểu diễn hiệu quả các khung cảnh phức tạp. Phương pháp này còn các tên gọi khác là Biểu diễn khung cảnh bằng đám mây điểm 3D Gaussian. Về luồng xử lý của phương pháp 3DGS thì có thể xem ảnh sau.
+
+        \begin{figure*}[htbp]
+    	\centering
+    	\includegraphics[width=\textwidth]{img/Workflow.png}
+    	\caption{Framework hệ thống cho bài toán 3D Gaussian splatting.}
+    	\label{fig:workflow}
+    \end{figure*}
+
+        \textbf{Quá trình khởi tạo các điểm 3D Gaussians} \\
+        
+        Phương pháp 3DGS yêu cầu một bộ điểm 3D Gaussian dựa trên một tập hợp đám mây điểm thưa thớt được tạo ra bởi thuật toán Structure-from-Motion (SfM) hoặc khởi tạo ngẫu nhiên. Các điểm 3D Gaussian có hình dạng sphere (hình cầu) và hàm dùng để biểu diễn cho mỗi điểm 3D Gaussian được định nghĩa bởi:
+
+        $$G_i(x, \mu_i, \Sigma_i) = \frac{1}{\sqrt{(2\pi)^k|\Sigma_i|}}\exp\left( -\frac{1}{2}(x-\mu_i)^T \Sigma_i^{-1}(x- \mu_i) \right)$$
+
+        với:
+        \begin{itemize}
+            \item  $x \in \mathbb{R}^3$ là vector biểu diễn cho vị trí của một điểm trong không gian ảnh có k-chiều (ví dụ: vị trí của một điểm ảnh trong không gian ảnh 3 chiều là [x, y, z]).
+            \item $ \mu_i \in \mathbb {R}^3 $ là vector đại diện cho trung tâm của điểm 3D Gaussian thứ $ i $-th và được tính dựa trên khoảng cách trung bình từ điểm 3D Gaussian thứ $i$-th đến các điểm lân cận sao cho không giản ảnh k-chiều được phủ kín hoàn hảo và không có 'lỗ hổng'.
+            \item $\Sigma_i \in \mathbb{R}^{3 \times 3}$ là ma trận hiệp phương sai xác định cách điểm 3D Gaussian thứ $i$ được xoay, kéo dài hoặc chia tỷ lệ. Nó có thể được coi là một tham số cho phép mô tả một điểm 3D Gaussian như hình elipsoid trong không gian 3 chiều.
+
+        \end{itemize}
+
+        Mỗi điểm 3D Gaussian (hình cầu) được xác định bởi các tham số bao gồm vị trí trung tâm của "quả cầu" 3D Gaussian trong không gian tọa độ $\mu$, độ mờ $\alpha \in \mathbb{R}^+$, ma trận hiệp phương sai $\Sigma$ và các hệ số điều hòa hình cầu (spherical harmonics coefficients) cho các giá trị RGB trong mỗi phân phối Gaussian.
+        \begin{quote}
+            Điều hòa hình cầu (spherical harmonics) là hàm đặc biệt giúp xác định màu sắc trên bề mặt của một hình cầu. Ta có thể coi nó là các chức năng cơ sở xác định biểu diễn màu. Màu sắc được hiển thị được xác định bởi các hệ số của hàm cơ bản (spherical harmonics basis function). Đối với mỗi Gaussian 3D, chúng ta sẽ muốn tìm hiểu các hệ số chính xác để khi chúng ta nhìn vào điểm 3D này từ một hướng nhất định, nó sẽ truyền tải một màu gần với màu thực tế của hình ảnh. 
+        \end{quote}
+
+        \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.6\linewidth]{img/sh.png}
+            \caption{Hàm cơ sở điều hòa hình cầu (spherical harmonics basis function) với $c_1...c_9$ là hệ số điều hòa hình cầu (spherical harmonics coefficient)}
+            \label{fig:placeholder}
+        \end{figure}
+
+        Trong các ứng dụng thực tế, các hệ số trong hàm $G_i(x, \mu_i, \Sigma_i)$ có thể được lược bỏ để giúp cho quá trình tính toán được diễn ra thuận lợi hơn. Do đó, 3DGS có thể biểu diễn các 'quả cầu' 3D Gaussian bằng:
+        $$G_i(x, \mu_i, \Sigma_i) = \exp\left( -\frac{1}{2}(x-\mu_i)^T \Sigma_i^{-1}(x- \mu_i) \right)$$
+
+        Vì bất kỳ "quả cầu" 3D Gaussian nào trong không gian cũng có thể được xem như là một phân phối chuẩn được biến đổi bởi kỹ thuật chuyển đổi affine.
+
+        \begin{quote}
+            Kỹ thuật chuyển đổi affine thì đây là một phương pháp ánh xạ tuyến tính nhằm lưu giữ lại  'trạng thái' hiện tại của các điểm, đường thẳng và mặt phẳng trong không gian. Ví dụ các đường thẳng song song vẫn song song sau khi biến đổi affine. Kỹ thuật chuyển đổi affine thường được sử dụng để điều chỉnh cho các biến dạng hoặc biến dạng hình học xảy ra với các góc máy ảnh không lý tưởng. 
+        \end{quote}
+        
+        Với sự biến đổi affine thì sẽ ảnh hưởng đến ma trận hiệp phương sai $\Sigma$ thông qua ma trận xoay (rotation) $R \in \mathbb{R}^{3 \times 3}$ và ma trận tỷ lệ (scaling) $S \in \mathbb{R}^{3 \times 3}$. Do đó, ma trận hiệp phương sai $\Sigma$ có thể được biểu diễn thành:
+        $$\Sigma = R\cdot S\cdot I \cdot (R\cdot S)^T =R\cdot S\cdot I \cdot S^T \cdot R^T $$
+
+        với 
+        \begin{itemize}
+            \item $\Sigma \in \mathbb{R}^{k \times k}$ là ma trận hiệp phương 3 chiều của Gaussian.
+            \item $R \in \mathbb{R}^{3 \times 3}$ là ma trận xoay có thể đại diện cho định hướng của Gaussian.
+            \item $S \in \mathbb{R}^{3 \times 3}$ là ma trận tỷ lệ chéo $\text{diag}(s)$ biểu thị độ lệch chuẩn căn chỉnh với trục dọc theo các trục x, y, z.
+            \item $I \in \mathbb{R}^{3 \times 3}$ là ma trận đơn vị.
+        \end{itemize}
+
+        Để thể hiện tính dị hướng (hay còn được gọi là \textbf{anisotropy} và được định nghĩa là tính chất của một vật liệu hay hệ thống mà các đặc tính vật lý, hóa học hoặc quang học của nó thay đổi tùy thuộc vào phương hướng quan sát hoặc tác động) của mỗi màu của "quả cầu" 3D Gaussian, hệ số điều hòa hình cầu (spherical harmonics coefficient) được sử dụng để mô tả phân phối màu tại các điểm khác nhau trên mỗi quả cầu 3D Gaussian. Cuối cùng, kết xuất hình ảnh đạt được thông qua nguyên tắc pha trộn $\alpha$ ($\alpha$-blending). \\
+        
+        Trong đồ họa máy tính và xử lý hình ảnh, pha trộn $\alpha$ chủ yếu giải quyết vấn đề tổng hợp các lớp. Quá trình này sẽ phủ các lớp lên màu nền để tính màu cuối cùng thông qua việc sử dụng độ trong suốt của mỗi lớp với giá trị $\beta$ làm tham số. Giả sử rằng có ba hình ảnh ($I_1 \sim I_3$) cần được trộn vào một hình ảnh nền $ I_ {bk} $, công thức hợp nhất được biểu diễn như sau:
+        $$I_{result} = I_1  \beta_1 + (1 - \beta_1)(I_2  \beta_2 + (1-\beta_2)(I_3\beta_3 +I_{BK} (1-\beta_3)))$$
+        $$\Leftrightarrow I_{result} = I_1 \beta_1 + (1-\beta_1)\beta_2I_2 + (1-\beta_1)(1-\beta_2)\beta_3I_3 + (1-\beta_1)(1-\beta_2)(1-\beta_3)I_{BK}$$
+        với
+        \begin{itemize}
+            \item $I_{result}$ là màu kết quả của điểm ảnh hiển thị.
+            \item $ I_1, I_2, I_3 $ là màu RGB được đóng góp bởi 3D Gaussian/lớp thứ nhất, thứ hai và thứ ba tương ứng $ \beta_1, \beta_2, \beta_3 \in [0, 1] $ là trọng lượng pha trộn (hoặc độ mờ) của mỗi 3D Gaussian/lớp tương ứng.
+            \item $I_{BK}$ là màu nền, thường được sử dụng khi không có 3D Gaussian nào chiếm hoàn toàn một điểm ảnh.
+        \end{itemize}
+
+        Trong các ứng dụng thực tế, màu nền thường bị bỏ qua, có nghĩa là màu của điểm ảnh nền có thể được giả sử là bằng không. Do vậy, công thức tính toán cho từng điểm ảnh với $N$ hình ảnh/lớp được pha trộn và được viết lại như sau:
+        $$I_{result} = \sum_{i \in N}I_i\beta_i \prod^{i-1}_{j=1}(1-\beta_j)$$
+        với
+        \begin{itemize}
+            \item Giá trị $ \beta $ đại diện cho độ trong suốt của 3D Gaussian/lớp hiện tại.
+        \end{itemize}
+
+        Trong 3DGS, các "quả cầu" 3D Gaussian được sắp xếp và chiếu dựa trên độ sâu của chúng. Công thức pha trộn $ \alpha $ cho các lớp với độ trong suốt mong đợi $ \beta $ được thay thế bằng opacity $ \alpha $ và được viết lại thành:
+        $$C = \sum_{i \in N } c_i \alpha_i \prod^{i-1}_{j=1}(1-\alpha_i)$$
+        với
+        \begin{itemize}
+            \item $C$ là màu của điểm ảnh sau khi tổng hợp tất cả các 3D Gaussian/lớp tương ứng.
+            \item $N$ là tập hợp tất cả các 3D Gaussian/lớp chiếu lên điểm ảnh và được sắp xếp theo thứ tự độ sâu từ trước đến sau.
+            \item $c_i$ là màu RGB của Gaussian thứ $ i $.
+            \item $\alpha_i \in [0,1]$ là độ mờ của 3D Gaussian thứ $i$  (tức là, nó đóng góp bao nhiêu cho điểm ảnh đang xét tương ứng).
+            \item $\prod_{j=1}^{i-1}(1-\alpha_j)$ tích lũy độ mờ của tất cả các Gaussian/lớp trước Gaussian/lơp thứ $i$ để đảm bảo rằng các 3D Gaussian/lớp ở gần (phía trước) thì sẽ che khuất đi các 3D Gaussian/lớp ở xa (phía sau).
+        \end{itemize}
+
+        Màu sắc của một "quả cầu" 3D Gaussian được biểu thị bằng các hàm điều hòa hình cầu (spherical harmonic functions) nhằm mô hình hóa sự chiếu sáng tại bất kỳ điểm nào trong không gian. Công thức chiếu sáng hàm được biểu diễn dưới dạng:
+        $$C(\theta, \varphi) = \sum_{j=0}^J\sum^j_{m=-j}c_j^mY_j^m(\theta, \varphi)$$
+
+        với
+        \begin{itemize}
+            \item $C(\theta, \varphi)$ là định hướng màu (hoặc ánh sáng) của 3D Gaussian dọc theo hướng được xác định bởi các góc của hình cầu $(\theta, \varphi)$.
+            \item  $\theta \in [0, \pi]$ là góc độ cao (hay elevation angle) và được đo từ trục z dương.
+            \item $\varphi \in [0, 2\pi)$ là góc phương vị (hay góc quét hoặc azimuth angle) và được đo trong mặt phẳng xy.
+            \begin{figure}[H]
+                \centering
+                \includegraphics[width=0.5\linewidth]{img/Góc elevation và azimuth của hình cầu.png}
+                \caption{Góc elevation và azimuth của hình cầu}
+                \label{fig:placeholder}
+            \end{figure}
+            \item $J$ là bậc (degree) tối đa của hàm cơ sở điều hòa hình cầu (spherical harmonics basis) giúp kiểm soát mức độ chi tiết của màu sắc theo các nhiều góc nhìn khác nhau.
+            \item $j$ là bậc (degree) của hàm cơ sở điều hòa hình cầu đang xét.
+            \item $m$ là thứ tự (order) của một mức độ nhất định $j$ với khoảng giá trị của $m$ là $[-j, j]$.
+            \item $ c_j^m $ là hệ số điều hòa hình cầu đã học được ở bậc $ j $ và thứ tự $ m $ và nó đại diện cho sự đóng góp của mỗi hàm cơ sở cho ánh sáng tổng thể.
+            \item $Y_j^m(\theta, \varphi)$ là giá trị của hàm cơ sở điều hòa hình cầu ở bậc $ j $ và mức độ $m$ và được đánh giá theo hướng/góc nhìn $ (\theta, \varphi) $.
+            \begin{figure}[H]
+                \centering
+                \includegraphics[width=0.5\linewidth]{img/Spherical harmonic basis of selective degree and orders.png}
+                \caption{Cơ sở điều hòa hình cầu (spherical harmonic basis) với bậc (degree) và thứ tự (order) tương ứng}
+                \label{fig:placeholder}
+            \end{figure}
+            
+        \end{itemize}
+
+        Màu sắc định hướng của mỗi "quả cầu" 3D Gaussian được mô hình hóa bằng cách sử dụng điều hòa hình cầu giúp cho phép mã hóa sự xoay vòng của các hiệu ứng màu sắc một cách nhỏ gọn và phù thuộc vào góc nhìn. Hệ số $ c_j^m $ được học trên mỗi 3D Gaussian và hàm cơ sở $ y_j^m (\theta, \varphi) $ mã hóa cấu trúc góc chiếu sáng. Bằng việc sử dụng neural network cho phép chúng ta dự đoán hệ số $ c_j^m $ cho mỗi hàm cơ sở để xác định các giá trị màu của "quả cầu" 3D Gaussian từ các hướng quan sát/góc nhìn khác nhau. \\
+        
+        \textbf{Quá trình tối ưu hóa bằng thuật toán Stochastic Gradient Descent và phương pháp kiểm soát mật độ điểm thích ứng (adaptive density control)} \\
+        
+        Quá trình thứ hai là tối ưu hóa các tham số của các 3D Gaussians để tái tạo lại chính xác khung cảnh và cùng với việc kiểm soát số lượng và phân phối các Gaussians giúp cho cân bằng giữa sự nhỏ gọn và chất lượng của kết quả đầu ra. \\
+        
+        Sau khi quá trình tổng hợp của hình ảnh được hoàn thành thì sử dụng thuật toán  Stochastic Gradient Descent (SGD) cho tất cả các tham số có thể học được và hầu hết các thuộc tính của Gaussian 3D có thể được tối ưu hóa trực tiếp bằng phương pháp lan truyền ngược (back propagation) qua hàm lỗi là hàm hợp giữa L1 (pixel-wise difference) và D-SSIM (Differentiable Structural Similarity Index), giữa các hình ảnh thực tế và các hình ảnh được kết suất bởi 3DGS:
+        $$\mathcal{L} = (1 - \lambda)\mathcal{L}_1 + \lambda \mathcal{L}_{D-SSIM}$$
+        với
+        \begin{itemize}
+            \item $\mathcal{L}$ là tổng mất mát trắc quang (photometric loss).
+            \item $\mathcal{L}_{D-SSIM}$ là mất mát trắc quang dựa trên sự tương đồng về cấu trúc (SSIM).
+            \item $\lambda \in [0, 1]$ là trọng số và cũng là hyperparameter giúp cân bằng giữa độ chính xác màu sắc và độ tương tự cấu trúc.
+        \end{itemize}
+         Nhưng cần lưu ý rằng tối ưu hóa trực tiếp ma trận hiệp phương sai $\Sigma$ có thể dẫn đến một ma trận nửa xác định dương và nó sẽ không tuân thủ các giải thích vật lý của ma trận hiệp phương sai. Để khắc phục vấn đề này, 3D GS chọn tối ưu hóa ma trận xoay $R$ và ma trận tỷ lệ chéo $S$. Ma trận hiệp phương sai $\Sigma$ được xây dựng lại như sau (đã được đề cập ở phần \textbf{Khởi tạo các điểm 3D Gaussian}):
+        $$\Sigma = R S S^{T} R^{T}$$
+        Tiếp đến là \textit{kiểm soát mật độ thích ứng} xen kẽ thuật toán tối ưu hóa (được trình bày ở trên) và được coi là một bước tối ưu hóa bổ sung nhằm điều chỉnh số lượng 3D Gaussian cũng giúp giải quyết việc tái tạo dưới mức (under-reconstruction) và tái tạo vượt mức (over-reconstruction) bằng cách tăng hoặc giảm số lượng 3D Gaussian để nắm bắt tốt hơn các chi tiết của một ảnh. \\
+
+        Quá trình này tập trung vào các khu vực Gaussian bị mất hoặc lan quá rộng. Quy trình kiểm soát mật độ sẽ được thực hiện theo định kỳ (nghĩa là sau một số lần lặp nhất định). Có hai trường hợp cần tăng hoặc giảm số lượng 3D Gaussian:
+        \begin{itemize}
+            \item Đối với các khu vực tái tạo dưới mức, các điểm sẽ được nhân bản lên và di chuyển dọc theo độ dốc để che đi các hình học bị thiếu.
+            \item Đối với các khu vực tái tạo vượt mức, các điểm sẽ được chia hai thành hai phần nhỏ hơn với một tỷ lệ nhất định. \\
+        \end{itemize}
+        Bước này tìm kiếm sự phân phối tối ưu của 3D Gaussian trong không gian 3 chiều nhằm nâng cao chất lượng tổng thể của quá trình tái tạo. Quá trình kiểm soát mật độ có thể được mô tả như sau:
+        \begin{figure}[H]
+            \centering
+            \includegraphics[width=0.5\linewidth]{img/density control.png}
+            \caption{Density control cho khu vực tái tạo dưới mức và khu vực tái tạo vượt mức}
+            \label{fig:placeholder}
+        \end{figure}
+        Sau đó sử dụng độ mờ $\alpha$ để xác định các 3D Gaussian cần loại bỏ. Quá trình này được gọi là cắt tỉa điểm (point pruning). \\
+
+        \begin{quote}
+            Giai đoạn cắt tỉa điểm là giai đoạn thực hiện việc loại bỏ Gaussian thừa hoặc ít ảnh hưởng, có thể được xem như là một quá trình chính quy hóa (regularization process). Nó được thực hiện bằng cách loại bỏ Gaussians có độ mờ $\alpha$ dưới một ngưỡng nhất định ($\alpha < \epsilon_\alpha$) và hoặc kích thước quá lớn trong không gian ảnh để duy trì tính nhỏ gọn. Nghĩa là, loại bỏ 3DG đã hội tụ đến các giá trị rất thấp của $\alpha$.
+        \end{quote}
+
+        Ngoài ra, để ngăn chặn sự gia tăng không chính đáng của mật độ 3D Gaussian trong không gian ảnh đầu vào gần camera, giá trị $\alpha$ của 3D Gaussian được đặt gần bằng 0 sau một số lần lặp nhất định. Điều này giúp tăng mật độ của 3D Gaussian khi cần thiết và loại bỏ khi quá dư thừa. Quá trình này không chỉ giúp bảo tồn các tài nguyên tính toán mà còn đảm bảo rằng các 3D Gaussian trong mô hình vẫn chính xác và hiệu quả cho việc thể hiện khung cảnh tái tạo. \\
+        
+        \textbf{Quá trình vi phân nhanh bằng tile-based rasterizer và sử dụng GPU để kết xuất nhanh trong thời gian thực} \\
+
+        Giả sử các 3D Gaussian đã được tối ưu hóa, xét một cảnh được đại diện bởi (hàng triệu) 3D Gaussian đó. 3DGS bắt đầu chiếu các 3D Gaussian này lên mặt phẳng ảnh dựa trên các điểm ảnh. Quy trình này được gọi là \textbf{splatting}. Trong bước này, các hình elipsids 3D Gaussian trong không gian 3 chiều được chiếu thành các hình elip trong không gian ảnh 2 chiều. Xét về mặt toán học, với ma trận hiệp phương sai 3 chiều $\Sigma$ mô tả phân phối không gian 3D Gaussian và ma trận chuyển đổi góc nhìn $W$, ma trận hiệp phương sai 2 chiều $W'$ đặc trưng cho các 2D Gaussian được chiếu lên không gian mặt phẳng và được tính toán thông qua:
+        $$\Sigma' = JW\Sigma W^TJ^T$$
+        với $J$ là Jacobian xấp xỉ của một phép biến đổi affine.\\
+        
+        Để tránh chi phí tính toán cao của việc lấy 3D Gaussian cho mỗi điểm ảnh, 3DGS chuyển độ chính xác từ mức độ điểm ảnh sang mức độ cấp độ bản vá (patch-level) được lấy cảm hứng từ rasterization dựa trên ô.  Cụ thể, phương pháp GS 3D bắt đầu bằng cách chia hình ảnh thành nhiều bản vá không chồng chéo, được gọi là ô, mỗi ô gồm 16 × 16 điểm ảnh. 3DGS sau đó xác định ô nào giao nhau giữa các 3D Gaussian được chiếu lên mặt phẳng (hay không gian 2 chiều). Vì các 3D Gaussian được chiếu lên có thể nằm trên nhiều ô nên phương pháp hợp lý là nhân bản các 3D Gaussian đó rồi sau đó gán cho mỗi bản sao một định danh duy nhất (ID) tương ứng với các ô có liên quan. \\
+
+        Sau khi sao chép, 3DGS kết hợp ID của các tương ứng với giá trị độ sâu thu được từ chuyển đổi góc nhìn của mỗi 3D Gaussian. Quá trình này mang lại một danh sách các byte chưa được sắp xếp, trong đó các bit phía trên đại diện cho ID các ô và các bit dưới cho biết độ sâu tương ứng. Sau đó, danh sách được sắp xếp theo ID của ô và độ sâu tương ứng và có thể được sử dụng trực tiếp cho mục đích kết xuất, chẳng hạn như tổng hợp $\alpha$ ($\alpha$ compositing). \\
+
+        Sau khi 3D GS sắp xếp lại các 3D Gaussian này xong thì sẽ tính giá trị màu sắc của từng điểm ảnh. Với vị trí của điểm ảnh x, khoảng cách của nó với tất cả các 3D Gaussian chồng chéo, tức là độ sâu của các 3D Gaussian này, có thể được tính toán thông qua ma trận chuyển đổi góc nhìn W, tạo thành một danh sách được sắp xếp. Sau đó, sự pha trộn $\alpha$ ($\alpha$-blending) được áp dụng để tính toán màu cuối cùng của điểm ảnh này:
+        $$C = \sum^{|N|}_{n=1}c_n\alpha_n' \prod^{n-1}_{j=1}(1 - \alpha_j')$$
+
+        với
+        \begin{itemize}
+            \item $c_n$ là màu đã được học
+            \item Giá trị của độ mờ cuối cùng $\alpha_n'$ là kết quả nhân của độ mờ đã học $\alpha_N $ và Gaussian và được định nghĩa như sau:
+            $$\alpha_n' = \alpha_n \times \exp \left( -\frac{1}{2}(x' - \mu'_n)^T\Sigma^{'-1}_n (x' - \mu'_n)  \right)$$
+        \end{itemize}
+        với $ x '$ và $\mu_n'$ là tọa độ khi được chiếu lên không gian phẳng.
+        
+
+        \begin{figure*}[htbp]
+        	\centering
+        	\includegraphics[width=\textwidth]{img/Survey framework.png}
+        	\caption{Tile-based rasterizer}
+        	\label{fig:3dgs_framework}
+        \end{figure*}
+        
+        Tổng kết lại, đầu tiên là đưa biểu diễn 3D Gaussian thành hình ảnh 2D trong thời gian thực cùng với hỗ trợ lan truyền ngược để tối ưu hóa. Sau đó, Rasterizer đảm bảo chất lượng hình ảnh cao bằng cách thực hiện chính xác thứ tự hiển thị và xử lý các splats dị hướng. Nó sẽ thực hiện các bước sau:
+        \begin{itemize}
+            \item Loại bỏ hình cụt (frustum culling) bằng việc loại bỏ các Gaussian ngoài trường nhìn thấy/tầm nhìn của máy ảnh.
+            \item Chuyển đổi không gian của màn hình bằng cách ánh xạ các 3D Gaussian thành 2D, chuyển đổi điểm trung bình (mean) và hiệp phương sai thành không gian của màn hình.
+            \item Chia hình ảnh 2D trên thành các ô gạch và sau đó sẽ gán Gaussians cho các ô gạch dựa trên các phép chiếu 2D và sắp xếp chúng theo độ sâu để đặt thứ tự hiển thị chính xác.
+            \item Kết xuất các điểm điểm ảnh bằng cách pha trộn các Gaussians đã được sắp xếp bằng cách sử dụng độ mờ và hệ số SH của các 3D Gaussian để đảm bảo hiển thị chính xác hình ảnh và các hiệu ứng như ánh sáng, độ tối của các đối tượng,... \\
+        \end{itemize}
+        
+        \subsubsection{Ví dụ thực tế} Giả sử cho hình ảnh \textit{Xe đạp} trong bộ dữ liệu Mip-NNeRT360 \\
+        
+        Dữ liệu đầu vào là bộ hình ảnh 'xe đạp' từ nhiều góc chụp khác nhau, vị trí, góc chụp và các tham số của máy ảnh được hiệu chuẩn từ SfM cũng như là đám mây điểm thưa thớt từ COLMAP. \\
+        
+        Quy trình thực thi trên bộ dữ liệu đầu vào trải qua ba thành phần chính:
+        
+        \begin{itemize}
+            \item Khởi tạo gồm 10000 Gaussians từ đám máy điểm, mỗi Gaussian được tham số hóa bởi vị trí, hiệp phương sai đẳng hướng, độ mờ và hệ số SH
+            \item Tối ưu hóa tham số của các Gaussian qua gần 30000 lần lặp (tầm 35-45 phút cho việc huấn luyện) và sử dụng thuật toán tối ưu SGD với hàm mất mát:
+            $$\mathcal{L} = 0.8\mathcal{L} + 0.2 \mathcal{L}_{D-SSIM}$$
+            \item Mật độ hóa bằng cách nhân bản các Gaussian nhỏ ở khu vực được tái tạo dưới mức (ví dụ như các nan xe đạp, do quá nhỏ và mỏng nên các điểm biểu diễn nên nó cũng sẽ hạn chế) và tách Gaussian lớn ở các khu vực được tía tạo quá mức (ví dụ như bề mặt phẳng của xe đạp, do bề mặt của xe đạp vốn to nên số điểm biểu diễn bề mặt cũng sẽ nhiều đáng kể so với các thành phần khác của xe đẹp) 
+            \item Ánh xạ Gaussians đến một góc nhìn khác, sắp xếp theo chiều sâu và pha trộn bằng cách sử dụng rasterizer dựa trên khối gạch để tạo ra hình ảnh có độ phân giải 1080p trong 33ms  (khoảng 30 khung hình trên giây)
+        \end{itemize}
+
+        \subsection{Splatter Image: Ultra-Fast Single-View 3D Reconstruction \cite{b3}}
+
+            \begin{figure}[H]
+                \centering
+                \includegraphics[width=1\linewidth]{SplatterImage.png}
+            \end{figure}
+            \subsubsection{Những điểm nổi bật của công trình}
+            Splatter Image là một phương pháp kết hợp giữa \textit{neural network} và \textit{Gaussian Splatting} cho bài toán tái dựng 3D từ ảnh đơn (single-view 3D reconstruction). Mạng nơ-ron đảm nhận việc dự đoán tập hợp các điểm Gaussian 3D từ ảnh đầu vào, còn Gaussian Splatting đảm nhận việc hiển thị mô hình 3D. Thiết kế này giúp mô hình tận dụng được tốc độ render rất cao của Gaussian Splatting đồng thời giữ được khả năng học biểu diễn mạnh mẽ của mạng nơ-ron.  
+            
+            Những điểm nổi bật:
+            \begin{itemize}
+            	\item Tốc độ suy luận cực nhanh: Splatter Image đạt tốc độ render 588 FPS và tốc độ tái dựng 38 FPS trong khi vẫn đảm bảo chất lượng vượt trội so với các mô hình SOTA như PixelNeRF, VisionNeRF, CodeNeRF, NeRFDiff.
+            	\item Hiệu quả tài nguyên: Chỉ cần 1 GPU RAM 28GB để train trên ShapeNet, 2 GPU A6000 để train trên Objaverse, trong khi các mô hình SOTA khác như LRM cần tới 128 GPU A100.
+            	\item Thời gian huấn luyện rút ngắn: 
+            		\begin{itemize}
+            			\item Nhanh hơn VisionNeRF 246 lần trong huấn luyện (VisionNeRF cần 16 A100 trong 5 ngày, Splatter Image chỉ cần 1 A6000 trong 7 ngày).
+            			\item Trên Objaverse, Splatter Image train trong 3.5 ngày với 2 A6000, trong khi LRM cần 128 A100 trong 3 ngày.
+            		\end{itemize}
+            	\item Mô hình vẫn đạt SOTA trên nhiều bộ dữ liệu: ShapeNet-SRN, CO3D, Objaverse-LVIS, Google Scanned Objects.
+            \end{itemize}
+            
+            \subsubsection{Phương pháp}
+
+                Phương pháp Splatter Image được xây dựng trên nền tảng \textit{Gaussian Splatting}, vốn là một biểu diễn trường bức xạ (radiance field) bằng hỗn hợp Gaussian 3D.  
+                
+                \paragraph{Biểu diễn Gaussian Splatting.}  
+                Một trường bức xạ được định nghĩa gồm hai hàm:
+                \[
+                \sigma(x) \in \mathbb{R}^+ \quad \text{(opacity)}, \qquad c(x,\nu) \in \mathbb{R}^3 \quad \text{(màu sắc phụ thuộc hướng nhìn $\nu$)} 
+                \]
+                ứng với mỗi điểm $x \in \mathbb{R}^3$.  
+                
+                Gaussian Splatting mô tả hai hàm này bằng hỗn hợp $\theta$ của $G$ Gaussian màu:
+                \[
+                g_i(x) = \exp\!\left(-\tfrac{1}{2}(x - \mu_i)^\top \Sigma_i^{-1}(x - \mu_i)\right), \quad 1 \leq i \leq G
+                \]
+                trong đó:
+                \begin{itemize}
+                	\item $\mu_i \in \mathbb{R}^3$: trung tâm (mean) của Gaussian thứ $i$.
+                	\item $\Sigma_i \in \mathbb{R}^{3 \times 3}$: ma trận hiệp phương sai, mô tả hình dạng và kích thước.
+                	\item $\sigma_i \in [0,1]$: độ mờ (opacity).
+                	\item $c_i(\nu) \in \mathbb{R}^3$: màu phụ thuộc hướng nhìn $\nu$.
+                \end{itemize}
+                
+                Tập hợp Gaussians được ký hiệu:
+                \[
+                \theta = \{(\sigma_i, \mu_i, \Sigma_i, c_i), \; i=1,\dots,G \}.
+                \]
+                
+                Khi đó trường bức xạ được tính:
+                \[
+                \sigma(x) = \sum_{i=1}^{G} \sigma_i g_i(x), \qquad 
+                c(x,\nu) = \frac{\sum_{i=1}^{G} c_i(\nu)\sigma_i g_i(x)}{\sum_{j=1}^{G}\sigma_j g_j(x)}.
+                \]
+                
+                Ảnh $I(u)$ quan sát tại pixel $u$ được render bằng cách tích phân theo tia nhìn:
+                \[
+                I(u) = \int_0^{\infty} c(x_\tau,\nu)\sigma(x_\tau)\exp\!\left(-\int_0^\tau \sigma(x_\mu)\, d\mu \right) d\tau,
+                \]
+                trong đó $x_\tau = x_0 - \tau \nu$ là điểm trên tia $u$.  
+                
+                \begin{figure}[H]
+                    \centering
+                    \includegraphics[width=0.75\linewidth]{GaussianSplatting.png}
+                \end{figure}
+                
+                \paragraph{Mạng Splatter Image.}  
+                Vấn đề đặt ra: tìm một hàm $S(I)$ ánh xạ từ ảnh $I$ sang tập Gaussian $\theta$. Splatter Image giải quyết bằng cách dùng một mạng neural image-to-image (UNet cải tiến), cho mỗi pixel $u=(u_1,u_2,1)$ đầu vào một Gaussian:
+                \[
+                \mu = \begin{bmatrix}
+                u_1 d + \Delta x \\
+                u_2 d + \Delta y \\
+                d + \Delta z
+                \end{bmatrix},
+                \]
+                trong đó $d$ là độ sâu (depth) theo tia camera, $(\Delta x, \Delta y, \Delta z)$ là offset học được. Ngoài ra, mạng dự đoán thêm $\sigma$, $\Sigma$, $c$.  
+                
+                \paragraph{Hàm mất mát huấn luyện.}  
+                Cho tập dữ liệu đa góc nhìn $\mathcal{D} = \{(I, J, \pi)\}$, trong đó $I$ là ảnh nguồn, $J$ là ảnh đích và $\pi$ là phép biến đổi viewpoint. Splatter Image tối thiểu hóa:
+                \[
+                \mathcal{L}(S) = \frac{1}{|\mathcal{D}|} \sum_{(I,J,\pi)\in \mathcal{D}} \|J - R(S(I),\pi)\|_2^2,
+                \]
+                trong đó $R$ là renderer Gaussian Splatting.  
+                Ngoài L2-loss, tác giả còn dùng LPIPS để cải thiện độ chân thực cảm nhận.  
+                
+                \paragraph{Mở rộng multi-view.}  
+                Với nhiều ảnh vào $\{I_j\}$, mỗi $S(I_j)$ sinh ra một tập Gaussians, sau đó được ánh xạ về cùng hệ tọa độ bằng:
+                \[
+                \tilde{\mu} = R\mu + T, \quad \tilde{\Sigma} = R \Sigma R^\top, \quad \tilde{c} = c,
+                \]
+                rồi hợp nhất lại thành một Splatter Image tổng hợp.
+                
+                \paragraph{Màu phụ thuộc góc nhìn.}  
+                Màu $c(\nu)$ được biểu diễn bằng \textit{spherical harmonics} bậc $L=0,1$:
+                \[
+                c(\nu;\alpha) = \alpha_0 + \alpha_1^\top Y_1(\nu),
+                \]
+                trong đó $Y_1(\nu) = \sqrt{\tfrac{3}{4\pi}} \, \Pi\nu$, với $\nu$ là hướng nhìn. Điều này cho phép mô hình biểu diễn sự thay đổi màu theo viewpoint, khắc phục lỗi sai màu.
+                
+                \paragraph{Kiến trúc mạng.}  
+                Splatter Image dùng SongUNet [46], thay lớp cuối bằng tích chập $1\times 1$ với $12+k$ kênh (tùy colour model). Các đầu ra gồm $\hat{\sigma}, \hat{d}, \hat{\Delta}, \hat{s}, \hat{q}, \alpha$ lần lượt được kích hoạt phi tuyến để sinh ra các tham số $\sigma, d, \Delta, \Sigma, c$.  
+            
+            \subsubsection{Kết quả thực nghiệm}
+
+\paragraph{1. Độ đo}  
+Công trình sử dụng ba chỉ số đánh giá chính:
+\begin{itemize}
+	\item \textbf{Peak Signal-to-Noise Ratio (PSNR)}: đo độ trung thực về cường độ pixel so với ảnh gốc.
+	\item \textbf{Structural Similarity Index (SSIM)}: đo mức độ tương đồng cấu trúc hình ảnh.
+	\item \textbf{Learned Perceptual Image Patch Similarity (LPIPS)}: đo sự khác biệt về cảm nhận thị giác (càng thấp càng tốt).
+\end{itemize}
+
+\paragraph{2. Benchmarks}  
+Splatter Image được kiểm chứng trên nhiều benchmark quan trọng:
+\begin{itemize}
+	\item \textbf{Single-view 3D Reconstruction} và \textbf{Two-view 3D Reconstruction}.
+	\item Tác vụ: tái dựng mô hình 3D từ ảnh đầu vào ở 1 hoặc 2 góc nhìn khác nhau.
+	\item Bộ dữ liệu sử dụng:
+	\begin{itemize}
+		\item \textbf{ShapeNet-SRN}: train và evaluate trên 2 lớp \textit{Car} và \textit{Chair}.
+		\item \textbf{CO3D}: evaluate trên 2 lớp \textit{Hydrants} và \textit{Teddybears}.
+		\item \textbf{Objaverse-LVIS}: dataset quy mô lớn, dùng để kiểm tra khả năng generalization.
+		\item \textbf{Google Scanned Objects (GSO)}: tập dữ liệu vật thể scan ngoài đời thực.
+	\end{itemize}
+\end{itemize}
+
+\paragraph{3. Kết quả}  
+Splatter Image vượt trội hơn các phương pháp SOTA như PixelNeRF, VisionNeRF, OpenLRM cả về chất lượng tái dựng và tốc độ.  
+
+\begin{figure}[H]
+    \centering
+    \begin{minipage}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{splatter_result1.png}
+        
+        \label{fig:splatter1}
+    \end{minipage}
+    \hfill
+    \begin{minipage}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{splatter_result2.png}
+    
+        \label{fig:splatter2}
+    \end{minipage}
+\end{figure}
+
+\textbf{Tổng kết:} Splatter Image đạt được cả ba tiêu chí \textit{chất lượng cao, tốc độ nhanh và hiệu quả tài nguyên}, chứng minh ưu thế vượt trội trong tái dựng 3D từ ít góc nhìn.
+
+            
+            \textbf{Kết luận}: Splatter Image mang lại một phương pháp đơn giản, hiệu quả, tận dụng Gaussian Splatting trong bối cảnh học sâu để đạt được tốc độ và chất lượng vượt trội, đặt nền móng cho hướng nghiên cứu tái dựng 3D từ ít góc nhìn với chi phí tài nguyên thấp.
+\newpage
+\subsection{SG-Splatting: Accelerating 3D Gaussian Splatting with Spherical Gaussians \cite{b4}}
+\subsubsection{Những điểm nổi bật của công trình}
+SG-Splatting mang đến một bước tiến đáng kể trong việc tổng hợp góc nhìn mới(novel view synthesis) bằng cách cải thiện hiệu suất của 3D Gaussian Splatting (3DGS). \\
+
+Phương pháp này tập trung vào việc giảm đáng kể độ phức tạp tính toán và yêu cầu lưu trữ, đồng thời nâng cao chất lượng hình ảnh và tốc độ render, đặc biệt phù hợp với các ứng dụng thời gian thực như thực tế ảo (VR), thực tế tăng cường (AR), mô phỏng vật lý và lái xe tự động. \\
+
+Các điểm nổi bật chính của SG-Splatting bao gồm:
+\begin{enumerate}
+    \item \textbf{Tăng tốc độ render đáng kể thông qua biểu diễn màu bằng Spherical Gaussians (SG)}
+    \begin{itemize}
+        \item SG-Splatting thay thế biểu diễn màu dựa trên spherical harmonics (SH) bậc ba (yêu cầu 48 hệ số mỗi Gaussian) trong 3DGS truyền thống bằng Spherical Gaussians, một biểu diễn màu gọn nhẹ hơn. Với SG, số lượng tham số cần để biểu diễn màu giảm mạnh (chỉ cần 4-6 tham số mỗi Gaussian so với 48 của SH) dẫn đến giảm đáng kể memory footprint. Ví dụ, với một cảnh có hàng triệu Gaussians, SG-Splatting giảm hàng chục GB lưu trữ xuống chỉ còn vài GB, giúp tiết kiệm tài nguyên bộ nhớ và tăng khả năng mở rộng cho các cảnh phức tạp hoặc lớn hơn.
+        \item Kết quả là tốc độ render được cải thiện đáng kể, đạt đến mức real-time rendering với tốc độ trung bình 120 FPS trên RTX 3090 ở độ phân giải 1080p, so với khoảng 90 FPS của 3DGS truyền thống, phù hợp cho các ứng dụng yêu cầu hiệu suất cao như VR/AR hoặc mô phỏng thời gian thực.
+    \end{itemize}
+    \item \textbf{Cải thiện chất lượng hình ảnh với ít artifacts hơn}
+    \begin{itemize}
+        \item SG-Splatting không chỉ nhanh hơn mà còn cải thiện chất lượng hình ảnh, đặc biệt trong việc giảm artifacts thường thấy ở 3DGS. Phương pháp này sử dụng biểu diễn SG để capture thông tin màu phụ thuộc góc nhìn (view-dependent color) một cách hiệu quả hơn, giảm hiện tượng mờ hoặc méo mó ở các vùng chi tiết cao.
+        \item Các chi tiết như texture bề mặt và ranh giới đối tượng được tái hiện mượt mà hơn, loại bỏ các artifacts phổ biến trong 3DGS, đặc biệt ở các vùng có độ tương phản cao hoặc chuyển đổi ánh sáng phức tạp.
+    \end{itemize}
+    \item \textbf{Chiến lược tổ chức Spherical Gaussians tối ưu}
+    \begin{itemize}
+        \item SG-Splatting giới thiệu một chiến lược tổ chức nhiều SG hiệu quả, sắp xếp chúng để cân bằng giữa độ chính xác và độ phức tạp tính toán. Thay vì phân bổ đồng đều, phương pháp này sử dụng adaptive density control để tập trung Gaussians vào các vùng có chi tiết cao (như cạnh, góc), trong khi giảm mật độ ở các vùng đơn giản (như bề mặt phẳng). Điều này giúp tối ưu hóa tài nguyên tính toán, giảm số lượng Gaussians cần thiết (giảm 20-30\% số lượng Gaussians so với 3DGS trong các cảnh phức tạp) mà vẫn duy trì độ chính xác của scene representation.
+        \item Kỹ thuật này được thực hiện thông qua một thuật toán phân cụm (clustering) dựa trên spatial-temporal features, đảm bảo phân bố Gaussians hợp lý, giảm lãng phí tài nguyên mà vẫn giữ được tính toàn vẹn của cảnh.
+    \end{itemize}
+    \item \textbf{Kết hợp biểu diễn hỗn hợp SG và SH bậc thấp}
+    \begin{itemize}
+        \item Để cải thiện hơn nữa chất lượng render, SG-Splatting đề xuất một biểu diễn hỗn hợp kết hợp Spherical Gaussians với spherical harmonics bậc thấp (low-degree SH, thường bậc 0-1, yêu cầu 1-4 hệ số). Cách tiếp cận này cho phép capture cả thông tin màu tần số thấp (low-frequency như màu nền đồng đều) và tần số cao (high-frequency như chi tiết texture) một cách hiệu quả. Kết quả là cải thiện đáng kể độ trung thực của hình ảnh, đặc biệt trong các cảnh có sự kết hợp phức tạp giữa ánh sáng khuếch tán và phản xạ (specular reflections).
+    \end{itemize}
+\end{enumerate}
+\subsubsection{Đóng góp của đề tài}
+SG-Splatting mang lại những đóng góp quan trọng trong việc cải tiến 3D Gaussian Splatting, tập trung vào việc giải quyết các hạn chế về hiệu suất và lưu trữ của phương pháp gốc, đồng thời nâng cao chất lượng tái tạo cảnh và khả năng áp dụng thực tế. \\
+
+Các đóng góp của đề tài bao gồm:
+\begin{enumerate}
+    \item \textbf{Biểu diễn màu mới dựa trên Spherical Gaussians (SG)}
+    \begin{itemize}
+        \item SG-Splatting giới thiệu một biểu diễn màu mới sử dụng Spherical Gaussians thay vì spherical harmonics bậc ba, giảm đáng kể số lượng tham số (từ 48 xuống 4-6 hệ số mỗi Gaussian). Điều này không chỉ giảm memory footprint (từ hàng GB xuống MB cho cảnh lớn) mà còn tăng tốc độ tính toán trong cả huấn luyện và render.
+        \item Biểu diễn SG tận dụng đặc tính compact của Gaussian trên không gian hướng (directional space) để mô hình view-dependent color hiệu quả hơn, đặc biệt trong các cảnh có ánh sáng phức tạp hoặc chuyển đổi góc nhìn lớn.
+        \item Đóng góp này giải quyết trực tiếp vấn đề storage demands của 3DGS, vốn là rào cản lớn khi triển khai trên thiết bị giới hạn tài nguyên như mobile hoặc embedded systems. Ví dụ, trên dataset DeepBlending, SG-Splatting giảm storage từ 2.5 GB của 3DGS xuống 0.8 GB mà vẫn giữ chất lượng tương đương hoặc tốt hơn.
+    \end{itemize}
+    \item \textbf{Chiến lược tổ chức và tối ưu hóa Spherical Gaussians}
+    \begin{itemize}
+        \item SG-Splatting đề xuất một phương pháp tổ chức Gaussians hiệu quả thông qua thuật toán phân cụm dựa trên spatial-temporal features cho phép phân bổ Gaussians một cách thông minh theo mức độ chi tiết của cảnh.
+        \item Các vùng có tần số cao (high-frequency regions) như cạnh hoặc texture phức tạp được gán nhiều Gaussians hơn, trong khi các vùng tần số thấp (low-frequency regions) như nền đồng đều được giảm số lượng. Kỹ thuật này giảm 20-30\% số Gaussians cần thiết, từ đó giảm thời gian render và yêu cầu tính toán.
+        \item Ngoài ra, chiến lược này được hỗ trợ bởi một cơ chế adaptive densification, tương tự 3DGS nhưng tối ưu hơn cho SG, giúp đảm bảo phân bố Gaussians cân bằng và chính xác.  
+    \end{itemize}
+\end{enumerate}
+\newpage
+\subsection{Curve-Aware Gaussian Splatting for 3D Parametric Curve Reconstruction \cite{b5}}
+\subsubsection{Những điểm nổi bật của công trình}
+Curve-Aware Gaussian Splatting cho phép tái tạo các đường cong tham số 3D (parametric curves) trực tiếp từ các edge map đa góc nhìn (multi-view edge maps). \\
+
+Phương pháp này không chỉ cải thiện độ chính xác và hiệu quả của quá trình tái tạo mà còn giải quyết các hạn chế của các phương pháp hai giai đoạn trước đó, vốn phụ thuộc vào việc tái tạo point cloud trước khi fitting đường cong. \\
+
+Các điểm nổi bật chính của CurveGaussian bao gồm:
+\begin{enumerate}
+    \item \textbf{Tái tạo đường cong tham số 3D trực tiếp bằng phương pháp một giai đoạn (one-stage)}
+    \begin{itemize}
+        \item Không giống các phương pháp hai giai đoạn truyền thống (tái tạo point cloud rồi fitting đường cong), CurveGaussian tối ưu hóa trực tiếp các đường cong tham số 3D từ 2D edge maps, loại bỏ sự tích lũy lỗi do khoảng cách tối ưu hóa giữa các giai đoạn. Điều này dẫn đến các kết quả tái tạo sạch hơn, chính xác hơn, đặc biệt trong các trường hợp dữ liệu đầu vào thưa thớt hoặc nhiễu.
+        \item Phương pháp một giai đoạn giúp đơn giản hóa pipeline, giảm sự phụ thuộc vào chất lượng point cloud ban đầu và cải thiện khả năng xử lý các kịch bản thực tế phức tạp như dữ liệu từ cảm biến không hoàn hảo hoặc hình ảnh có occlusion.
+    \end{itemize}
+    \item \textbf{Cơ chế ghép nối hai chiều giữa đường cong tham số và Gaussian (bi-directional coupling)}
+    \begin{itemize}
+        \item CurveGaussian giới thiệu một biểu diễn mới, Curve-Aware Gaussian, kết hợp chặt chẽ các đường cong tham số với các thành phần Gaussian định hướng cạnh (edge-oriented Gaussian components). Cơ chế này cho phép render differentiable của các đường cong 3D, hỗ trợ tối ưu hóa trực tiếp dựa trên bằng chứng đa góc nhìn (multi-view evidence). Mỗi Gaussian được liên kết với một đường cong cụ thể thông qua tham số hóa, đảm bảo các thuộc tính hình học của đường cong được giữ nguyên trong quá trình render. Kết quả là khả năng tái tạo đường cong chính xác hơn, đặc biệt ở các vùng có chi tiết phức tạp hoặc cong mạnh.
+    \end{itemize}
+    \item \textbf{Giảm đáng kể số lượng tham số và tăng hiệu quả tính toán}
+    \begin{itemize}
+        \item Bằng cách tối ưu hóa trực tiếp các đường cong tham số thay vì point clouds trung gian, CurveGaussian giảm đáng kể số lượng tham số trong quá trình huấn luyện. Điều này dẫn đến thời gian huấn luyện nhanh hơn (khoảng 20 phút trên RTX 3090 so với 1-2 giờ của baselines) và yêu cầu lưu trữ thấp hơn (giảm từ 500 MB xuống 200 MB cho các cảnh trung bình).
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Đóng góp của đề tài}
+Curve-Aware Gaussian Splatting (CurveGaussian) mang lại những đóng góp quan trọng trong việc tái tạo các đường cong tham số 3D từ dữ liệu không có cấu trúc như edge maps, vượt qua các hạn chế của các phương pháp hai giai đoạn và cải thiện cả hiệu quả lẫn độ chính xác. \\
+
+Các đóng góp của đề tài bao gồm:
+\begin{enumerate}
+    \item \textbf{Phương pháp một giai đoạn tiên phong cho tái tạo đường cong 3D}
+    \begin{itemize}
+        \item CurveGaussian là phương pháp đầu tiên tối ưu hóa trực tiếp các đường cong tham số 3D từ multi-view edge maps trong một giai đoạn duy nhất, loại bỏ sự phụ thuộc vào tái tạo point cloud trung gian. Điều này khắc phục vấn đề tích lũy lỗi vốn có trong các pipeline hai giai đoạn như NEF và EMAP, nơi chất lượng của point cloud giai đoạn đầu ảnh hưởng nghiêm trọng đến kết quả fitting đường cong giai đoạn hai.
+        \item Bằng cách tích hợp quá trình tái tạo và tối ưu hóa trong một bước, phương pháp này đảm bảo sự liên kết chặt chẽ giữa edge maps 2D và geometry 3D, dẫn đến độ chính xác cao hơn và khả năng xử lý dữ liệu nhiễu hoặc không hoàn chỉnh tốt hơn.
+    \end{itemize}
+    \item \textbf{Biểu diễn Curve-Aware Gaussian với cơ chế ghép nối hai chiều}
+    \begin{itemize}
+        \item Đóng góp cốt lõi của CurveGaussian là biểu diễn Curve-Aware Gaussian, kết hợp các đường cong tham số với các thành phần Gaussian thông qua cơ chế ghép nối hai chiều. Mỗi Gaussian được gán một tham số hóa đường cong, cho phép render differentiable của các đường cong 3D, từ đó hỗ trợ tối ưu hóa trực tiếp dựa trên bằng chứng từ nhiều góc nhìn. Cơ chế này đảm bảo các thuộc tính hình học (như độ cong, tính liên tục) được giữ nguyên trong quá trình render và tối ưu hóa.
+        \item So với EdgeGaussians (dựa trên point-based Gaussians), biểu diễn này cải thiện độ chính xác của tái tạo đường cong và giảm artifacts ở các vùng có cấu trúc phức tạp, như giao điểm hoặc đường cong sắc nét. Thử nghiệm định tính cho thấy các đường cong tái tạo mượt mà hơn, không bị đứt gãy như các phương pháp hai giai đoạn.
+    \end{itemize}
+    \item \textbf{Framework tối ưu hóa cấu trúc liên kết động}
+    \begin{itemize}
+        \item CurveGaussian giới thiệu một framework tối ưu hóa cấu trúc liên kết động (tự động điều chỉnh số lượng và cấu hình các đường cong để phù hợp với dữ liệu đầu vào), bao gồm các thao tác linearization, merging, splitting và pruning, được thực hiện trong quá trình huấn luyện để tinh chỉnh cấu trúc đường cong. 
+        \item Linearization đơn giản hóa các đường cong phức tạp thành các đoạn thẳng gần đúng khi phù hợp, merging hợp nhất các đường cong gần nhau để giảm redundancy, splitting chia nhỏ các đường cong để tăng chi tiết ở các vùng cần thiết, pruning loại bỏ các đường cong thừa hoặc không chính xác.
+    \end{itemize}
+\end{enumerate}
+\newpage
+\subsection{Optimized Minimal 3D Gaussian Splatting \cite{b6}}
+\subsubsection{Những điểm nổi bật của công trình}
+Optimized Minimal 3D Gaussian Splatting (OMG) giúp cho việc tối ưu hóa biểu diễn 3D Gaussian Splatting (3DGS) để đạt được hiệu quả lưu trữ và tốc độ render vượt trội trong khi vẫn duy trì chất lượng hình ảnh cao. \\
+
+Phương pháp này tập trung vào việc giảm thiểu số lượng Gaussian primitives và tối ưu hóa biểu diễn thuộc tính, từ đó giảm đáng kể yêu cầu lưu trữ và tăng tốc độ render lên mức phù hợp cho các ứng dụng thời gian thực như thực tế ảo (VR), thực tế tăng cường (AR) và tái tạo cảnh 3D.
+
+Các điểm nổi bật chính OMG bao gồm:
+\begin{enumerate}
+    \item \textbf{Giảm đáng kể yêu cầu lưu trữ với số lượng Gaussian tối thiểu}
+    \begin{itemize}
+        \item OMG tập trung vào việc giảm số lượng Gaussian primitives xuống mức tối thiểu dẫn đến giảm yêu cầu lưu trữ xuống.Điều này tương ứng với giảm gần 50\% lưu trữ so với các phương pháp SOTA trước đó như Mini-Splatting (133 MB).
+        \item Việc giảm số lượng Gaussians không chỉ tiết kiệm bộ nhớ mà còn giảm chi phí tính toán, cho phép OMG duy trì chất lượng hình ảnh cao. Trong khi giảm đáng kể tài nguyên cần thiết. Điều này làm cho OMG lý tưởng cho các thiết bị có tài nguyên hạn chế như thiết bị di động hoặc nhúng.
+    \end{itemize}
+    \item \textbf{Tốc độ render cực nhanh với hiệu suất thời gian thực}
+    \begin{itemize}
+        \item OMG đạt tốc độ render ấn tượng, lên đến 682 FPS (OMG-XS) và 476 FPS (OMG-L) trên RTX 4090 và 393 FPS (OMG-XS) và 277 FPS (OMG-L) trên RTX 3090, vượt xa 3DGS tiêu chuẩn (65 FPS trên RTX 3090) và Mini-Splatting (382 FPS). Tốc độ này đảm bảo khả năng render thời gian thực ở độ phân giải cao (1080p), đáp ứng yêu cầu của các ứng dụng như VR/AR, game và mô phỏng thời gian thực.
+        \item Hiệu suất render nhanh được hỗ trợ bởi việc giảm số lượng Gaussians và tối ưu hóa pipeline render thông qua tile-based parallelism, vốn tận dụng GPU hiệu quả hơn để xử lý các cảnh phức tạp mà không làm giảm chất lượng hình ảnh.
+    \end{itemize}
+    \item \textbf{Biểu diễn thuộc tính compact và chính xác với sub-vector quantization}
+    \begin{itemize}
+        \item OMG giới thiệu một biểu diễn thuộc tính mới (attribute representation) để capture cả tính liên tục (continuity) và bất thường (irregularity) giữa các Gaussian primitives. Thay vì dựa vào spherical harmonics bậc cao (SH) như 3DGS, OMG sử dụng sub-vector quantization để nén thuộc tính Gaussian (vị trí, tỷ lệ, xoay, màu sắc, opacity) mà vẫn giữ được độ chính xác. Kỹ thuật này giảm kích thước codebook xuống mức không đáng kể, cho phép huấn luyện nhanh (20-30 phút) và render hiệu quả.
+        \item Sub-vector quantization giúp OMG duy trì thông tin tần số cao (high-frequency details) như texture và cạnh, đồng thời giảm redundancy trong biểu diễn và giảm yêu cầu lưu trữ hơn 90\% so với 3DGS.
+    \end{itemize}
+\end{enumerate}
+\subsubsection{Đóng góp của đề tài}
+Optimized Minimal 3D Gaussian Splatting (OMG) mang lại những đóng góp quan trọng trong việc tối ưu hóa 3D Gaussian Splatting, tập trung vào việc giảm số lượng Gaussian primitives và yêu cầu lưu trữ, đồng thời cải thiện tốc độ render và duy trì chất lượng hình ảnh cao. \\
+
+Các đóng góp này không chỉ giải quyết các hạn chế về hiệu suất của 3DGS mà còn mở ra tiềm năng ứng dụng trong các kịch bản thực tế yêu cầu tài nguyên thấp và hiệu suất cao. \\
+
+Các đóng góp của đề tài bao gồm:
+\begin{enumerate}
+    \item \textbf{Phương pháp tối ưu hóa số lượng Gaussian primitives tối thiểu}
+    \begin{itemize}
+        \item OMG giới thiệu một chiến lược xác định và loại bỏ các Gaussian trùng lặp hoặc không cần thiết (redundant Gaussians) bằng cách phân biệt các Gaussian riêng biệt (distinct) với các Gaussian gần kề dựa trên phân tích spatial-temporal continuity mà không làm giảm chất lượng hình ảnh đáng kể.
+        \item Chiến lược này sử dụng một thuật toán phân cụm dựa trên proximity và feature similarity để hợp nhất các Gaussian gần nhau, từ đó giảm redundancy mà vẫn duy trì tính toàn vẹn của scene representation. Kết quả là OMG đạt được biểu diễn cực kỳ compact, phù hợp cho các thiết bị có bộ nhớ hạn chế.
+    \end{itemize}
+    \item \textbf{Biểu diễn thuộc tính compact và chính xác}
+    \begin{itemize}
+        \item OMG đề xuất một biểu diễn thuộc tính mới, tối ưu hóa cách mã hóa các thuộc tính Gaussian (vị trí, tỷ lệ, xoay, màu sắc, opacity) để capture cả tính liên tục (smooth transitions giữa các vùng) và bất thường (sharp changes ở cạnh hoặc texture). Thay vì sử dụng spherical harmonics bậc cao (48 hệ số mỗi Gaussian), OMG áp dụng một biểu diễn compact với số lượng tham số thấp hơn (8-12 tham số mỗi Gaussian), giảm đáng kể memory footprint.
+        \item Biểu diễn này được tối ưu hóa để giữ thông tin tần số cao (high-frequency details) và tần số thấp (low-frequency regions), đảm bảo chất lượng hình ảnh trong khi giảm chi phí tính toán. Điều này làm cho OMG phù hợp với các ứng dụng yêu cầu render nhanh và chất lượng cao.
+    \end{itemize}
+\end{enumerate}
+
+\newpage
+\section{Khởi tạo điểm ảnh bằng Structure-from-Motion (SfM)}
+\subsection{Tổng quan về quy trình}
+
+Bước đầu tiên trong quy trình 3D Gaussian Splatting là việc tạo ra một đám mây điểm thưa (sparse point cloud) đóng vai trò là đầu vào khởi tạo hình học. Để thực hiện điều này, công trình sử dụng kỹ thuật Structure-from-Motion (SfM) nhằm mô phỏng lại các thuật toán cốt lõi của COLMAP. \\
+
+Quy trình này được chia thành hai giai đoạn chính liên tiếp nhau: giai đoạn tìm kiếm điểm tương đồng (Correspondence Search) để thiết lập các liên kết dữ liệu giữa các ảnh và giai đoạn tái tạo 3D tăng dần (Incremental 3D Reconstruction) để chuyển đổi các liên kết 2D đó thành không gian 3D thực tế.
+
+\subsection{Giai đoạn tìm kiếm điểm tương đồng (Correspondence Search)}
+
+Giai đoạn này đóng vai trò nền tảng trong việc thiết lập các liên kết dữ liệu giữa các ảnh đầu vào. Quá trình này không chỉ đơn thuần là so sánh hình ảnh mà là một chuỗi các phép biến đổi toán học phức tạp nhằm trích xuất, mô tả và xác minh các điểm đặc trưng hình học bất biến.
+
+\subsubsection{Trích xuất đặc trưng (Feature Extraction)}
+
+Để đảm bảo các điểm ảnh được nhận diện chính xác bất kể sự thay đổi về góc chụp, xoay, độ sáng hay khoảng cách, hệ thống sử dụng thuật toán SIFT (Scale-Invariant Feature Transform). Quá trình bắt đầu bằng việc phát hiện các điểm cực trị trong không gian tỷ lệ (Scale-space Extrema Detection). Thay vì tìm kiếm trên ảnh gốc, thuật toán xây dựng một không gian tỷ lệ bằng cách làm mờ ảnh với các độ mịn khác nhau sử dụng hàm Gauss $G(x, y, \sigma)$, sau đó tính hiệu giữa hai ảnh được làm mờ kế tiếp nhau. \\
+
+\textbf{a. Xây dựng không gian tỷ lệ (Scale-space Construction)}. Không gian tỷ lệ của một hình ảnh được định nghĩa là một hàm $L(x, y, \sigma)$, được tạo ra từ tích chập (convolution) của một hạt nhân Gauss (Gaussian kernel) thay đổi tỉ lệ với ảnh đầu vào $I(x, y)$:
+
+$$L(x, y, \sigma) = G(x, y, \sigma) * I(x, y)$$
+
+Trong đó, 
+
+\begin{itemize}
+    \item $I(x, y)$ là ảnh đầu vào tại toạ độ $(x, y)$.
+    \item Hàm $G(x, y, \sigma)$ là hạt nhân Gauss với độ lệch chuẩn $\sigma$, đại diện cho mức độ làm mờ của ảnh và hạt nhân Gauss $G(x, y, \sigma)$ được định nghĩa là:
+
+$$G(x, y, \sigma) = \frac{1}{2\pi\sigma^2} e^{-(x^2 + y^2) / 2\sigma^2}$$
+    \item Phép toán $*$ biểu thị tích chập (convolution) giữa hạt nhân Gauss và ảnh.
+\end{itemize}
+
+\textbf{b. Phát hiện cực trị bằng hiệu Gauss (Difference of Gaussians - DoG)} bằng cách tìm ra các điểm keypoint ổn định, thuật toán xấp xỉ toán tử Laplacian of Gaussian bằng hàm hiệu của các phân phối Gauss (DoG):
+
+$$D(x, y, \sigma) = (G(x, y, k\sigma) - G(x, y, \sigma)) * I(x, y) = L(x, y, k\sigma) - L(x, y, \sigma)$$
+
+Trong đó,
+\begin{itemize}
+    \item Tham số $k$ là một hằng số tỉ lệ nhân với $\sigma$ để tạo ra mức độ mờ tiếp theo.
+\end{itemize}
+
+Hàm $D(x, y, \sigma)$ làm nổi bật các cấu trúc hình ảnh ổn định (như các góc, các chấm) mà không bị ảnh hưởng bởi nhiễu hay chi tiết thừa. Các điểm cực trị (giá trị lớn nhất hoặc nhỏ nhất cục bộ) sẽ được xác định bằng cách so sánh từng điểm ảnh với 26 điểm lân cận của nó trong khối không gian 3D bao gồm toạ độ $(x, y)$ và chiều tỷ lệ $\sigma$. \\
+ 
+\textbf{c. Định vị chính xác điểm đặc trưng (Keypoint Localization)} do
+vị trí của các cực trị tìm được ở bước trên là rời rạc. Để đạt độ chính xác dưới pixel (sub-pixel accuracy), vị trí cực trị thực $\hat{\mathbf{x}}$ được ước lượng bằng cách khai triển Taylor chuỗi $D(\mathbf{x})$ đến bậc hai:
+
+$$D(\mathbf{x}) = D + \frac{\partial D^T}{\partial \mathbf{x}}\mathbf{x} + \frac{1}{2}\mathbf{x}^T \frac{\partial^2 D}{\partial \mathbf{x}^2} \mathbf{x}$$
+
+Đạo hàm của phương trình trên theo $\mathbf{x}$ và đặt bằng 0, ta thu được vị trí cực trị tinh chỉnh:
+
+$$\hat{\mathbf{x}} = - \left( \frac{\partial^2 D}{\partial \mathbf{x}^2} \right)^{-1} \frac{\partial D}{\partial \mathbf{x}}$$
+
+\textbf{d. Loại bỏ cạnh (Edge Response Elimination)}. Để loại bỏ các điểm nằm trên cạnh (kém ổn định), thuật toán sử dụng ma trận Hessian $\mathbf{H}$ kích thước $2 \times 2$:$$\mathbf{H} = \begin{bmatrix} D_{xx} & D_{xy} \\ D_{xy} & D_{yy} \end{bmatrix}$$
+
+
+
+Sau khi xác định được các điểm ứng viên, bước tiếp theo là định vị chính xác điểm đặc trưng (Keypoint Localization). Để loại bỏ các điểm có độ tương phản thấp hoặc nằm dọc theo các cạnh (vốn không ổn định khi so khớp), thuật toán sử dụng ma trận Hessian $\mathbf{H}$ để phân tích độ cong của bề mặt ảnh tại điểm đó. Tiêu chí loại bỏ dựa trên tỉ số giữa bình phương vết (Trace) và định thức (Determinant) của ma trận này:
+
+$$\frac{\text{Tr}(\mathbf{H})^2}{\text{Det}(\mathbf{H})} < \frac{(r+1)^2}{r}$$
+
+Ở đây,
+\begin{itemize}
+    \item $\text{Tr}(\mathbf{H})$ là tổng các giá trị riêng, đại diện cho độ cong tổng thể.
+    \item $\text{Det}(\mathbf{H})$ là tích các giá trị riêng. 
+    \item Tham số $r$ là ngưỡng tỉ lệ độ cong chính (thường được chọn bằng 10 và với  điều kiện này tương đương với việc kiểm tra xem tỉ lệ giữa hai giá trị riêng (eigenvalues) chính của ma trận Hessian có nhỏ hơn 10 hay không).
+\end{itemize}
+
+Bất đẳng thức chỉ giữ lại các điểm "giống góc" (corner-like), nơi sự thay đổi độ sáng diễn ra mạnh mẽ theo cả hai hướng và loại bỏ các điểm "giống cạnh" (edge-like) nơi độ sáng chỉ thay đổi theo một hướng duy nhất. \\
+
+Cuối cùng, mỗi điểm đặc trưng được gán một vector mô tả (descriptor) 128 chiều dựa trên hướng của gradient cục bộ, giúp việc so khớp sau này bất biến với phép xoay ảnh.
+
+\subsubsection{Khớp đặc trưng (Feature Matching)}
+
+Sau quá trình trích xuất, các vector đặc trưng từ các ảnh khác nhau sẽ được so sánh để tìm ra các cặp tương ứng. Mỗi điểm đặc trưng được gán một vector mô tả $d \in \mathbb{R}^{128}$, độ tương tự giữa hai vector mô tả $d_1$ (của ảnh A) và $d_2$ (của ảnh B) được đo lường bằng khoảng cách Euclid $L_2$. \\
+
+Tuy nhiên, để tránh các trường hợp khớp sai do sự lặp lại của các hoạ tiết trong ảnh, hệ thống áp dụng tiêu chuẩn Kiểm tra tỉ lệ của Lowe (Lowe's Ratio Test). Một cặp điểm chỉ được chấp nhận khi  ta cần tìm điểm khớp cho vector $d_i$ từ ảnh $I_1$ trong tập các vector $\{d_j\}$ của ảnh $I_2$. Gọi $d_{j1}$ và $d_{j2}$ lần lượt là hai láng giềng gần nhất và gần nhì của $d_i$ theo khoảng cách Euclid. Một cặp khớp $(i, j1)$ được chấp nhận nếu thỏa mãn:
+
+$$\frac{||d_i - d_{j1}||_2}{||d_i - d_{j2}||_2} < \tau$$
+
+Trong đó $\tau$ là ngưỡng tỉ lệ, thường được chọn là $0.8$. 
+\begin{itemize}
+    \item Nếu tỉ số này tiến gần đến 1, nghĩa là đặc trưng $d_i$ có độ tương đồng gần như nhau với cả hai điểm trong ảnh $I_2$, dẫn đến sự mơ hồ và khả năng khớp sai cao.
+    \item Ngược lại, một tỉ số nhỏ (dưới 0.8) đảm bảo rằng điểm khớp tìm được là duy nhất và đáng tin cậy.
+\end{itemize} 
+
+\subsubsection{Xác minh hình học với RANSAC}
+
+Dữ liệu sau khi khớp thô vẫn có thể chứa nhiễu (outliers). Bước xác minh hình học (Geometric Verification) được thực hiện để lọc bỏ các cặp điểm không tuân theo quy luật hình học epipolar. \\
+
+Hệ thống sử dụng thuật toán RANSAC (Random Sample Consensus) để ước lượng Ma trận cơ bản (Fundamental Matrix) $F$. Ma trận $F$ mô tả mối quan hệ hình học giữa hai khung hình, sao cho với mọi cặp điểm khớp đúng $x$ và $x'$, phương trình sau phải được thỏa mãn:
+
+$$x'^T F x = 0$$
+
+Phương trình biểu thị ràng buộc epipolar: điểm $x'$ trong ảnh thứ hai phải nằm trên đường $l' = Fx$ tương ứng với điểm $x$ trong ảnh thứ nhất. \\
+
+Trong quá trình RANSAC, để đánh giá sai số của một cặp điểm $(x, x')$ đối với một ma trận $F$ giả định, thay vì dùng khoảng cách đại số, ta sử dụng xấp xỉ bậc nhất của sai số hình học gọi là khoảng cách Sampson:
+
+$$E(x, x', F) = \frac{(x'^T F x)^2}{(Fx)_1^2 + (Fx)_2^2 + (F^T x')_1^2 + (F^T x')_2^2}$$
+
+Ở đây $(v)_k$ là thành phần thứ $k$ của vector $v$. Các cặp điểm có sai số Sampson nhỏ hơn một ngưỡng $\epsilon$ sẽ được coi là inliers (điểm khớp nội lai) và được sử dụng để tinh chỉnh lại ma trận $F$ cuối cùng bằng phương pháp bình phương tối thiểu. \\
+
+Thuật toán RANSAC sẽ lặp đi lặp lại việc chọn ngẫu nhiên các tập con điểm để tính $F$, sau đó đếm số lượng điểm khớp thỏa mãn phương trình trên. Mô hình $F$ có số lượng điểm phù hợp (inliers) lớn nhất sẽ được chọn làm kết quả cuối cùng.
+
+\subsection{Giai đoạn tái tạo 3D tăng dần (Incremental 3D Reconstruction)}
+
+Sau khi đã thiết lập được các liên kết 2D giữa các ảnh, quy trình chuyển sang giai đoạn tái tạo cấu trúc 3D. Khác với các phương pháp tái tạo toàn cục (Global SfM) giải quyết tất cả các tham số cùng lúc, phương pháp Tái tạo tăng dần (Incremental SfM) hoạt động theo cơ chế lặp: khởi tạo từ một cặp ảnh tốt nhất, sau đó lần lượt thêm các ảnh mới vào mô hình, xen kẽ với việc tam giác hóa điểm ảnh và tối ưu hóa để giảm thiểu sai số tích lũy. Quy trình này đảm bảo tính ổn định và khả năng loại bỏ nhiễu cao.
+
+\subsubsection{Chiến lược khởi tạo mô hình và phân rã ma trận}
+
+Sự thành công của toàn bộ quá trình tái tạo phụ thuộc rất lớn vào cặp ảnh khởi tạo. Thuật toán không chọn ngẫu nhiên mà tìm kiếm cặp ảnh thỏa mãn hai điều kiện tiên quyết: có số lượng điểm khớp (matches) lớn để đảm bảo độ tin cậy và có khoảng cách cơ sở (baseline) đủ rộng để quá trình tam giác hóa đạt độ chính xác cao. Nếu góc giữa hai tia nhìn quá nhỏ, sai số tính toán độ sâu sẽ tăng vọt. \\
+
+Quá trình tái tạo bắt đầu bằng việc lựa chọn một cặp ảnh khởi đầu có độ chồng lấp tốt và góc cơ sở đủ rộng. Từ các điểm khớp đã được chuẩn hóa, hệ thống tính toán ma trận thiết yếu (Essential Matrix) $E$. Mối quan hệ giữa một điểm ảnh chuẩn hóa $x_1$ trong ảnh thứ nhất và $x_2$ trong ảnh thứ hai được biểu diễn qua phương trình:
+
+$$x_2^T E x_1 = 0$$
+
+Để khôi phục tư thế tương đối (ma trận quay $R$ và vector tịnh tiến $t$), ma trận $E$ được phân rã bằng phương pháp Phân rã giá trị suy biến (Singular Value Decomposition - SVD). Giả sử $E = U \text{diag}(1, 1, 0) V^T$, ta có bốn nghiệm toán học khả dĩ cho cặp $(R, t)$:
+
+$$R \in \{U W V^T, U W^T V^T\}$$$$t \in \{u_3, -u_3\}$$
+
+Trong đó $W$ là ma trận trực giao đặc biệt. Để chọn ra nghiệm vật lý duy nhất, thuật toán thực hiện kiểm tra tính che khuất (cheirality check), đảm bảo rằng điểm 3D được tam giác hóa từ nghiệm đó phải có toạ độ độ sâu dương ($Z > 0$) đối với cả hai camera.
+
+\subsubsection{Đăng ký ảnh mới}
+Khi mô hình 3D ban đầu đã được hình thành, các ảnh tiếp theo được thêm vào dựa trên các điểm 3D chung mà chúng quan sát được. Việc tìm tư thế $(R, t)$ của một camera mới được mô hình hóa thành bài toán Perspective-n-Point (PnP). Mục tiêu là tìm $R$ và $t$ sao cho tổng bình phương sai số tái chiếu của các điểm 3D $X_i$ lên mặt phẳng ảnh $u_i$ là nhỏ nhất. Hàm mục tiêu được xác định như sau:
+$$\min_{R, t} \sum_{i} || u_i - \pi(K(RX_i + t)) ||^2$$
+
+$$(R_{new}, t_{new}) = \arg \min_{R, t} \sum_{i} || x_i - \pi(R, t, X_i) ||^2$$
+
+Trong đó,
+\begin{itemize}
+    \item $\pi$ là hàm chiếu phối cảnh chuyển đổi toạ độ không gian sang toạ độ ảnh.
+    \item $K$ là ma trận nội tham số.
+\end{itemize}
+
+Để giải bài toán tối ưu phi tuyến này một cách bền vững trước nhiễu, hệ thống sử dụng thuật toán RANSAC kết hợp với bộ giải P3P (Perspective-3-Point) để tìm lời giải khởi tạo, sau đó tinh chỉnh bằng phương pháp Levenberg-Marquardt.
+
+\subsubsection{Tam giác hóa điểm}
+Sau khi xác định được vị trí camera mới, hệ thống tiến hành tam giác hóa để xác định toạ độ không gian của các điểm đặc trưng mới. Với một điểm 3D $X$ được quan sát bởi hai ma trận camera $P_1$ và $P_2$ tại các vị trí ảnh $x_1$ và $x_2$, ta có quan hệ $x_i \times (P_i X) = 0$. Điều này dẫn đến một hệ phương trình tuyến tính thuần nhất dạng $AX = 0$:
+
+$$A = \begin{bmatrix} 
+x_1 (p_{1}^{3T} X) - (p_{1}^{1T} X) \\ 
+y_1 (p_{1}^{3T} X) - (p_{1}^{2T} X) \\ 
+x_2 (p_{2}^{3T} X) - (p_{2}^{1T} X) \\ 
+y_2 (p_{2}^{3T} X) - (p_{2}^{2T} X) 
+\end{bmatrix}$$
+
+Trong đó $p_{i}^{kT}$ là hàng thứ $k$ của ma trận $P_i$. Do nhiễu đo đạc, vector $X$ không thể thoả mãn chính xác phương trình, nên nghiệm được tìm bằng phương pháp Biến đổi tuyến tính trực tiếp (Direct Linear Transform - DLT) thông qua SVD của ma trận $A$, chọn vector riêng ứng với trị riêng nhỏ nhất.
+
+\subsubsection{Hiệu chỉnh bó (Bundle Adjustment)}
+
+Đây là bước tối ưu hóa quan trọng nhất để ngăn chặn sự tích lũy sai số (drift) khi mô hình ngày càng lớn. Hiệu chỉnh bó (BA) là một bài toán tối ưu hóa phi tuyến lớn, tinh chỉnh đồng thời tất cả các tham số: 
+\begin{itemize}
+    \item Cấu trúc 3D ($X_j$)
+    \item Tư thế của tất cả camera ($R_i, t_i$)
+    \item Iham số nội tại camera ($f, c_x, c_y$)
+\end{itemize}
+
+Hàm mục tiêu là tổng bình phương sai số tái chiếu trên toàn bộ các quan sát:
+
+$$J(\Theta) = \sum_{i=1}^{m} \sum_{j=1}^{n} v_{ij} \cdot \rho \left( || \tilde{x}_{ij} - \pi(R_i, t_i, X_j) ||^2 \right)$$
+
+Trong công thức này, 
+\begin{itemize}
+    \item Vector tham số $\Theta = \{R_i, t_i, X_j\}_{i,j}$ bao gồm tất cả các biến số cần tối ưu
+    \item  Biến $v_{ij} \in \{0, 1\}$ là biến chỉ thị (bằng 1 nếu camera $i$ nhìn thấy điểm $j$)
+    \item Hàm $\rho(s) = \log(1+s)$ là hàm tổn thất Cauchy (Robust Loss Function) giúp giảm thiểu tác động của các điểm ngoại lai có sai số lớn
+\end{itemize}
+
+Bài toán này được giải bằng thuật toán Levenberg-Marquardt, sử dụng ma trận Jacobian thưa (Sparse Jacobian) và bổ sung thành phần tắt dần $\lambda I$ (damping term) vào phương trình chuẩn tắc: $(J^T J + \lambda I)\delta = J^T r$, cho phép chuyển đổi linh hoạt giữa phương pháp Gradient Descent và Gauss-Newton để đảm bảo sự hội tụ.
+
+\subsubsection{Lọc nhiễu hình học}
+Sau mỗi bước Hiệu chỉnh bó, cấu trúc hình học có thể thay đổi, làm lộ ra các điểm 3D kém chất lượng. Bước lọc nhiễu cuối cùng được thực hiện dựa trên ba tiêu chí khắt khe. 
+
+\begin{enumerate}
+    \item Sai số tái chiếu (Reprojection Error) bằng việc loại bỏ các điểm mà khoảng cách giữa hình chiếu của nó và điểm ảnh thực tế vượt quá một ngưỡng pixel nhất định (thường là 4px)
+    \item Góc tam giác hóa (Triangulation Angle) bằng việc loại bỏ các điểm được tạo bởi các tia nhìn gần như song song, vì độ bất định về vị trí (độ sâu) của chúng là rất lớn
+    \item Độ dài vết (Track Length) bằng việc loại bỏ các điểm chỉ được quan sát bởi rất ít camera, vì chúng thiếu sự kiểm chứng từ nhiều góc độ.
+\end{enumerate}
+
+Kết quả cuối cùng là một đám mây điểm thưa sạch nhiễu, chính xác về mặt hình học và làm đầu vào cho quy trình 3D Gaussian Splatting.
+
+\section{Thực nghiệm và kết quả}
+
+\subsection{Environment Setup (Thiết lập môi trường)}
+Để tối ưu hóa tài nguyên phần cứng và khả năng hiển thị, quá trình thực nghiệm được chia thành hai giai đoạn riêng biệt: Huấn luyện (Training) trên Cloud và Trực quan hóa (Visualization) trên máy cục bộ (Local).
+
+\subsubsection{Cấu hình phần cứng (Hardware Configuration)}
+Chi tiết cấu hình cho từng giai đoạn được mô tả trong Bảng \ref{tab:hardware}.
+
+\begin{table}[h]
+\centering
+\caption{Cấu hình phần cứng cho thực nghiệm}
+\label{tab:hardware}
+\vspace{0.2cm}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Thành phần} & \textbf{Training (Google Colab)} & \textbf{Visualization (Local PC)} \\ \midrule
+Hệ điều hành & Linux (Ubuntu environment) & Ubuntu Linux \\
+GPU & NVIDIA Tesla T4 (16GB VRAM) & NVIDIA RTX Series \\
+CUDA Version & 12.x & 12.4 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Cài đặt phần mềm (Software Installation)}
+Thư viện lõi được sử dụng là \texttt{gsplat} (phiên bản v1.5.3) chạy trên nền tảng PyTorch.
+
+\begin{itemize}
+    \item \textbf{Trên Google Colab (Training):} Sử dụng môi trường mặc định của Colab, cài đặt \texttt{gsplat} qua pip và biên dịch source code cần thiết từ kho lưu trữ git.
+    \item \textbf{Trên Local Machine (Inference/Viewing):} Cài đặt môi trường PyTorch 2.4.1 tương thích CUDA 12.4 để khớp với driver máy local và đảm bảo viewer hoạt động mượt mà.
+\end{itemize}
+
+Dưới đây là các lệnh cài đặt chính cho môi trường Local:
+
+\begin{lstlisting}[language=bash, caption=Script cài đặt môi trường Local]
+# 1. Cai dat PyTorch 2.4.1 CUDA 12.4
+pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu124
+
+# 2. Cai dat gsplat pre-compiled wheels
+pip install ninja numpy jaxtyping rich
+pip install gsplat --index-url https://docs.gsplat.studio/whl/pt24cu124
+
+# 3. Cai dat cac thu vien phu tro (No isolation build)
+# Luu y: Can cai dat gsplat truoc khi cai dat cac thu vien nay
+pip install git+https://github.com/rahul-goel/fused-ssim --no-build-isolation
+pip install git+https://github.com/harry7557558/fused-bilagrid --no-build-isolation
+\end{lstlisting}
+
+\subsection{Datasets (Bộ dữ liệu)}
+Thực nghiệm được tiến hành trên bộ dữ liệu chuẩn \textbf{Mip-NeRF 360}. Đây là bộ dữ liệu bao gồm các cảnh ngoài trời và trong nhà phức tạp với góc chụp 360 độ, phù hợp để đánh giá khả năng tái tạo cảnh 3D không giới hạn (unbounded scenes).
+
+\begin{itemize}
+    \item \textbf{Cảnh tiêu biểu:} \textit{Bicycle} (Xe đạp).
+    \item \textbf{Cấu trúc dữ liệu:} Sử dụng định dạng COLMAP (images, sparse point cloud, camera calibrations).
+    \item \textbf{Quy trình chuẩn bị:} Dữ liệu được tải về thông qua script \texttt{download\_dataset.py} và phân giải các tham số camera bởi \texttt{pycolmap}.
+\end{itemize}
+
+\subsection{Evaluation Metrics (Chỉ số đánh giá)}
+Chất lượng mô hình được đánh giá dựa trên 3 chỉ số định lượng về chất lượng ảnh và các chỉ số hiệu năng hệ thống:
+
+\begin{itemize}
+    \item \textbf{PSNR (Peak Signal-to-Noise Ratio):} Đo lường tỉ lệ tín hiệu trên nhiễu. Giá trị càng cao thể hiện ảnh tái tạo càng ít nhiễu và gần với ảnh gốc.
+    \item \textbf{SSIM (Structural Similarity Index):} Đo lường độ tương đồng về cấu trúc giữa ảnh thực và ảnh tạo ra (max = 1.0).
+    \item \textbf{LPIPS (Learned Perceptual Image Patch Similarity):} Đánh giá độ tương đồng dựa trên nhận thức của mắt người (sử dụng deep features). Giá trị càng thấp càng tốt.
+    \item \textbf{Resource Usage:} Bao gồm bộ nhớ VRAM tiêu thụ (GB), Thời gian huấn luyện (phút) và Số lượng điểm Gaussians (Millions).
+\end{itemize}
+
+\subsection{Quantitative Results (Kết quả định lượng)}
+Quá trình huấn luyện trên GPU T4 cho tập dữ liệu \textit{Bicycle} kéo dài khoảng 104 phút cho 30.000 bước lặp (iterations). Bảng \ref{tab:results} so sánh hiệu năng giữa mốc "Early stopping" (7.000 bước) và "Converged" (30.000 bước).
+
+\begin{table}[h]
+\centering
+\caption{Kết quả định lượng trên cảnh Bicycle (Mip-NeRF 360)}
+\label{tab:results}
+\vspace{0.2cm}
+\begin{tabular}{@{}ccccccc@{}}
+\toprule
+\textbf{Steps} & \textbf{Time (min)} & \textbf{VRAM (GB)} & \textbf{Num GS} & \textbf{PSNR} $\uparrow$ & \textbf{SSIM} $\uparrow$ & \textbf{LPIPS} $\downarrow$ \\ \midrule
+6,999 & $\approx 30.5$ & 5.87 & 3,985,904 & 26.63 & 0.838 & 0.118 \\
+29,999 & $\approx 104.1$ & 7.36 & 4,993,630 & \textbf{27.75} & \textbf{0.871} & \textbf{0.071} \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Nhận xét số liệu:}
+\begin{itemize}
+    \item Tại bước 30.000, chỉ số \textbf{LPIPS giảm mạnh} (từ 0.118 xuống 0.071), cho thấy chi tiết ảnh trở nên sắc nét và thực tế hơn nhiều so với bước 7.000.
+    \item Số lượng điểm Gaussian tăng từ $\approx 4$ triệu lên $\approx 5$ triệu điểm, dẫn đến mức tiêu thụ VRAM tăng nhẹ (từ 5.8GB lên 7.3GB). Mức tiêu thụ này vẫn nằm trong giới hạn chịu tải của các GPU phổ thông (như T4 16GB hay RTX 3060 12GB), chứng tỏ tính hiệu quả về bộ nhớ của \texttt{gsplat}.
+\end{itemize}
+
+\subsection{Qualitative Results (Kết quả định tính)}
+Kết quả render được trực quan hóa sử dụng \texttt{simple\_viewer.py} trên máy cục bộ.
+
+% Placeholder cho hình ảnh
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\linewidth]{viewer_overview.png}
+  \caption{Giao diện trực quan hóa thời gian thực với gsplat viewer.}
+  \label{fig:viewer_overview}
+\end{figure}
+
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\linewidth]{viewer_closed.png}
+  \caption{Khả năng tái tạo chi tiết (High-fidelity reconstruction).}
+  \label{fig:viewer_detail}
+\end{figure}
+
+Như thể hiện trong Hình \ref{fig:viewer_overview} và Hình \ref{fig:viewer_detail}, các chi tiết nền (cỏ, cây cối) được tái tạo đầy đủ. Đặc biệt, các cấu trúc hình học mỏng (thin structures) như nan hoa xe đạp được hiển thị rõ ràng, không bị đứt gãy hay mờ nhòe quá mức.
+
+\subsection{Analysis \& Discussion (Phân tích và Thảo luận)}
+
+\begin{itemize}
+    \item \textbf{Tốc độ hội tụ và Thời gian huấn luyện:}
+    Mô hình đạt chất lượng khá tốt (PSNR $> 26$) chỉ sau khoảng 30 phút (7.000 bước). Tuy nhiên, để đạt được độ chi tiết cao (high-fidelity) và giảm nhiễu xuống mức thấp nhất (LPIPS $< 0.08$), việc train đủ 30.000 bước là cần thiết. Tổng thời gian khoảng 1 giờ 45 phút trên Tesla T4 là chấp nhận được so với hàng chục giờ của các phương pháp NeRF cũ.
+
+    \item \textbf{Hiệu quả sử dụng tài nguyên:}
+    Với thư viện \texttt{gsplat}, việc huấn luyện một cảnh phức tạp như Mip-NeRF 360 chỉ tiêu tốn tối đa khoảng \textbf{7.4 GB VRAM}. Điều này khẳng định tính ưu việt của \texttt{gsplat}, cho phép chạy thực nghiệm trên các GPU tầm trung hoặc môi trường Cloud miễn phí (Colab T4) mà không lo ngại vấn đề tràn bộ nhớ (OOM).
+
+    \item \textbf{Khả năng Render thời gian thực:}
+    Mặc dù thời gian tính toán metric (validation) là khoảng 0.15s/frame ($\approx 6.7$ FPS) do phải tính toán loss và gradient, nhưng khi chạy viewer tương tác (\texttt{simple\_viewer.py}), tốc độ thực tế cao hơn nhiều (thường đạt $>30$ FPS trên GPU local) nhờ quy trình rasterization được tối ưu hóa bằng CUDA, cho phép xoay và xem mô hình mượt mà.
+\end{itemize}
+
+\newpage
+\begin{thebibliography}{99}
+\bibitem{b1}  Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, George Drettakis, "3D Gaussian Splatting for Real-Time Radiance Field Rendering", August 2023 \url{https://arxiv.org/abs/2308.04079}
+
+\bibitem{b2}  Guikun Chen, Wenguan Wang, "A Survey on 3D Gaussian Splatting", Jan 2024 \url{https://arxiv.org/abs/2401.03890}
+
+\bibitem{b3}  Stanislaw Szymanowicz Christian Rupprecht Andrea Vedaldi, "Splatter Image: Ultra-Fast Single-View 3D Reconstruction", April 2024 \url{https://arxiv.org/abs/2312.13150}
+
+\bibitem{b4} Yiwen Wang, Siyuan Chen, Ran Yi, "SG-Splatting: Accelerating 3D Gaussian Splatting with Spherical Gaussians", Dec 2024 \url{https://arxiv.org/abs/2501.00342}
+
+\bibitem{b5} Zhirui Gao, Renjiao Yi, Yaqiao Dai, Xuening Zhu, Wei Chen, Chenyang Zhu, Kai Xu, "Curve-Aware Gaussian Splatting for 3D Parametric Curve Reconstruction", Jul 2025 \url{https://arxiv.org/abs/2506.21401}
+
+\bibitem{b6} Joo Chan Lee, Jong Hwan Ko, Eunbyung Park, "Optimized Minimal 3D Gaussian Splatting", Mar 2025, \url{https://arxiv.org/abs/2503.16924}
+
+\end{thebibliography}

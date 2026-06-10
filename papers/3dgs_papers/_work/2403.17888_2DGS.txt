@@ -1,0 +1,1161 @@
+2D Gaussian Splatting for Geometrically Accurate Radiance Fields
+BINBIN HUANG, ShanghaiTech University, China
+ZEHAO YU, University of Tübingen Tübingen AI Center, Germany
+ANPEI CHEN, University of Tübingen Tübingen AI Center, Germany
+ANDREAS GEIGER, University of Tübingen Tübingen AI Center, Germany
+SHENGHUA GAO, ShanghaiTech University, China
+https://surfsplatting.github.io
+Mesh
+Radiance field
+Disk (color)
+Disk (normal)
+Surface normal
+(a) 2D disks as surface elements
+(b) 2D Gaussian splatting
+(c) Meshing
+Fig. 1. Our method, 2DGS, (a) optimizes a set of 2D oriented disks to represent and reconstruct a complex real-world scene from multi-view RGB images. These
+optimized 2D disks are tightly aligned to the surfaces. (b) With 2D Gaussian splatting, we allow real-time rendering of high quality novel view images with
+view consistent normals and depth maps. (c) Finally, our method provides detailed and noise-free triangle mesh reconstruction from the optimized 2D disks.
+3D Gaussian Splatting (3DGS) has recently revolutionized radiance field
+reconstruction, achieving high quality novel view synthesis and fast render-
+ing speed. However, 3DGS fails to accurately represent surfaces due to the
+multi-view inconsistent nature of 3D Gaussians. We present 2D Gaussian
+Splatting (2DGS), a novel approach to model and reconstruct geometrically
+accurate radiance fields from multi-view images. Our key idea is to collapse
+the 3D volume into a set of 2D oriented planar Gaussian disks. Unlike 3D
+Gaussians, 2D Gaussians provide view-consistent geometry while modeling
+surfaces intrinsically. To accurately recover thin surfaces and achieve stable
+Authors’ Contact Information: Binbin Huang, huangbb@shanghaitech.edu.cn, Shang-
+haiTech University, Shanghai, China; Zehao Yu, zehao.yu@uni-tuebingen.de, Uni-
+versity of Tübingen and Tübingen AI Center, Tübingen, Germany; Anpei Chen,
+anpei.chen@uni-tuebingen.de, University of Tübingen and Tübingen AI Center, Tübin-
+gen, Germany; Andreas Geiger, a.geiger@uni-tuebingen.de, University of Tübingen and
+Tübingen AI Center, Tübingen, Germany; Shenghua Gao, gaoshh@shanghaitech.edu.cn,
+ShanghaiTech University, Shanghai, China.
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for third-party components of this work must be honored.
+For all other uses, contact the owner/author(s).
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA
+© 2024 Copyright held by the owner/author(s).
+ACM ISBN 979-8-4007-0525-0/24/07
+https://doi.org/10.1145/3641519.3657428
+optimization, we introduce a perspective-accurate 2D splatting process uti-
+lizing ray-splat intersection and rasterization. Additionally, we incorporate
+depth distortion and normal consistency terms to further enhance the quality
+of the reconstructions. We demonstrate that our differentiable renderer al-
+lows for noise-free and detailed geometry reconstruction while maintaining
+competitive appearance quality, fast training speed, and real-time rendering.
+CCS Concepts: • Computing methodologies →Reconstruction; Render-
+ing; Machine learning approaches.
+Additional Key Words and Phrases: Novel View Synthesis, Radiance Fields,
+Surface Splatting, Surface Reconstruction
+ACM Reference Format:
+Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao.
+2024. 2D Gaussian Splatting for Geometrically Accurate Radiance Fields.
+In Special Interest Group on Computer Graphics and Interactive Techniques
+Conference Conference Papers ’24 (SIGGRAPH Conference Papers ’24), July
+27-August 1, 2024, Denver, CO, USA. ACM, New York, NY, USA, 13 pages.
+https://doi.org/10.1145/3641519.3657428
+1
+INTRODUCTION
+Photorealistic novel view synthesis (NVS) and accurate geometry
+reconstruction stand as pivotal long-term objectives in computer
+graphics and vision. Recently, 3D Gaussian Splatting (3DGS) [Kerbl
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA.
+arXiv:2403.17888v3  [cs.CV]  22 Feb 2025
+
+2
+•
+Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao
+et al. 2023] has emerged as an appealing alternative to implicit [Bar-
+ron et al. 2022a; Mildenhall et al. 2020] and feature grid-based rep-
+resentations [Barron et al. 2023; Müller et al. 2022] in NVS, due to
+its real-time photorealistic NVS results at high resolutions. Rapidly
+evolving, 3DGS has been quickly extended with respect to multiple
+domains, including anti-aliasing rendering [Yu et al. 2024], material
+modeling [Jiang et al. 2023; Shi et al. 2023], dynamic scene recon-
+struction [Yan et al. 2023], and animatable avatar creation [Qian
+et al. 2023; Zielonka et al. 2023]. Nevertheless, it falls short in cap-
+turing intricate geometry since the volumetric 3D Gaussian, which
+models the complete angular radiance, conflicts with the thin nature
+of surfaces.
+On the other hand, earlier works [Pfister et al. 2000; Zwicker et al.
+2001a,b] have shown surfels (surface elements) to be an effective
+representation of complex geometry. Surfels approximate the object
+surface locally with shape and shade attributes and can be derived
+from known geometry. They are widely used in SLAM [Whelan et al.
+2016] and other robotics tasks [Schöps et al. 2019] as an efficient ge-
+ometry representation. Subsequent advancements [Yifan et al. 2019]
+have incorporated surfels into a differentiable framework. However,
+these methods typically require ground truth (GT) geometry, depth
+sensor data, or operate under constrained scenarios with known
+lighting.
+Inspired by these works, we propose 2D Gaussian Splatting for
+3D scene reconstruction and novel view synthesis that combines
+the benefits of both worlds, while overcoming their limitations. Un-
+like 3DGS, our approach represents a 3D scene with 2D Gaussian
+primitives, each defining an oriented elliptical disk. The significant
+advantage of 2D Gaussian over its 3D counterpart lies in the accu-
+rate geometry representation during rendering. Specifically, 3DGS
+evaluates a Gaussian’s value at the intersection between a pixel ray
+and a 3D Gaussian [Keselman and Hebert 2022, 2023], which leads
+to inconsistency depth when rendered from different viewpoints.
+In contrast, our method utilizes explicit ray-splat intersection, re-
+sulting in a perspective correct splatting, as illustrated in Figure 2,
+which in turn significantly improves reconstruction quality. Fur-
+thermore, the inherent surface normals in 2D Gaussian primitives
+enable direct surface regularization through normal constraints. In
+contrast with surfels-based models [Pfister et al. 2000; Yifan et al.
+2019; Zwicker et al. 2001a], our 2D Gaussians can be recovered from
+unknown geometry with gradient-based optimization.
+While our 2D Gaussian approach excels in geometric model-
+ing, optimizing solely with photometric losses can lead to noisy
+reconstructions, due to the inherently unconstrained nature of 3D
+reconstruction tasks, as noted in [Barron et al. 2022b; Yu et al. 2022b;
+Zhang et al. 2020]. To enhance reconstructions and achieve smoother
+surfaces, we introduce two regularization terms: depth distortion
+and normal consistency. The depth distortion term concentrates 2D
+primitives distributed within a tight range along the ray, address-
+ing the rendering process’s limitation where the distance between
+Gaussians is ignored. The normal consistency term minimizes dis-
+crepancies between the rendered normal map and the gradient of
+the rendered depth, ensuring alignment between the geometries
+defined by depth and normals. Employing these regularizations
+in combination with our 2D Gaussian model enables us to extract
+highly accurate surface meshes, as demonstrated in Figure 1.
+Fig. 2. Comparison of 3DGS and 2DGS. 3DGS utilizes different intersec-
+tion planes for value evaluation when viewing from different viewpoints,
+resulting in inconsistency. Our 2DGS provides multi-view consistent value
+evaluations.
+In summary, we make the following contributions:
+• We present a highly efficient differentiable 2D Gaussian ren-
+derer, enabling perspective-correct splatting by leveraging
+2D surface modeling, ray-splat intersection, and volumetric
+integration.
+• We introduce two regularization losses for improved and
+noise-free surface reconstruction.
+• Our approach achieves state-of-the-art geometry reconstruc-
+tion and NVS results compared to other explicit representa-
+tions.
+2
+RELATED WORK
+2.1
+Novel view synthesis
+Significant advancements have been achieved in NVS, particularly
+since the introduction of Neural Radiance Fields (NeRF) [Milden-
+hall et al. 2021]. NeRF employs a multi-layer perceptron (MLP) to
+represent geometry and view-dependent appearance, optimized via
+volume rendering to deliver exceptional rendering quality. Post-
+NeRF developments have further enhanced its capabilities. For in-
+stance, Mip-NeRF [Barron et al. 2021] and subsequent works [Barron
+et al. 2022a, 2023; Hu et al. 2023] tackle NeRF’s aliasing issues. Ad-
+ditionally, the rendering efficiency of NeRF has seen substantial
+improvements through techniques such as distillation [Reiser et al.
+2021; Yu et al. 2021] and baking [Chen et al. 2023a; Hedman et al.
+2021; Reiser et al. 2023; Yariv et al. 2023]. Moreover, the training
+and representational power of NeRF have been enhanced using
+feature-grid based scene representations [Chen et al. 2022, 2023c;
+Fridovich-Keil et al. 2022; Liu et al. 2020; Müller et al. 2022; Sun et al.
+2022a].
+Recently, 3D Gaussian Splatting (3DGS) [Kerbl et al. 2023] has
+emerged, demonstrating impressive real-time NVS results. This
+method has been quickly extended to multiple domains [Xie et al.
+2023; Yan et al. 2023; Yu et al. 2024; Zielonka et al. 2023]. In this work,
+we propose to “flatten” 3D Gaussians to 2D Gaussian primitives to
+better align their shape with the object surface. Combined with
+two novel regularization losses, our approach reconstructs surfaces
+more accurately than 3DGS while preserving its high-quality and
+real-time rendering capabilities.
+2.2
+3D reconstruction
+3D Reconstruction from multi-view images has been a long-standing
+goal in computer vision. Multi-view stereo based methods [Schön-
+berger et al. 2016; Yao et al. 2018; Yu and Gao 2020] rely on a modular
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA.
+
+2D Gaussian Splatting for Geometrically Accurate Radiance Fields
+•
+3
+pipeline that involves feature matching, depth prediction, and fu-
+sion. In contrast, recent neural approaches [Niemeyer et al. 2020;
+Yariv et al. 2020] represent surface implicitly via an MLP [Mescheder
+et al. 2019; Park et al. 2019] , extracting surfaces post-training via
+the Marching Cube algorithm. Further advancements [Oechsle et al.
+2021; Wang et al. 2021; Yariv et al. 2021] integrated implicit surfaces
+with volume rendering, achieving detailed surface reconstructions
+from RGB images. These methods have been extended to large-scale
+reconstructions via additional regularization [Li et al. 2023; Yu et al.
+2022a,b], and efficient reconstruction for objects [Wang et al. 2023].
+Despite these impressive developments, efficient large-scale scene
+reconstruction remains a challenge. For instance, Neuralangelo [Li
+et al. 2023] requires 128 GPU hours for reconstructing a single scene
+from the Tanks and Temples Dataset [Knapitsch et al. 2017]. In this
+work, we introduce 2D Gaussian splatting, a method that signifi-
+cantly accelerates the reconstruction process. It achieves similar or
+slightly better results compared to previous implicit neural surface
+representations, while being an order of magnitude faster.
+2.3
+Differentiable Point-based Graphics
+Differentiable point-based rendering [Aliev et al. 2020; Insafutdinov
+and Dosovitskiy 2018; Rückert et al. 2022; Wiles et al. 2020; Yifan
+et al. 2019] has been explored extensively due to its efficiency and
+flexibility in representing intricate structures. Notably, NPBG [Aliev
+et al. 2020] rasterizes point cloud features onto an image plane,
+subsequently utilizing a convolutional neural network for RGB
+image prediction. DSS [Yifan et al. 2019] focuses on optimizing ori-
+ented point clouds from multi-view images under known lighting
+conditions. Pulsar [Lassner and Zollhofer 2021] introduces a tile-
+based acceleration structure for more efficient rasterization. More
+recently, 3DGS [Kerbl et al. 2023] optimizes anisotropic 3D Gauss-
+ian primitives, demonstrating real-time photorealistic NVS results.
+Despite these advances, using point-based representations from un-
+constrained multi-view images remains challenging. In this paper,
+we demonstrate detailed surface reconstruction using 2D Gaussian
+primitives. We also highlight the critical role of additional regular-
+ization losses in optimization, showcasing their significant impact
+on the quality of the reconstruction.
+2.4
+Concurrent works
+Since 3DGS [Kerbl et al. 2023] was introduced, it has been rapidly
+adapted across multiple domains. We now review the closest work
+in inverse rendering. These work [Gao et al. 2023; Jiang et al. 2023;
+Liang et al. 2023; Shi et al. 2023] extend 3DGS by modeling normals
+as additional attributes of 3D Gaussian primitives. Our approach,
+in contrast, inherently defines normals by representing the tangent
+space of the 3D surface using 2D Gaussian primitives, aligning them
+more closely with the underlying geometry. Additionally, the afore-
+mentioned works predominantly focus on estimating the material
+properties of the scene and evaluating their results for relighting
+tasks. Notably, none of these works specifically target surface re-
+construction, the primary focus of our work.
+We also highlight the distinctions between our method and con-
+current works SuGaR [Guédon and Lepetit 2023] and NeuSG [Chen
+et al. 2023b]. Unlike SuGaR, which approximates 2D Gaussians with
+3D Gaussians, our method directly employs 2D Gaussians, simpli-
+fying the process and enhancing the resulting geometry without
+additional mesh refinement. NeuSG optimizes 3D Gaussian primi-
+tives and an implicit SDF network jointly and extracts the surface
+from the SDF network, while our approach leverages 2D Gaussian
+primitives for surface approximation, offering a faster and concep-
+tually simpler solution.
+3
+3D GAUSSIAN SPLATTING
+Kerbl et al. [Kerbl et al. 2023] propose to represent 3D scenes with
+3D Gaussian primitives and render images using differentiable vol-
+ume splatting. Specifically, 3DGS explicitly parameterizes Gaussian
+primitives via 3D covariance matrix 𝚺and their location p𝑘:
+G(p) = exp(−1
+2 (p −p𝑘)⊤𝚺−1(p −p𝑘))
+(1)
+where the covariance matrix 𝚺= RSS⊤R⊤is factorized into a scal-
+ing matrix S and a rotation matrix R. To render an image, the 3D
+Gaussian is transformed into the camera coordinates with world-
+to-camera transform matrix W and projected to image plane via a
+local affine transformation J [Zwicker et al. 2001a]:
+𝚺
+′ = JW𝚺W⊤J⊤
+(2)
+By skipping the third row and column of 𝚺
+′, we obtain a 2D Gaussian
+G2𝐷with covariance matrix 𝚺2𝐷. Next, 3DGS [Kerbl et al. 2023]
+employs volumetric alpha blending to integrate alpha-weighted
+appearance from front to back:
+c(x) =
+𝐾
+∑︁
+𝑘=1
+c𝑘𝛼𝑘G2𝐷
+𝑘
+(x)
+𝑘−1
+Ö
+𝑗=1
+(1 −𝛼𝑗G2𝐷
+𝑗
+(x))
+(3)
+where 𝑘is the index of the Gaussian primitives, 𝛼𝑘denotes the alpha
+values and c𝑘is the view-dependent appearance. The attributes of
+3D Gaussian primitives are optimized using a photometric loss.
+Challenges in Surface Reconstruction. Reconstructing surfaces us-
+ing 3D Gaussian modeling and splatting faces several challenges.
+First, the volumetric radiance representation of 3D Gaussians con-
+flicts with the thin nature of surfaces. Second, 3DGS does not na-
+tively model surface normals, essential for high-quality surface
+reconstruction. Third, the rasterization process in 3DGS lacks multi-
+view consistency, leading to varied 2D intersection planes for dif-
+ferent viewpoints [Keselman and Hebert 2023], as illustrated in
+Figure 2 (a). Additionally, using an affine matrix for transforming a
+3D Gaussian into ray space only yields accurate projections near the
+center, compromising on perspective accuracy around surrounding
+regions [Zwicker et al. 2004]. Therefore, it often results in noisy
+reconstructions, as shown in Figure 5.
+4
+2D GAUSSIAN SPLATTING
+To accurately reconstruct geometry while maintaining high-quality
+novel view synthesis, we present differentiable 2D Gaussian splat-
+ting (2DGS).
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA.
+
+4
+•
+Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao
+𝑠!𝐭!
+𝑠"𝐭"
+2D Gaussian Splat 
+in object space
+2D Gaussian Splat 
+in image space
+Tangent frame (u,v)
+Image frame (x,y)
+𝐩!
+𝑠"𝐭"
+𝑠#𝐭#
+Fig. 3. Illustration of 2D Gaussian Splatting. 2D Gaussian Splats are ellip-
+tical disks characterized by a center point p𝑘, tangential vectors t𝑢and
+t𝑣, and two scaling factors (𝑠𝑢and 𝑠𝑣) control the variance. Their elliptical
+projections are sampled through the ray-splat intersection ( Section 4.2) and
+accumulated via alpha-blending in image space. 2DGS reconstructs surface
+attributes such as colors, depths, and normals through gradient descent.
+4.1
+Modeling
+Unlike 3DGS [Kerbl et al. 2023], which models the entire angular
+radiance in a blob, we simplify the 3-dimensional modeling by adopt-
+ing “flat” 2D Gaussians embedded in 3D space. With 2D Gaussian
+modeling, the primitive distributes densities within a planar disk,
+defining the normal as the direction of the steepest change of den-
+sity. This feature enables better alignment with thin surfaces. While
+previous methods [Kopanas et al. 2021; Yifan et al. 2019] also utilize
+2D Gaussians for geometry reconstruction, they require a dense
+point cloud or ground-truth normals as input. By contrast, we si-
+multaneously reconstruct the appearance and geometry given only
+a sparse calibration point cloud and photometric supervision.
+As illustrated in Figure 3, our 2D splat is characterized by its
+central point p𝑘, two principal tangential vectors t𝑢and t𝑣, and
+a scaling vector S = (𝑠𝑢,𝑠𝑣) that controls the variances of the 2D
+Gaussian. Notice that the primitive normal is defined by two orthog-
+onal tangential vectors t𝑤= t𝑢× t𝑣. We can arrange the orientation
+into a 3 × 3 rotation matrix R = [t𝑢, t𝑣, t𝑤] and the scaling factors
+into a 3 × 3 diagonal matrix S whose last entry is zero.
+A 2D Gaussian is therefore defined in a local tangent plane in
+world space, which is parameterized:
+𝑃(𝑢, 𝑣) = p𝑘+ 𝑠𝑢t𝑢𝑢+ 𝑠𝑣t𝑣𝑣= H(𝑢, 𝑣, 1, 1)T
+(4)
+where H =
+𝑠𝑢t𝑢
+𝑠𝑣t𝑣
+0
+p𝑘
+0
+0
+0
+1
+
+=
+RS
+p𝑘
+0
+1
+
+(5)
+where H ∈4 × 4 is a homogeneous transformation matrix repre-
+senting the geometry of the 2D Gaussian. For the point u = (𝑢, 𝑣) in
+𝑢𝑣space, its 2D Gaussian value can then be evaluated by standard
+Gaussian
+G(u) = exp
+
+−𝑢2 + 𝑣2
+2
+
+(6)
+The center p𝑘, scaling (𝑠𝑢,𝑠𝑣), and the rotation (t𝑢, t𝑣) are learnable
+parameters. Following 3DGS [Kerbl et al. 2023], each 2D Gaussian
+primitive has opacity 𝛼and view-dependent appearance 𝑐parame-
+terized with spherical harmonics.
+4.2
+Splatting
+One common strategy for rendering 2D Gaussians is to project the
+2D Gaussian primitives onto the image space using the affine ap-
+proximation of the perspective projection [Zwicker et al. 2001a,b].
+However, as noted in [Zwicker et al. 2004], this projection is only
+accurate at the center of the Gaussian and has increasing approxi-
+mation error with increased distance to the center. To address this
+issue, Zwicker et al. proposed a formulation based on homogeneous
+coordinates. Specifically, projecting the 2D splat onto an image plane
+can be described by a general 2D-to-2D mapping in homogeneous
+coordinates. Let W ∈4 × 4 be the combined transformation matrix
+from world space to screen space. The screen space points are hence
+obtained by
+x = (𝑥𝑧,𝑦𝑧,𝑧,𝑧)T = W𝑃(𝑢, 𝑣) = WH(𝑢, 𝑣, 1, 1)T
+(7)
+where x represents a homogeneous ray emitted from the camera and
+passing through pixel (𝑥,𝑦) and intersecting the splat at depth 𝑧. To
+rasterize a 2D Gaussian, Zwicker et al. proposed to project its conic
+into the screen space with an implicit method using M = (WH)−1.
+However, the inverse transformation introduces numerical insta-
+bility, especially when the splat degenerates into a line segment
+(i.e., if it is viewed from the side). To address this issue, previous
+surface splatting rendering methods discard such ill-conditioned
+transformations using a predefined threshold [Zwicker et al. 2004].
+However, such a scheme poses challenges within a differentiable
+rendering framework, as thresholding can lead to unstable opti-
+mization. To address this problem, we utilize an explicit ray-splat
+intersection inspired by [Sigg et al. 2006].
+Ray-splat Intersection. We efficiently locate the ray-splat inter-
+sections by finding the intersection of three non-parallel planes, a
+method originally designed for specialized hardware [Weyrich et al.
+2007]. Given an image coordinate x = (𝑥,𝑦), we parameterize the ray
+of a pixel in the projective space as the intersection of two orthogo-
+nal planes: the x-plane and the y-plane. Specifically, the x-plane is
+defined by a normal vector (−1, 0, 0) and an offset 𝑥. The x-plane
+can be represented as a 4D homogeneous plane h𝑥= (−1, 0, 0,𝑥)T.
+Similarly, the y-plane is h𝑦= (0, −1, 0,𝑦)T. Thus, the ray x = (𝑥,𝑦)
+is determined by the intersection of the two planes.
+Next, we transform both planes into the local coordinates of
+the 2D Gaussian primitives, the 𝑢𝑣-coordinate system. Note that
+transforming points on a plane using a transformation matrix M
+is equivalent to transforming homogeneous plane parameters us-
+ing the inverse transpose M−T [Blinn 1977]. Therefore, applying
+M = (WH)−1 is equivalent to (WH)T, eliminating explicit matrix
+inversion and yielding:
+h𝑢= (WH)Th𝑥
+h𝑣= (WH)Th𝑦
+(8)
+As introduced in Section 4.1, points on the 2D Gaussian plane are
+represented as (𝑢, 𝑣, 1, 1). At the same time, the intersection point
+should fall in the transformed 𝑥-plane and 𝑦-plane. Thus,
+h𝑢· (𝑢, 𝑣, 1, 1)T = h𝑣· (𝑢, 𝑣, 1, 1)T = 0
+(9)
+This leads to an efficient solution for the intersection point u(x):
+𝑢(x) = h2𝑢h4𝑣−h4𝑢h2𝑣
+h1𝑢h2𝑣−h2𝑢h1𝑣
+𝑣(x) = h4𝑢h1𝑣−h1𝑢h4𝑣
+h1𝑢h2𝑣−h2𝑢h1𝑣
+(10)
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA.
+
+2D Gaussian Splatting for Geometrically Accurate Radiance Fields
+•
+5
+where h𝑖𝑢, h𝑖𝑣are the 𝑖-th parameter of the 4D plane. Note that h3𝑢
+and h3𝑣are always zero according to Eq. 5. Once we obtain the local
+coordinates (𝑢, 𝑣), we can calculate the depth 𝑧of the intersected
+points using Eq. 7 and evaluate the Gaussian value with Eq. 6.
+Degenerate Solutions. When a 2D Gaussian is observed from a
+slanted viewpoint, it degenerates to a line in screen space. Therefore,
+it might be missed during rasterization. To deal with these cases and
+stabilize optimization, we employ the object-space low-pass filter
+introduced in [Botsch et al. 2005]:
+ˆG(x) = max
+n
+G(u(x)), G( x −c
+𝜎
+)
+o
+(11)
+where u(x) is given by Eq. 10 and c is the projection of center p𝑘.
+Intuitively, ˆG(x) is lower-bounded by a fixed screen-space Gaussian
+low-pass filter with center c and radius 𝜎. In our experiments, we
+set 𝜎=
+√
+2/2 to ensure sufficient pixels are used during rendering.
+Rasterization. We follow a similar rasterization process as in
+3DGS [Kerbl et al. 2023]. First, a screen space bounding box is com-
+puted for each Gaussian primitive. Then, 2D Gaussians are sorted
+based on the depth of their center and organized into tiles based on
+their bounding boxes. Finally, volumetric alpha blending is used to
+integrate alpha-weighted appearance from front to back:
+c(x) =
+∑︁
+𝑖=1
+c𝑖𝛼𝑖ˆG𝑖(u(x))
+𝑖−1
+Ö
+𝑗=1
+(1 −𝛼𝑗ˆG𝑗(u(x)))
+(12)
+The iterative process is terminated when the accumulated opacity
+reaches saturation.
+5
+TRAINING
+Our 2D Gaussian method, while effective in geometric modeling, can
+result in noisy reconstructions when optimized only with photomet-
+ric losses, a challenge inherent to 3D reconstruction tasks [Barron
+et al. 2022b; Yu et al. 2022b; Zhang et al. 2020]. To mitigate this
+issue and improve the geometry reconstruction, we introduce two
+regularization terms: depth distortion and normal consistency.
+Depth Distortion. Different from NeRF, 3DGS’s volume rendering
+doesn’t consider the distance between intersected Gaussian primi-
+tives. Therefore, spreading out Gaussians might result in a similar
+color and depth rendering. This is different from surface rendering,
+where rays intersect the first visible surface exactly once. To miti-
+gate this issue, we take inspiration from Mip-NeRF360 [Barron et al.
+2022a] and propose a depth distortion loss to concentrate the weight
+distribution along the rays by minimizing the distance between the
+ray-splat intersections:
+L𝑑=
+∑︁
+𝑖,𝑗
+𝜔𝑖𝜔𝑗|𝑧𝑖−𝑧𝑗|
+(13)
+where 𝜔𝑖= 𝛼𝑖ˆG𝑖(u(x)) Î𝑖−1
+𝑗=1(1 −𝛼𝑗ˆG𝑗(u(x))) is the blending
+weight of the 𝑖−th intersection and 𝑧𝑖is the depth of the intersection
+points. Unlike the distortion loss in Mip-NeRF360, where 𝑧𝑖is the
+distance between sampled points and is not optimized, our approach
+directly encourages the concentration of the splats by adjusting the
+intersection depth 𝑧𝑖. Note that we implement this regularization
+term efficiently with CUDA in a manner similar to [Sun et al. 2022b].
+Normal Consistency. As our representation is based on 2D Gauss-
+ian surface elements, we must ensure that all 2D splats are locally
+aligned with the actual surfaces. In the context of volume rendering
+where multiple semi-transparent surfels may exist along the ray,
+we consider the actual surface at the median point of intersection
+p𝑠, where the accumulated opacity reaches 0.5. We then align the
+splats’ normal with the gradients of the depth maps as follows:
+L𝑛=
+∑︁
+𝑖
+𝜔𝑖(1 −nT
+𝑖N)
+(14)
+where 𝑖indexes over intersected splats along the ray, 𝜔denotes
+the blending weight of the intersection point, n𝑖represents the
+normal of the splat that is oriented towards the camera, and N is
+the normal estimated by the gradient of the depth map. Specifically,
+N is computed with finite differences from nearby depth points as
+follows:
+N(𝑥,𝑦) = ∇𝑥p𝑠× ∇𝑦p𝑠
+|∇𝑥p𝑠× ∇𝑦p𝑠|
+(15)
+By aligning the splat normal with the estimated surface normal, we
+ensure that 2D splats locally approximate the actual object surface.
+Final Loss. Finally, we optimize our model from an initial sparse
+point cloud using a set of posed images. We minimize the following
+loss function:
+L = L𝑐+ 𝛼L𝑑+ 𝛽L𝑛
+(16)
+where L𝑐is an RGB reconstruction loss combining L1 with the
+D-SSIM term from [Kerbl et al. 2023], while L𝑑and L𝑛are regu-
+larization terms. We set 𝛼= 1000 for bounded scenes, 𝛼= 100 for
+unbounded scenes, and 𝛽= 0.05 for all scenes.
+6
+EXPERIMENTS
+We now present evaluations of our 2D Gaussian Splatting recon-
+struction method, including appearance and geometry comparison
+with previous state-of-the-art implicit and explicit approaches. We
+then analyze the contribution of the proposed components.
+6.1
+Implementation
+We implement our 2D Gaussian Splatting with custom CUDA ker-
+nels, building upon the framework of 3DGS [Kerbl et al. 2023]. We
+extend the renderer to output depth distortion maps, depth maps
+and normal maps for regularizations (See detailed computations in
+Appendices A and B of the supplemental material). During train-
+ing, we increase the number of 2D Gaussian primitives following
+the adaptive control strategy in 3DGS. Since our method does not
+directly rely on the gradient of the projected 2D center, we hence
+project the gradient of 3D center p𝑘onto the screen space as an
+approximation. Similarly, we employ a gradient threshold of 0.0002
+and remove splats with opacity lower than 0.05 every 3000 step. We
+conduct all the experiments on a single GTX RTX3090 GPU.
+Mesh Extraction. To extract meshes from reconstructed 2D splats,
+we render depth maps of the training views using the depth value
+of the splats projected to the pixels and utilize truncated signed
+distance fusion (TSDF) to fuse the reconstruction depth maps, using
+Open3D [Zhou et al. 2018]. We set the voxel size to 0.004 and the
+truncated threshold to 0.02 during TSDF fusion. We also extend the
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA.
+
+6
+•
+Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao
+Ground truth
+Ours (color)
+Ours (normal)
+3DGS
+SuGaR
+Ours
+Fig. 4. Visual comparisons (test-set view) between our method, 3DGS [Kerbl et al. 2023], and SuGaR [Guédon and Lepetit 2023] using scenes from an real-world
+dataset [Barron et al. 2022b]. Our method excels at synthesizing geometrically accurate radiance fields and surface reconstruction, outperforming 3DGS and
+SuGaR in capturing sharp edges and intricate details.
+Table 1. Quantitative comparison on the DTU Dataset [Jensen et al. 2014]. Our 2DGS achieves the highest reconstruction accuracy among other methods and
+provides 100× speed up compared to the SDF based baselines.
+24
+37
+40
+55
+63
+65
+69
+83
+97
+105
+106
+110
+114
+118
+122
+Mean
+Time
+implicit
+NeRF [Mildenhall et al. 2021]
+1.90
+1.60
+1.85
+0.58
+2.28
+1.27
+1.47
+1.67
+2.05
+1.07
+0.88
+2.53
+1.06
+1.15
+0.96
+1.49
+> 12h
+VolSDF [Yariv et al. 2021]
+1.14
+1.26
+0.81
+0.49
+1.25
+0.70
+0.72
+1.29
+1.18
+0.70
+0.66
+1.08
+0.42
+0.61
+0.55
+0.86
+>12h
+NeuS [Wang et al. 2021]
+1.00
+1.37
+0.93
+0.43
+1.10
+0.65
+0.57
+1.48
+1.09
+0.83
+0.52
+1.20
+0.35
+0.49
+0.54
+0.84
+>12h
+explicit
+3DGS [Kerbl et al. 2023]
+2.14
+1.53
+2.08
+1.68
+3.49
+2.21
+1.43
+2.07
+2.22
+1.75
+1.79
+2.55
+1.53
+1.52
+1.50
+1.96
+11.2 m
+SuGaR [Guédon and Lepetit 2023]
+1.47
+1.33
+1.13
+0.61
+2.25
+1.71
+1.15
+1.63
+1.62
+1.07
+0.79
+2.45
+0.98
+0.88
+0.79
+1.33
+∼1h
+2DGS-15k (Ours)
+0.48
+0.92
+0.42
+0.40
+1.04
+0.83
+0.83
+1.36
+1.27
+0.76
+0.72
+1.63
+0.40
+0.76
+0.60
+0.83
+5.5 m
+2DGS-30k (Ours)
+0.48
+0.91
+0.39
+0.39
+1.01
+0.83
+0.81
+1.36
+1.27
+0.76
+0.70
+1.40
+0.40
+0.76
+0.52
+0.80
+10.9 m
+Table 2. Quantitative results on the Tanks and Temples Dataset [Knapitsch
+et al. 2017]. We report the F1 score and training time.
+NeuS
+Geo-Neus
+Neurlangelo
+SuGaR
+3DGS
+Ours
+Barn
+0.29
+0.33
+0.70
+0.14
+0.13
+0.41
+Caterpillar
+0.29
+0.26
+0.36
+0.16
+0.08
+0.23
+Courthouse
+0.17
+0.12
+0.28
+0.08
+0.09
+0.16
+Ignatius
+0.83
+0.72
+0.89
+0.33
+0.04
+0.51
+Meetingroom
+0.24
+0.20
+0.32
+0.15
+0.01
+0.17
+Truck
+0.45
+0.45
+0.48
+0.26
+0.19
+0.45
+Mean
+0.38
+0.35
+0.50
+0.19
+0.09
+0.32
+Time
+>24h
+>24h
+>24h
+>1h
+14.3 m
+15.5 m
+original 3DGS to render depth and employ the same technique for
+surface reconstruction for a fair comparison.
+6.2
+Comparison
+Dataset. We evaluate the performance of our method on vari-
+ous datasets, including DTU [Jensen et al. 2014], Tanks and Tem-
+ples [Knapitsch et al. 2017], and Mip-NeRF360 [Barron et al. 2022a].
+The DTU dataset comprises 15 scenes, each with 49 or 69 images of
+Table 3. Performance comparison between 2DGS (ours), 3DGS and SuGaR
+on the DTU dataset [Jensen et al. 2014]. We report the averaged chamfer
+distance, PSNR (training-set view), reconstruction time, and model size.
+CD ↓
+PSNR ↑
+Time ↓
+MB (Storage) ↓
+3DGS [Kerbl et al. 2023]
+1.96
+35.76
+11.2 m
+113
+SuGaR [Guédon and Lepetit 2023]
+1.33
+34.57
+∼1 h
+1247
+2DGS-15k (Ours)
+0.83
+33.42
+5.5 m
+52
+2DGS-30k (Ours)
+0.80
+34.52
+10.9 m
+52
+resolution 1600 × 1200. We use Colmap [Schönberger and Frahm
+2016] to generate a sparse point cloud for each scene and down-
+sample the images into a resolution of 800 × 600 for efficiency. We
+use the same training process for 3DGS [Kerbl et al. 2023] and
+SuGaR [Guédon and Lepetit 2023] for a comparison.
+Geometry Reconstruction. In Table 1 and Table 3, we compare
+our geometry reconstruction to SOTA implicit (i.e., NeRF [Milden-
+hall et al. 2020], VolSDF [Yariv et al. 2021], and NeuS [Wang et al.
+2021]), explicit (i.e., 3DGS [Kerbl et al. 2023] and concurrent work
+SuGaR [Guédon and Lepetit 2023]) methods on Chamfer distance
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA.
+
+2D Gaussian Splatting for Geometrically Accurate Radiance Fields
+•
+7
+Fig. 5. Qualitative comparison on the DTU benchmark [Jensen et al. 2014].
+Our 2DGS produces detailed and noise-free surfaces.
+Table 4. Quantitative results on Mip-NeRF 360 [Barron et al. 2022a] dataset.
+All scores of the baseline methods are directly taken from their papers
+whenever available. We report the performance of 3DGS, SuGaR and ours
+using 30𝑘iterations.
+Outdoor Scene
+Indoor scene
+PSNR ↑
+SSIM ↑
+LIPPS ↓
+PSNR ↑
+SSIM ↑
+LIPPS ↓
+NeRF
+21.46
+0.458
+0.515
+26.84
+0.790
+0.370
+Deep Blending
+21.54
+0.524
+0.364
+26.40
+0.844
+0.261
+Instant NGP
+22.90
+0.566
+0.371
+29.15
+0.880
+0.216
+MERF
+23.19
+0.616
+0.343
+27.80
+0.855
+0.271
+BakedSDF
+22.47
+0.585
+0.349
+27.06
+0.836
+0.258
+MipNeRF360
+24.47
+0.691
+0.283
+31.72
+0.917
+0.180
+Mobile-NeRF
+21.95
+0.470
+0.470
+-
+-
+-
+SuGaR
+22.93
+0.629
+0.356
+29.43
+0.906
+0.225
+3DGS
+24.64
+0.731
+0.234
+30.41
+0.920
+0.189
+2DGS (Ours)
+24.34
+0.717
+0.246
+30.40
+0.916
+0.195
+and training time using the DTU dataset. Our method outperforms
+all compared methods in terms of Chamfer distance. Moreover, as
+shown in Table 2, 2DGS achieves competitive results with SDF mod-
+els (i.e., NeuS [Wang et al. 2021] and Geo-Neus [Fu et al. 2022])
+on the TnT dataset, and significantly better reconstruction than
+explicit reconstruction methods (i.e., 3DGS and SuGaR). Notably,
+our model demonstrates exceptional efficiency, offering a recon-
+struction speed that is approximately 100 times faster compared
+to implicit reconstruction methods and more than 3 times faster
+than the concurrent work SuGaR. Our approach can also achieve
+qualitatively better reconstructions with more appearance and ge-
+ometry details and fewer outliers, as shown in Figure 5. Moreover,
+SDF-based reconstruction methods require predefining the spherical
+size for initialization, which plays a critical role in the success of
+SDF reconstruction. By contrast, our method leverages radiance
+field based geometry modeling and is less sensitive to initialization.
+We include the full geometry reconstruction results for both DTU
+and TnT in Figure 9 and Figure 10.
+Appearance Reconstruction. Our method represents 3D scenes
+as radiance fields, providing high-quality novel view synthesis. In
+this section, we compare our novel view renderings using the Mip-
+NeRF360 dataset against baseline approaches, as shown in Table 4
+and Figure 4. Note that, since the ground truth geometry is not
+available in the Mip-NeRF360 dataset and we hence focus on quan-
+titative comparison. Remarkably, our method consistently achieves
+Table 5. Quantitative studies for the regularization terms and mesh extrac-
+tion methods on the DTU dataset.
+Accuracy ↓
+Completion ↓
+Average ↓
+A. w/o normal consistency
+1.35
+1.13
+1.24
+B. w/o depth distortion
+0.89
+0.87
+0.88
+C. w / expected depth
+0.88
+1.01
+0.94
+D. w / SPSR
+1.25
+0.89
+1.07
+E. Full Model
+0.79
+0.86
+0.83
+Input
+(A) w/o. NC
+(B) w/o. DD
+Full Model
+Fig. 6. Qualitative studies for the regularization effects. From left to right –
+input image, surface normals without normal consistency, without depth
+distortion, and our full model. Disabling the normal consistency loss leads
+to noisy surface orientations; conversely, omitting depth distortion regular-
+ization results in blurred surface normals. The complete model, employing
+both regularizations, successfully captures sharp and flat features.
+competitive NVS results across state-of-the-art techniques while
+providing geometrically accurate surface reconstruction. We include
+the appearance rendering results in Figure 11.
+6.3
+Ablations
+In this section, we isolate the design choices and measure their effect
+on reconstruction quality, including regularization terms and mesh
+extraction. We conduct experiments on the DTU dataset [Jensen et al.
+2014] with 15𝑘iterations and report the reconstruction accuracy,
+completeness and average reconstruction quality. The quantitative
+effect of the choices is reported in Table 5. Additional baseline com-
+parisons can be found in Appendix C of the supplemental material.
+Regularization. We first examine the effects of the proposed nor-
+mal consistency and depth distortion regularization terms. Our
+model (Table 5 E) provides the best performance when applying
+both regularization terms. We observe that disabling the normal
+consistency (Table 5 A) can lead to incorrect orientation, as shown
+in Figure 6 A. Additionally, the absence of depth distortion (Table 5
+B) results in a noisy surface, as shown in Figure 6 B.
+Mesh Extraction. We now analyze our choice for mesh extraction.
+Our full model (Table 5 E) utilizes TSDF fusion for mesh extraction
+with median depth. One alternative option is to use the expected
+depth instead of the median depth. However, it yields worse recon-
+structions as it is more sensitive to outliers, as shown in Table 5
+C. Further, our approach surpasses screened Poisson surface recon-
+struction (SPSR)(Table 5 D) [Kazhdan and Hoppe 2013] using 2D
+Gaussians’ center and normal as inputs, due to SPSR’s inability to
+incorporate the opacity and the size of 2D Gaussian primitives.
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA.
+
+8
+•
+Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao
+7
+CONCLUSION
+We presented 2D Gaussian splatting, a novel approach for geomet-
+rically accurate radiance field reconstruction. We utilized 2D Gauss-
+ian primitives for 3D scene representation, facilitating accurate and
+view consistent geometry modeling and rendering. We proposed
+two regularization techniques to further enhance the reconstructed
+geometry. Extensive experiments on several challenging datasets
+verify the effectiveness and efficiency of our method.
+Limitations. While our method successfully delivers accurate ap-
+pearance and geometry reconstruction for a wide range of objects
+and scenes, we also discuss its limitations: First, we assume surfaces
+with full opacity and extract meshes from multi-view depth maps.
+This can pose challenges in accurately handling semi-transparent
+surfaces, such as glass, due to their complex light transmission prop-
+erties, as shown in Figure 12. Secondly, our current densification
+strategy favors texture-rich over geometry-rich areas, occasionally
+leading to less accurate representations of fine geometric structures.
+A more effective densification strategy could mitigate this issue.
+Finally, our regularization often involves a trade-off between image
+quality and geometry, and can potentially lead to over-smoothing
+in certain regions.
+ACKNOWLEDGMENTS
+BH and SG are supported by NSFC #62172279, #61932020, Program of
+Shanghai Academic Research Leader. ZY, AC and AG are supported
+by the ERC Starting Grant LEGO-3D (850533) and DFG EXC number
+2064/1 - project number 390727645.
+REFERENCES
+Kara-Ali Aliev, Artem Sevastopolsky, Maria Kolos, Dmitry Ulyanov, and Victor Lem-
+pitsky. 2020. Neural point-based graphics. In Computer Vision–ECCV 2020: 16th
+European Conference, Glasgow, UK, August 23–28, 2020, Proceedings, Part XXII 16.
+Springer, 696–712.
+Jonathan T. Barron, Ben Mildenhall, Matthew Tancik, Peter Hedman, Ricardo Martin-
+Brualla, and Pratul P. Srinivasan. 2021. Mip-NeRF: A Multiscale Representation for
+Anti-Aliasing Neural Radiance Fields. ICCV (2021).
+Jonathan T Barron, Ben Mildenhall, Dor Verbin, Pratul P Srinivasan, and Peter Hedman.
+2022a. Mip-nerf 360: Unbounded anti-aliased neural radiance fields. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. 5470–5479.
+Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P. Srinivasan, and Peter Hedman.
+2022b. Mip-NeRF 360: Unbounded Anti-Aliased Neural Radiance Fields. CVPR (2022).
+Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P. Srinivasan, and Peter Hedman.
+2023. Zip-NeRF: Anti-Aliased Grid-Based Neural Radiance Fields. ICCV (2023).
+James F Blinn. 1977. A homogeneous formulation for lines in 3 space. In Proceedings of
+the 4th annual conference on Computer graphics and interactive techniques. 237–241.
+Mario Botsch, Alexander Hornung, Matthias Zwicker, and Leif Kobbelt. 2005. High-
+quality surface splatting on today’s GPUs. In Proceedings Eurographics/IEEE VGTC
+Symposium Point-Based Graphics, 2005. IEEE, 17–141.
+Anpei Chen, Zexiang Xu, Andreas Geiger, Jingyi Yu, and Hao Su. 2022. TensoRF:
+Tensorial Radiance Fields. In European Conference on Computer Vision (ECCV).
+Hanlin Chen, Chen Li, and Gim Hee Lee. 2023b. NeuSG: Neural Implicit Surface Re-
+construction with 3D Gaussian Splatting Guidance. arXiv preprint arXiv:2312.00846
+(2023).
+Zhiqin Chen, Thomas Funkhouser, Peter Hedman, and Andrea Tagliasacchi. 2023a.
+Mobilenerf: Exploiting the polygon rasterization pipeline for efficient neural field
+rendering on mobile architectures. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition. 16569–16578.
+Zhang Chen, Zhong Li, Liangchen Song, Lele Chen, Jingyi Yu, Junsong Yuan, and Yi
+Xu. 2023c. NeuRBF: A Neural Fields Representation with Adaptive Radial Basis
+Functions. In Proceedings of the IEEE/CVF International Conference on Computer
+Vision. 4182–4194.
+Sara Fridovich-Keil, Alex Yu, Matthew Tancik, Qinhong Chen, Benjamin Recht, and
+Angjoo Kanazawa. 2022. Plenoxels: Radiance Fields without Neural Networks. In
+CVPR.
+Qiancheng Fu, Qingshan Xu, Yew-Soon Ong, and Wenbing Tao. 2022. Geo-Neus:
+Geometry-Consistent Neural Implicit Surfaces Learning for Multi-view Reconstruc-
+tion. Advances in Neural Information Processing Systems (NeurIPS) (2022).
+Jian Gao, Chun Gu, Youtian Lin, Hao Zhu, Xun Cao, Li Zhang, and Yao Yao. 2023. Re-
+lightable 3D Gaussian: Real-time Point Cloud Relighting with BRDF Decomposition
+and Ray Tracing. arXiv:2311.16043 (2023).
+Antoine Guédon and Vincent Lepetit. 2023. SuGaR: Surface-Aligned Gaussian Splatting
+for Efficient 3D Mesh Reconstruction and High-Quality Mesh Rendering. arXiv
+preprint arXiv:2311.12775 (2023).
+Peter Hedman, Pratul P Srinivasan, Ben Mildenhall, Jonathan T Barron, and Paul De-
+bevec. 2021. Baking neural radiance fields for real-time view synthesis. In Proceedings
+of the IEEE/CVF International Conference on Computer Vision. 5875–5884.
+Wenbo Hu, Yuling Wang, Lin Ma, Bangbang Yang, Lin Gao, Xiao Liu, and Yuewen
+Ma. 2023. Tri-MipRF: Tri-Mip Representation for Efficient Anti-Aliasing Neural
+Radiance Fields. In ICCV.
+Eldar Insafutdinov and Alexey Dosovitskiy. 2018. Unsupervised learning of shape and
+pose with differentiable point clouds. Advances in neural information processing
+systems 31 (2018).
+Rasmus Jensen, Anders Dahl, George Vogiatzis, Engin Tola, and Henrik Aanæs. 2014.
+Large scale multi-view stereopsis evaluation. In Proceedings of the IEEE conference
+on computer vision and pattern recognition. 406–413.
+Yingwenqi Jiang, Jiadong Tu, Yuan Liu, Xifeng Gao, Xiaoxiao Long, Wenping Wang, and
+Yuexin Ma. 2023. GaussianShader: 3D Gaussian Splatting with Shading Functions
+for Reflective Surfaces. arXiv preprint arXiv:2311.17977 (2023).
+Michael Kazhdan and Hugues Hoppe. 2013. Screened poisson surface reconstruction.
+ACM Transactions on Graphics (ToG) 32, 3 (2013), 1–13.
+Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Drettakis. 2023.
+3D Gaussian Splatting for Real-Time Radiance Field Rendering. ACM Transactions on
+Graphics 42, 4 (July 2023). https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/
+Leonid Keselman and Martial Hebert. 2022. Approximate differentiable rendering with
+algebraic surfaces. In European Conference on Computer Vision. Springer, 596–614.
+Leonid Keselman and Martial Hebert. 2023. Flexible techniques for differentiable
+rendering with 3d gaussians. arXiv preprint arXiv:2308.14737 (2023).
+Arno Knapitsch, Jaesik Park, Qian-Yi Zhou, and Vladlen Koltun. 2017. Tanks and
+Temples: Benchmarking Large-Scale Scene Reconstruction. ACM Transactions on
+Graphics 36, 4 (2017).
+Georgios Kopanas, Julien Philip, Thomas Leimkühler, and George Drettakis. 2021. Point-
+Based Neural Rendering with Per-View Optimization. In Computer Graphics Forum,
+Vol. 40. Wiley Online Library, 29–43.
+Christoph Lassner and Michael Zollhofer. 2021. Pulsar: Efficient sphere-based neural
+rendering. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition. 1440–1449.
+Zhaoshuo Li, Thomas Müller, Alex Evans, Russell H Taylor, Mathias Unberath, Ming-
+Yu Liu, and Chen-Hsuan Lin. 2023. Neuralangelo: High-Fidelity Neural Surface
+Reconstruction. In IEEE Conference on Computer Vision and Pattern Recognition
+(CVPR).
+Zhihao Liang, Qi Zhang, Ying Feng, Ying Shan, and Kui Jia. 2023. GS-IR: 3D Gaussian
+Splatting for Inverse Rendering. arXiv preprint arXiv:2311.16473 (2023).
+Lingjie Liu, Jiatao Gu, Kyaw Zaw Lin, Tat-Seng Chua, and Christian Theobalt. 2020.
+Neural Sparse Voxel Fields. NeurIPS (2020).
+Jonathon Luiten, Georgios Kopanas, Bastian Leibe, and Deva Ramanan. 2024. Dynamic
+3D Gaussians: Tracking by Persistent Dynamic View Synthesis. In 3DV.
+Lars Mescheder, Michael Oechsle, Michael Niemeyer, Sebastian Nowozin, and Andreas
+Geiger. 2019. Occupancy Networks: Learning 3D Reconstruction in Function Space.
+In Conference on Computer Vision and Pattern Recognition (CVPR).
+Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik, Jonathan T. Barron, Ravi Ra-
+mamoorthi, and Ren Ng. 2020. NeRF: Representing Scenes as Neural Radiance Fields
+for View Synthesis. In ECCV.
+Ben Mildenhall, Pratul P Srinivasan, Matthew Tancik, Jonathan T Barron, Ravi Ra-
+mamoorthi, and Ren Ng. 2021. Nerf: Representing scenes as neural radiance fields
+for view synthesis. Commun. ACM 65, 1 (2021), 99–106.
+Thomas Müller, Alex Evans, Christoph Schied, and Alexander Keller. 2022. Instant
+Neural Graphics Primitives with a Multiresolution Hash Encoding. ACM Trans.
+Graph. 41, 4, Article 102 (July 2022), 15 pages.
+Michael Niemeyer, Lars Mescheder, Michael Oechsle, and Andreas Geiger. 2020. Differ-
+entiable Volumetric Rendering: Learning Implicit 3D Representations without 3D
+Supervision. In Conference on Computer Vision and Pattern Recognition (CVPR).
+Michael Oechsle, Songyou Peng, and Andreas Geiger. 2021. UNISURF: Unifying Neural
+Implicit Surfaces and Radiance Fields for Multi-View Reconstruction. In International
+Conference on Computer Vision (ICCV).
+Jeong Joon Park, Peter Florence, Julian Straub, Richard Newcombe, and Steven Love-
+grove. 2019. DeepSDF: Learning Continuous Signed Distance Functions for Shape
+Representation. In The IEEE Conference on Computer Vision and Pattern Recognition
+(CVPR).
+Hanspeter Pfister, Matthias Zwicker, Jeroen Van Baar, and Markus Gross. 2000. Surfels:
+Surface elements as rendering primitives. In Proceedings of the 27th annual conference
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA.

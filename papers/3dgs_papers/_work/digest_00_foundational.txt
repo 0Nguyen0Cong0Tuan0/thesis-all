@@ -1,0 +1,1850 @@
+
+
+==========================================================================================
+### 2003.08934_NeRF_Mildenhall2020  (pages=25, img=2003.08934_NeRF_Mildenhall2020_fig.png)
+==========================================================================================
+NeRF: Representing Scenes as
+Neural Radiance Fields for View Synthesis
+Ben Mildenhall1⋆
+Pratul P. Srinivasan1⋆
+Matthew Tancik1⋆
+Jonathan T. Barron2
+Ravi Ramamoorthi3
+Ren Ng1
+1UC Berkeley
+2Google Research
+3UC San Diego
+Abstract. We present a method that achieves state-of-the-art results
+for synthesizing novel views of complex scenes by optimizing an under-
+lying continuous volumetric scene function using a sparse set of input
+views. Our algorithm represents a scene using a fully-connected (non-
+convolutional) deep network, whose input is a single continuous 5D coor-
+dinate (spatial location (x, y, z) and viewing direction (θ, φ)) and whose
+output is the volume density and view-dependent emitted radiance at
+that spatial location. We synthesize views by querying 5D coordinates
+along camera rays and use classic volume rendering techniques to project
+the output colors and densities into an image. Because volume rendering
+is naturally diﬀerentiable, the only input required to optimize our repre-
+sentation is a set of images with known camera poses. We describe how to
+eﬀectively optimize neural radiance ﬁelds to render photorealistic novel
+views of scenes with complicated geometry and appearance, and demon-
+strate results that outperform prior work on neural rendering and view
+synthesis. View synthesis results are best viewed as videos, so we urge
+readers to view our supplementary video for convincing comparisons.
+Keywords: scene representation, view synthesis, image-based render-
+ing, volume rendering, 3D deep learning
+1
+Introduction
+In this work, we address the long-standing problem of view synthesis in a new
+way by directly optimizing parameters of a continuous 5D scene representation
+to minimize the error of rendering a set of captured images.
+We represent a static scene as a continuous 5D function that outputs the
+radiance emitted in each direction (θ, φ) at each point (x, y, z) in space, and a
+density at each point which acts like a diﬀerential opacity controlling how much
+radiance is accumulated by a ray passing through (x, y, z). Our method optimizes
+a deep fully-connected neural network without any convolutional layers (often
+referred to as a multilayer perceptron or MLP) to represent this function by
+regressing from a single 5D coordinate (x, y, z, θ, φ) to a single volume density
+and view-dependent RGB color. To render this neural radiance ﬁeld (NeRF)
+⋆Authors contributed equally to this work.
+arXiv:2003.08934v2 [cs.CV] 3 Aug 2020
+
+2
+B. Mildenhall, P. P. Srinivasan, M. Tancik et al.
+Input Images
+Optimize NeRF
+Render new views
+Fig. 1: We present a method that optimizes a continuous 5D neural radiance
+ﬁeld representation (volume density and view-dependent color at any continuous
+location) of a scene from a set of input images. We use techniques from volume
+rendering to accumulate samples of this scene representation along rays to render
+the scene from any viewpoint. Here, we visualize the set of 100 input views of the
+synthetic Drums scene randomly captured on a surrounding hemisphere, and we
+show two novel views rendered from our optimized NeRF representation.
+from a particular viewpoint we: 1) march camera rays through the scene to
+generate a sampled set of 3D points, 2) use those points and their corresponding
+2D viewing directions as input to the neural network to produce an output
+set of colors and densities, and 3) use classical volume rendering techniques to
+accumulate those colors and densities into a 2D image. Because this process is
+naturally diﬀerentiable, we can use gradient descent to optimize this model by
+minimizing the error between each observed image and the corresponding views
+rendered from our representation. Minimizing this error across multiple views
+encourages the network to predict a coherent model of the scene by assigning
+high volume densities and accurate colors to the locations that contain the true
+underlying scene content. Figure 2 visualizes this overall pipeline.
+We ﬁnd that the basic implementation of optimizing a neural radiance ﬁeld
+representation for a complex scene does not converge to a suﬃciently high-
+resolution representation and is ineﬃcient in the required number of samples per
+camera ray. We address these issues by transforming input 5D coordinates with
+a positional encoding that enables the MLP to represent higher frequency func-
+tions, and we propose a hierarchical sampling procedure to reduce the number of
+queries required to adequately sample this high-frequency scene representation.
+Our approach inherits the beneﬁts of volumetric representations: both can
+represent complex real-world geometry and appearance and are well suited for
+gradient-based optimization using projected images. Crucially, our method over-
+comes the prohibitive storage costs of discretized voxel grids when modeling
+complex scenes at high-resolutions. In summary, our technical contributions are:
+– An approach for representing continuous scenes with complex geometry and
+materials as 5D neural radiance ﬁelds, parameterized as basic MLP networks.
+– A diﬀerentiable rendering procedure based on classical volume rendering tech-
+niques, which we use to optimize these representations from standard RGB
+images. This includes a hierarchical sampling strategy to allocate the MLP’s
+capacity towards space with visible scene content.
+
+NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis
+3
+– A positional encoding to map each input 5D coordinate into a higher dimen-
+sional space, which enables us to successfully optimize neural radiance ﬁelds
+to represent high-frequency scene content.
+We demonstrate that our resulting neural radiance ﬁeld method quantitatively
+and qualitatively outperforms state-of-the-art view synthesis methods, including
+works that ﬁt neural 3D representations to scenes as well as works that train deep
+convolutional networks to predict sampled volumetric representations. As far as
+we know, this paper presents the ﬁrst continuous neural scene representation
+that is able to render high-resolution photorealistic novel views of real objects
+and scenes from RGB images captured in natural settings.
+2
+Related Work
+A promising recent direction in computer vision is encoding objects and scenes
+in the weights of an MLP that directly maps from a 3D spatial location to
+an implicit representation of the shape, such as the signed distance [6] at that
+location. However, these methods have so far been unable to reproduce realistic
+scenes with complex geometry with the same ﬁdelity as techniques that represent
+scenes using discrete representations such as triangle meshes or voxel grids. In
+this section, we review these two lines of work and contrast them with our
+approach, which enhances the capabilities of neural scene representations to
+produce state-of-the-art results for rendering complex realistic scenes.
+A similar approach of using MLPs to map from low-dimensional coordinates
+to colors has also been used for representing other graphics functions such as im-
+ages [44], textured materials [12,31,36,37], and indirect illumination values [38].
+Neural 3D shape representations Recent work has investigated the im-
+plicit representation of continuous 3D shapes as level sets by optimizing deep
+networks that map xyz coordinates to signed distance functions [15,32] or occu-
+pancy ﬁelds [11,27]. However, these models are limited by their requirement of
+access to ground truth 3D geometry, typically obtained from synthetic 3D shape
+datasets such as ShapeNet [3]. Subsequent work has relaxed this requirement of
+ground truth 3D shapes by formulating diﬀerentiable rendering functions that
+allow neural implicit shape representations to be optimized using only 2D im-
+ages. Niemeyer et al. [29] represent surfaces as 3D occupancy ﬁelds and use a
+numerical method to ﬁnd the surface intersection for each ray, then calculate an
+exact derivative using implicit diﬀerentiation. Each ray intersection location is
+provided as the input to a neural 3D texture ﬁeld that predicts a diﬀuse color for
+that point. Sitzmann et al. [42] use a less direct neural 3D representation that
+simply outputs a feature vector and RGB color at each continuous 3D coordinate,
+and propose a diﬀerentiable rendering function consisting of a recurrent neural
+network that marches along each ray to decide where the surface is located.
+Though these techniques can potentially represent complicated and high-
+resolution geometry, they have so far been limited to simple shapes with low
+geometric complexity, resulting in oversmoothed renderings. We show that an al-
+ternate strategy of optimizing networks to encode 5D radiance ﬁelds (3D volumes
+
+4
+B. Mildenhall, P. P. Srinivasan, M. Tancik et al.
+with 2D view-dependent appearance) can represent higher-resolution geometry
+and appearance to render photorealistic novel views of complex scenes.
+View synthesis and image-based rendering Given a dense sampling of
+views, photorealistic novel views can be reconstructed by simple light ﬁeld sam-
+ple interpolation techniques [21,5,7]. For novel view synthesis with sparser view
+sampling, the computer vision and graphics communities have made signiﬁcant
+progress by predicting traditional geometry and appearance representations from
+observed images. One popular class of approaches uses mesh-based representa-
+tions of scenes with either diﬀuse [48] or view-dependent [2,8,49] appearance.
+Diﬀerentiable rasterizers [4,10,23,25] or pathtracers [22,30] can directly optimize
+mesh representations to reproduce a set of input images using gradient descent.
+However, gradient-based mesh optimization based on image reprojection is often
+diﬃcult, likely because of local minima or poor conditioning of the loss land-
+scape. Furthermore, this strategy requires a template mesh with ﬁxed topology
+to be provided as an initialization before optimization [22], which is typically
+unavailable for unconstrained real-world scenes.
+Another class of methods use volumetric representations to address the task
+of high-quality photorealistic view synthesis from a set of input RGB images.
+Volumetric approaches are able to realistically represent complex shapes and
+materials, are well-suited for gradient-based optimization, and tend to produce
+less visually distracting artifacts than mesh-based methods. Early volumetric
+approaches used observed images to directly color voxel grids [19,40,45]. More
+recently, several methods [9,13,17,28,33,43,46,52] have used large datasets of mul-
+tiple scenes to train deep networks that predict a sampled volumetric represen-
+tation from a set of input images, and then use either alpha-compositing [34] or
+learned compositing along rays to render novel views at test time. Other works
+have optimized a combination of convolutional networks (CNNs) and sampled
+voxel grids for each speciﬁc scene, such that the CNN can compensate for dis-
+cretization artifacts from low resolution voxel grids [41] or allow the predicted
+voxel grids to vary based on input time or animation controls [24]. While these
+volumetric techniques have achieved impressive results for novel view
+
+
+==========================================================================================
+### 2111.12077_MipNeRF360_Barron2022  (pages=18, img=2111.12077_MipNeRF360_Barron2022_fig.png)
+==========================================================================================
+Mip-NeRF 360: Unbounded Anti-Aliased Neural Radiance Fields
+Jonathan T. Barron1
+Ben Mildenhall1
+Dor Verbin1,2
+Pratul P. Srinivasan1
+Peter Hedman1
+1Google Research
+2Harvard University
+Abstract
+Though neural radiance ﬁelds (NeRF) have demon-
+strated impressive view synthesis results on objects and
+small bounded regions of space, they struggle on “un-
+bounded” scenes, where the camera may point in any di-
+rection and content may exist at any distance. In this set-
+ting, existing NeRF-like models often produce blurry or
+low-resolution renderings (due to the unbalanced detail and
+scale of nearby and distant objects), are slow to train, and
+may exhibit artifacts due to the inherent ambiguity of the
+task of reconstructing a large scene from a small set of
+images. We present an extension of mip-NeRF (a NeRF
+variant that addresses sampling and aliasing) that uses a
+non-linear scene parameterization, online distillation, and
+a novel distortion-based regularizer to overcome the chal-
+lenges presented by unbounded scenes. Our model, which
+we dub “mip-NeRF 360” as we target scenes in which the
+camera rotates 360 degrees around a point, reduces mean-
+squared error by 57% compared to mip-NeRF, and is able to
+produce realistic synthesized views and detailed depth maps
+for highly intricate, unbounded real-world scenes.
+Neural Radiance Fields (NeRF) synthesize highly realis-
+tic renderings of scenes by encoding the volumetric density
+and color of a scene within the weights of a coordinate-
+based multi-layer perceptron (MLP). This approach has
+enabled signiﬁcant progress towards photorealistic view
+synthesis [33].
+However, NeRF models the input to the
+MLP using inﬁnitesimally small 3D points along a ray,
+which causes aliasing when rendering views of varying res-
+olutions. Mip-NeRF rectiﬁed this problem by extending
+NeRF to instead reason about volumetric frustums along a
+cone [3]. Though this improves quality, both NeRF and
+mip-NeRF struggle when dealing with unbounded scenes,
+where the camera may face any direction and scene con-
+tent may exist at any distance. In this work, we present an
+extension to mip-NeRF we call “mip-NeRF 360” that is ca-
+pable of producing realistic renderings of these unbounded
+scenes, as shown in Figure 1.
+Applying NeRF-like models to large unbounded scenes
+(a) mip-NeRF [3], SSIM=0.526
+(b) Our Model, SSIM=0.804
+Figure 1. (a) Though mip-NeRF is able to produce accurate ren-
+derings of objects, for unbounded scenes it often generates blurry
+backgrounds and low-detail foregrounds. (b) Our model produces
+detailed realistic renderings of these unbounded scenes, as evi-
+denced by the renderings (top) and depth maps (bottom) from both
+models. See the supplemental video for additional results.
+raises three critical issues:
+1. Parameterization. Unbounded 360 degree scenes can
+occupy an arbitrarily large region of Euclidean space,
+but mip-NeRF requires that 3D scene coordinates lie
+in a bounded domain.
+2. Efﬁciency. Large and detailed scenes require more net-
+work capacity, but densely querying a large MLP along
+each ray during training is expensive.
+3. Ambiguity. The content of unbounded scenes may lie
+at any distance and will be observed by only a small
+number of rays, exacerbating the inherent ambiguity
+of reconstructing 3D content from 2D images.
+Parameterization.
+Due to perspective projection, an ob-
+ject placed far from the camera will occupy a small portion
+of the image plane, but will occupy more of the image and
+be visible in detail if placed nearby. Therefore, an ideal pa-
+rameterization of a 3D scene should allocate more capacity
+to nearby content and less capacity to distant content. Out-
+side of NeRF, traditional view-synthesis methods address
+this by parameterizing the scene in projective panoramic
+1
+arXiv:2111.12077v3 [cs.CV] 25 Mar 2022
+
+space [2, 4, 9, 16, 23, 27, 36, 46, 54] or by embedding scene
+content within some proxy geometry [17, 26, 41] that has
+been recovered using multi-view stereo.
+One aspect of NeRF’s success is its pairing of speciﬁc
+scene types with their appropriate 3D parameterizations.
+The original NeRF paper [33] focused on 360 degree cap-
+tures of objects with masked backgrounds and on front-
+facing scenes where all images face roughly the same di-
+rection. For masked objects NeRF directly parameterized
+the scene in 3D Euclidean space, but for front-facing scenes
+NeRF used coordinates deﬁned in projective space (normal-
+ized device coordinates, or “NDC” [5]). By warping an
+inﬁnitely deep camera frustum into a bounded cube where
+distance along the z-axis corresponds to disparity (inverse
+distance), NDC effectively reallocates the NeRF MLP’s ca-
+pacity in a way that is consistent with the geometry of per-
+spective projection.
+However, scenes that are unbounded in all directions,
+not just in a single direction, require a different parame-
+terization. This idea was explored by NeRF++ [51], which
+used an additional network to model distant objects, and by
+DONeRF [34], which proposed a space-warping procedure
+to shrink distant points towards the origin. Both of these ap-
+proaches behave somewhat analogously to NDC but in ev-
+ery direction, rather than just along the z-axis. In this work,
+we extend this idea to mip-NeRF and present a method for
+applying any smooth parameterization to volumes (rather
+than points), and also present our own parameterization for
+unbounded scenes.
+Efﬁciency.
+One fundamental challenge in dealing with
+unbounded scenes is that such scenes are often large and
+detailed. Though NeRF-like models can accurately repro-
+duce objects or regions of scenes using a surprisingly small
+number of weights, the capacity of the NeRF MLP saturates
+when faced with increasingly intricate scene content. Ad-
+ditionally, larger scenes require signiﬁcantly more samples
+along each ray to accurately localize surfaces. For exam-
+ple, when scaling NeRF from objects to buildings, Martin-
+Brualla et al. [30] doubled the number of MLP hidden units
+and increased the number of MLP evaluations by 8×. This
+increase in model capacity is expensive — a NeRF already
+takes multiple hours to train, and multiplying this time by
+an additional ∼40× is prohibitively slow for most uses.
+This training cost is exacerbated by the coarse-to-ﬁne re-
+sampling strategy used by NeRF and mip-NeRF: MLPs are
+evaluated multiple times using “coarse” and “ﬁne” ray inter-
+vals, and are supervised using an image reconstruction loss
+on both passes. This approach is wasteful, as the “coarse”
+rendering of the scene does not contribute to the ﬁnal im-
+age. Instead of training a single NeRF MLP that is super-
+vised at multiple scales, we will instead train two MLPs: a
+“proposal MLP” and a “NeRF MLP”. The proposal MLP
+predicts volumetric density (but not color) and those densi-
+ties are used to resample new intervals that are provided to
+the NeRF MLP, which then renders the image. Crucially,
+the weights produced by the proposal MLP are not super-
+vised using the input image, but are instead supervised with
+the histogram weights generated by the NeRF MLP. This al-
+lows us to use a large NeRF MLP that is evaluated relatively
+few times, alongside a small proposal MLP that is evaluated
+many more times. As a result, our whole model’s total ca-
+pacity is signiﬁcantly larger than mip-NeRF’s (∼15×), re-
+sulting in greatly improved rendering quality, but our train-
+ing time only increases modestly (∼2×).
+We can think of this approach as a kind of “online dis-
+tillation”: while “distillation” commonly refers to train-
+ing a small network to match the output of an already-
+trained large network [19], here we distill the structure of
+the outputs predicted by the NeRF MLP into the proposal
+MLP “online” by training both networks simultaneously.
+NeRV [47] performs a similar kind of online distillation
+for an entirely different task: training MLPs to approximate
+rendering integrals for the purpose of modeling visibility
+and indirect illumination. Our online distillation approach
+is similar in spirit to the “sampling oracle networks” used
+in DONeRF, though that approach uses ground-truth depth
+for supervision [34]. A related idea was used in TermiN-
+eRF [39], though that approach only accelerates inference
+and actually slows training (a NeRF is trained to conver-
+gence, and an additional model is trained afterwards). A
+learned “proposer” network was explored in NeRF in De-
+tail [1] but only achieves a speedup of 25%, while our ap-
+proach accelerates training by 300%.
+Several works have attempted to distill or “bake” a
+trained NeRF into a format that can be rendered quickly
+[18,40,50], but these techniques do not accelerate training.
+The idea of accelerating ray-tracing through a hierarchical
+data structure such as octrees [43] or bounding volume hi-
+erarchies [42] is well-explored in the rendering literature,
+though these approaches assume a-priori knowledge of the
+geometry of the scene and therefore do not naturally gener-
+alize to an inverse rendering context in which the geometry
+of the scene is unknown and must be recovered. Indeed,
+despite building an octree acceleration structure while opti-
+mizing a NeRF-like model, the Neural Sparse Voxel Fields
+approach does not signiﬁcantly reduce training time [28].
+Ambiguity.
+Though NeRFs are traditionally optimized
+using many input images of a scene, the problem of re-
+covering a NeRF that produces realistic synthesized views
+from novel camera angles is still fundamentally undercon-
+strained — an inﬁnite family of NeRFs can explain away
+the input images, but only a small subset produces accept-
+able results for novel views. For example, a NeRF could
+recreate all input images by simply reconstructing each im-
+2
+
+age as a textured plane immediately in front of its respec-
+tive camera. The original NeRF paper regularized ambigu-
+ous scenes by injecting Gaussian noise into the density head
+of the NeRF MLP before the rectiﬁer [33], which encour-
+ages densities to gravitate towards either zero or inﬁnity.
+Though this reduces some “ﬂoaters” by discouraging semi-
+transparent densities, we will show that it is insufﬁcient for
+our more challenging task. Other regularizers for NeRF
+have been proposed, such as a robust loss on density [18]
+or smoothness penalties on surfaces [35, 53], but these so-
+lutions address different problems than ours (slow render-
+ing and non-smooth surfaces, respectively). Additionally,
+these regularizers are designed for the point samples used
+by NeRF, while our approach is designed to work with the
+continuous weights deﬁned along each mip-NeRF ray.
+These three issues will be addressed in Sections 2, 3, and
+4 respectively, after a review of mip-NeRF. We will demon-
+strate our improvement over prior work using a new dataset
+consisting of challenging indoor and outdoor
+
+
+==========================================================================================
+### 2112.05131_Plenoxels  (pages=21, img=2112.05131_Plenoxels_fig.png)
+==========================================================================================
+Plenoxels: Radiance Fields without Neural Networks
+Alex Yu∗
+Sara Fridovich-Keil∗
+Matthew Tancik
+Qinhong Chen
+Benjamin Recht
+Angjoo Kanazawa
+UC Berkeley
+Abstract
+We introduce Plenoxels (plenoptic voxels), a system for
+photorealistic view synthesis. Plenoxels represent a scene as
+a sparse 3D grid with spherical harmonics. This representa-
+tion can be optimized from calibrated images via gradient
+methods and regularization without any neural components.
+On standard, benchmark tasks, Plenoxels are optimized two
+orders of magnitude faster than Neural Radiance Fields with
+no loss in visual quality. For video and code, please see
+https://alexyu.net/plenoxels.
+1. Introduction
+A recent body of research has capitalized on implicit,
+coordinate-based neural networks as the 3D representation
+to optimize 3D volumes from calibrated 2D image super-
+vision. In particular, Neural Radiance Fields (NeRF) [26]
+demonstrated photorealistic novel viewpoint rendering, cap-
+turing scene geometry as well as view-dependent effects.
+This impressive quality, however, requires extensive com-
+putation time for both training and rendering, with training
+lasting more than a day and rendering requiring 30 sec-
+onds per frame, on a single GPU. Multiple subsequent pa-
+pers [8, 9, 19, 35, 36, 56] reduced this computational cost,
+particularly for rendering, but single GPU training still re-
+quires multiple hours, a bottleneck that limits the practical
+application of photorealistic volumetric reconstruction.
+In this paper, we show that we can train a radiance ﬁeld
+from scratch, without neural networks, while maintaining
+NeRF quality and reducing optimization time by two orders
+of magnitude. We provide a custom CUDA [29] implemen-
+tation that capitalizes on the model simplicity to achieve
+substantial speedups. Our typical optimization time on a
+single Titan RTX GPU is 11 minutes on bounded scenes
+(compared to roughly 1 day for NeRF, more than a 100×
+speedup) and 27 minutes on unbounded scenes (compared
+* Authors contributed equally to this work.
+NeRF
+Plenoxel
+Training Time (minutes)
+PSNR
+NeRF
+Plenoxel
+10 min
+5 min
+1 min
+20
+25
+30
+35
+60
+50
+40
+30
+20
+10
+0
+100x Faster Convergence
+Figure 1. Plenoxel: Plenoptic Volume Elements for fast optimiza-
+tion of radiance ﬁelds. We show that direct optimization of a fully
+explicit 3D model can match the rendering quality of modern neural
+based approaches such as NeRF while optimizing over two orders
+of magnitude faster.
+to roughly 4 days for NeRF++ [57], again more than a 100×
+speedup). Although our implementation is not optimized for
+fast rendering, we can render novel viewpoints at interactive
+rates 15 fps. If faster rendering is desired, our optimized
+Plenoxel model can be converted into a PlenOctree [56].
+Speciﬁcally, we propose an explicit volumetric represen-
+tation, based on a view-dependent sparse voxel grid without
+any neural networks. Our model can render photorealistic
+novel viewpoints and be optimized end-to-end from cali-
+brated 2D photographs, using the differentiable rendering
+loss on training views as well as a total variation regularizer.
+1
+arXiv:2112.05131v1 [cs.CV] 9 Dec 2021
+
+We call our model Plenoxel for plenoptic volume elements,
+as it consists of a sparse voxel grid in which each voxel stores
+opacity and spherical harmonic coefﬁcients. These coefﬁ-
+cients are interpolated to model the full plenoptic function
+continuously in space. To achieve high resolution on a single
+GPU, we prune empty voxels and follow a coarse to ﬁne
+optimization strategy. Although our core model is a bounded
+voxel grid, we can model unbounded scenes by using nor-
+malized device coordinates (for forward-facing scenes) or
+by surrounding our grid with multisphere images to encode
+the background (for 360◦scenes).
+Our method reveals that photorealistic volumetric recon-
+struction can be approached using standard tools from in-
+verse problems: a data representation, a forward model, a
+regularization function, and an optimizer. Our method shows
+that each of these components can be simple and state of
+the art results can still be achieved. Our experiments suggest
+the key element of Neural Radiance Fields is not the neural
+network but the differentiable volumetric renderer.
+2. Related Work
+Classical Volume Reconstruction.
+We begin with a brief
+overview of classical methods for volume reconstruction,
+focusing on those which ﬁnd application in our work. In
+particular, the most common classical methods for volume
+rendering are voxel grids [6, 13, 20, 41–43, 51] and multi-
+plane images (MPIs) [25,32,46,47,55,59]. Voxel grids are
+capable of representing arbitrary topologies but can be mem-
+ory limited at high resolution. One approach for reducing
+the memory requirement for voxel grids is to encode hier-
+archical structure, for instance using octrees [11,38,50,52]
+(see [16] for a survey); we use an even simpler sparse array
+structure. Using these grid-based representations combined
+with some form of interpolation produces a continuous repre-
+sentation that can be arbitrarily resized using standard signal
+processing methods (see [30] for reference). This combi-
+nation of sparsity and interpolation enables even a simple
+grid-based model to represent 3D scenes at high resolution
+without prohibitive memory requirements. We combine this
+classical sampling and interpolation paradigm with the for-
+ward volume rendering formula introduced by Max [22]
+(based on work from Kajiya and Von Herzen [12] and used
+in NeRF) to directly optimize a 3D model from indirect 2D
+observations. We further extend these classical approaches
+by modeling view dependence, which we accomplish by
+optimizing spherical harmonic coefﬁcients for each color
+channel at each voxel. Spherical harmonics are a standard
+basis for functions over the sphere, and have been used pre-
+viously to represent view dependence [3,34,45,56].
+Neural Volume Reconstruction.
+Recently, dramatic im-
+provements in neural volume reconstruction have renewed
+interest in this direction. Neural implicit representations were
+ﬁrst used to model occupancy [5,21,24] and signed distance
+to an object’s surface [31,48], and perform novel view syn-
+thesis from 3D point clouds [1, 17, 40, 54]. Several papers
+extended this idea of neural implicit 3D modeling to model
+a scene using only calibrated 2D image supervision via a
+differentiable volume rendering formulation [20,26,43,44].
+NeRF [26] in particular uses a differentiable volume ren-
+dering formula to train a coordinate-based multilayer per-
+ceptron (MLP) to directly predict color and opacity from 3D
+position and 2D viewing direction. NeRF produces impres-
+sive results but requires several days for full training, and
+about half an minute to render a full image, because every
+rendered pixel requires evaluating the coordinate-based MLP
+at hundreds of sample locations along the corresponding ray.
+Many papers have since extended the capabilities of NeRF,
+including modeling the background in 360◦views [57] and
+incorporating anti-aliasing for multiscale rendering [2]. We
+extend our Plenoxel method to unbounded 360◦scenes using
+a background model inspired by NeRF++ [57].
+Of these methods, Neural Volumes [20] is the most simi-
+lar to ours in that it uses a voxel grid with interpolation, but
+optimizes this grid through a convolutional neural network
+and applies a learned warping function to improve the ef-
+fective resolution (of a 1283 grid). We show that the voxel
+grid can be optimized directly and high resolution can be
+achieved by pruning and coarse to ﬁne optimization, without
+any neural networks or warping functions.
+Accelerating NeRF.
+In light of the substantial computa-
+tional requirements of NeRF for both training and rendering,
+many recent papers have proposed methods to improve efﬁ-
+ciency, particularly for rendering. Among these methods are
+many that achieve speedup by subdividing the 3D volume
+into regions that can be processed more efﬁciently [19,35].
+Other speedup approaches have focused on a range of com-
+putational and pre- or post-processing methods to remove
+bottlenecks in the original NeRF formulation. JAXNeRF [7],
+a JAX [4] reimplementation of NeRF offers a speedup for
+both training and rendering via parallelization across many
+GPUs or TPUs. AutoInt [18] restructures the coordinate-
+based MLP to compute ray integrals exactly, for more than
+10× faster rendering with a small loss in quality. Learned
+Initializations [49] employs meta-learning on many scenes to
+start from a better MLP initialization, for both > 10× faster
+training and better priors when per-scene data is limited.
+Other methods [14,27,33] achieve speedup by predicting a
+surface or sampling near the surface, reducing the number
+of samples necessary for rendering each ray.
+Another approach is to pretrain a NeRF (or similar model)
+and then extract it into a different data structure that can
+support fast inference [8, 9, 36, 56]. In particular, PlenOc-
+trees [56] extracts a NeRF variant into a sparse voxel grid
+in which each voxel represents view-dependent color us-
+2
+
+Spherical
+Harmonics
+b) Trilinear Interpolation
+a) Sparse Voxel Grid
+σ
+Ray Distance
+Training
+Image
+d) Optimization
+c) Volumetric Rendering
+minimize
+σ,
+Predicted
+Color
+Figure 2. Overview of our sparse Plenoxel model. Given a set of images of an object or scene, we reconstruct a (a) sparse voxel (“Plenoxel”)
+grid with density and spherical harmonic coefﬁcients at each voxel. To render a ray, we (b) compute the color and opacity of each sample point
+via trilinear interpolation of the neighboring voxel coefﬁcients. We integrate the color and opacity of these samples using (c) differentiable
+volume rendering, following the recent success of NeRF [26]. The voxel coefﬁcients can then be (d) optimized using the standard MSE
+reconstruction loss relative to the training images, along with a total variation regularizer.
+ing spherical harmonic coefﬁcients. Because the extracted
+PlenOctree can be further optimized, this method can speed
+up training by roughly 3×, and because it uses an efﬁcient
+GPU octree implementation without any MLP evaluations,
+it achieves > 3000× rendering speedup. Our method ex-
+tends PlenOctrees to perform end-to-end optimization of a
+sparse voxel representation with spherical harmonics, offer-
+ing much faster training (two orders of magnitude speedup
+compared to NeRF). Our Plenoxel model is a generalization
+of PlenOctrees to support sparse plenoptic voxel grids of
+arbitrary resolution (not necessary powers of two) with the
+ability to perform trilinear interpolation, which is easier to
+implement with this sparse voxel structure.
+3. Method
+Our model is a sparse voxel grid in which each occupied
+voxel corner stores a scalar opacity σ and a vector of spheri-
+cal harmonic (SH) coefﬁcients for each color channel. From
+here on we refer to this representation as Plenoxel. The opac-
+ity and color at an arbitrary position and viewing direction
+are determined by trilinearly interpolating the values stored
+at the neighboring voxels and evaluating the spherical har-
+monics at the appropriate viewing direction. Given a set of
+calibrated images, we optimize our model directly using the
+rendering loss on training rays. Our model is illustrated in
+Fig. 2 and described in detail below.
+3.1. Volume Rendering
+We use the same differentiable model
+
+
+==========================================================================================
+### 2201.05989_InstantNGP_Muller2022  (pages=15, img=2201.05989_InstantNGP_Muller2022_fig.png)
+==========================================================================================
+Instant Neural Graphics Primitives with a Multiresolution Hash Encoding
+THOMAS MÜLLER, NVIDIA, Switzerland
+ALEX EVANS, NVIDIA, United Kingdom
+CHRISTOPH SCHIED, NVIDIA, USA
+ALEXANDER KELLER, NVIDIA, Germany
+https://nvlabs.github.io/instant-ngp
+Trained for 1 second
+15 seconds
+1 second
+15 seconds
+60 seconds
+reference
+Gigapixel image
+SDF
+NRC
+NeRF
+Fig. 1. We demonstrate instant training of neural graphics primitives on a single GPU for multiple tasks. In Gigapixel image we represent a gigapixel image by
+a neural network. SDF learns a signed distance function in 3D space whose zero level-set represents a 2D surface. Neural radiance caching (NRC) [Müller et al.
+2021] employs a neural network that is trained in real-time to cache costly lighting calculations. Lastly, NeRF [Mildenhall et al. 2020] uses 2D images and
+their camera poses to reconstruct a volumetric radiance-and-density field that is visualized using ray marching. In all tasks, our encoding and its efficient
+implementation provide clear benefits: rapid training, high quality, and simplicity. Our encoding is task-agnostic: we use the same implementation and
+hyperparameters across all tasks and only vary the hash table size which trades off quality and performance. Photograph ©Trevor Dobson (CC BY-NC-ND 2.0)
+Neural graphics primitives, parameterized by fully connected neural net-
+works, can be costly to train and evaluate. We reduce this cost with a versatile
+new input encoding that permits the use of a smaller network without sac-
+rificing quality, thus significantly reducing the number of floating point
+and memory access operations: a small neural network is augmented by a
+multiresolution hash table of trainable feature vectors whose values are op-
+timized through stochastic gradient descent. The multiresolution structure
+allows the network to disambiguate hash collisions, making for a simple
+Authors’ addresses: Thomas Müller, NVIDIA, Zürich, Switzerland, tmueller@nvidia.
+com; Alex Evans, NVIDIA, London, United Kingdom, alexe@nvidia.com; Christoph
+Schied, NVIDIA, Seattle, USA, cschied@nvidia.com; Alexander Keller, NVIDIA, Berlin,
+Germany, akeller@nvidia.com.
+© 2022 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+This is the author’s version of the work. It is posted here for your personal use. Not for
+redistribution. The definitive Version of Record was published in ACM Transactions on
+Graphics, https://doi.org/10.1145/3528223.3530127.
+architecture that is trivial to parallelize on modern GPUs. We leverage this
+parallelism by implementing the whole system using fully-fused CUDA ker-
+nels with a focus on minimizing wasted bandwidth and compute operations.
+We achieve a combined speedup of several orders of magnitude, enabling
+training of high-quality neural graphics primitives in a matter of seconds,
+and rendering in tens of milliseconds at a resolution of 1920×1080.
+CCS Concepts: • Computing methodologies →Massively parallel algo-
+rithms; Vector / streaming algorithms; Neural networks.
+Additional Key Words and Phrases: Image Synthesis, Neural Networks, En-
+codings, Hashing, GPUs, Parallel Computation, Function Approximation.
+ACM Reference Format:
+Thomas Müller, Alex Evans, Christoph Schied, and Alexander Keller. 2022.
+Instant Neural Graphics Primitives with a Multiresolution Hash Encoding.
+ACM Trans. Graph. 41, 4, Article 102 (July 2022), 15 pages. https://doi.org/10.
+1145/3528223.3530127
+ACM Trans. Graph., Vol. 41, No. 4, Article 102. Publication date: July 2022.
+arXiv:2201.05989v2 [cs.CV] 4 May 2022
+
+102:2
+•
+Müller et al.
+1
+INTRODUCTION
+Computer graphics primitives are fundamentally represented by
+mathematical functions that parameterize appearance. The quality
+and performance characteristics of the mathematical representation
+are crucial for visual fidelity: we desire representations that remain
+fast and compact while capturing high-frequency, local detail. Func-
+tions represented by multi-layer perceptrons (MLPs), used as neural
+graphics primitives, have been shown to match these criteria (to
+varying degree), for example as representations of shape [Martel
+et al. 2021; Park et al. 2019] and radiance fields [Liu et al. 2020;
+Mildenhall et al. 2020; Müller et al. 2020, 2021].
+The important commonality of the these approaches is an encod-
+ing that maps neural network inputs to a higher-dimensional space,
+which is key for extracting high approximation quality from com-
+pact models. Most successful among these encodings are trainable,
+task-specific data structures [Liu et al. 2020; Takikawa et al. 2021]
+that take on a large portion of the learning task. This enables the use
+of smaller, more efficient MLPs. However, such data structures rely
+on heuristics and structural modifications (such as pruning, split-
+ting, or merging) that may complicate the training process, limit
+the method to a specific task, or limit performance on GPUs where
+control flow and pointer chasing is expensive.
+We address these concerns with our multiresolution hash encod-
+ing, which is adaptive and efficient, independent of the task. It is
+configured by just two values—the number of parameters 𝑇and the
+desired finest resolution 𝑁max—yielding state-of-the-art quality on
+a variety of tasks (Figure 1) after a few seconds of training.
+Key to both the task-independent adaptivity and efficiency is a
+multiresolution hierarchy of hash tables:
+• Adaptivity: we map a cascade of grids to corresponding fixed-
+size arrays of feature vectors. At coarse resolutions, there is a 1:1
+mapping from grid points to array entries. At fine resolutions, the
+array is treated as a hash table and indexed using a spatial hash
+function, where multiple grid points alias each array entry. Such
+hash collisions cause the colliding training gradients to average,
+meaning that the largest gradients—those most relevant to the
+loss function—will dominate. The hash tables thus automatically
+prioritize the sparse areas with the most important fine scale detail.
+Unlike prior work, no structural updates to the data structure are
+needed at any point during training.
+• Efficiency: our hash table lookups are O(1) and do not require
+control flow. This maps well to modern GPUs, avoiding execution
+divergence and serial pointer-chasing inherent in tree traversals.
+The hash tables for all resolutions may be queried in parallel.
+We validate our multiresolution hash encoding in four representa-
+tive tasks (see Figure 1):
+(1) Gigapixel image: the MLP learns the mapping from 2D coor-
+dinates to RGB colors of a high-resolution image.
+(2) Neural signed distance functions (SDF): the MLP learns the
+mapping from 3D coordinates to the distance to a surface.
+(3) Neural radiance caching (NRC): the MLP learns the 5D light
+field of a given scene from a Monte Carlo path tracer.
+(4) Neural radiance and density fields (NeRF): the MLP learns
+the 3D density and 5D light field of a given scene from image
+observations and corresponding perspective transforms.
+In the following, we first review prior neural network encodings
+(Section 2), then we describe our encoding (Section 3) and its imple-
+mentation (Section 4), followed lastly by our experiments (Section 5)
+and discussion thereof (Section 6).
+2
+BACKGROUND AND RELATED WORK
+Early examples of encoding the inputs of a machine learning model
+into a higher-dimensional space include the one-hot encoding [Har-
+ris and Harris 2013] and the kernel trick [Theodoridis 2008] by which
+complex arrangements of data can be made linearly separable.
+For neural networks, input encodings have proven useful in the at-
+tention components of recurrent architectures [Gehring et al. 2017]
+and, subsequently, transformers [Vaswani et al. 2017], where they
+help the neural network to identify the location it is currently pro-
+cessing. Vaswani et al. [2017] encode scalar positions 𝑥∈R as a
+multiresolution sequence of 𝐿∈N sine and cosine functions
+enc(𝑥) =   sin(20𝑥), sin(21𝑥), . . . , sin(2𝐿−1𝑥),
+cos(20𝑥), cos(21𝑥), . . . , cos(2𝐿−1𝑥)  .
+(1)
+This has been adopted in computer graphics to encode the spatio-
+directionally varying light field and volume density in the NeRF
+algorithm [Mildenhall et al. 2020]. The five dimensions of this light
+field are independently encoded using the above formula; this was
+later extended to randomly oriented parallel wavefronts [Tancik
+et al. 2020] and level-of-detail filtering [Barron et al. 2021a]. We will
+refer to this family of encodings as frequency encodings. Notably,
+frequency encodings followed by a linear transformation have been
+used in other computer graphics tasks, such as approximating the
+visibility function [Annen et al. 2007; Jansen and Bavoil 2010].
+Müller et al. [2019; 2020] suggested a continuous variant of the
+one-hot encoding based on rasterizing a kernel, the one-blob en-
+coding, which can achieve more accurate results than frequency
+encodings in bounded domains at the cost of being single-scale.
+Parametric encodings. Recently, state-of-the-art results have been
+achieved by parametric encodings which blur the line between clas-
+sical data structures and neural approaches. The idea is to arrange
+additional trainable parameters (beyond weights and biases) in an
+auxiliary data structure, such as a grid [Chabra et al. 2020; Jiang
+et al. 2020; Liu et al. 2020; Mehta et al. 2021; Peng et al. 2020a; Sun
+et al. 2021; Tang et al. 2018; Yu et al. 2021a] or a tree [Takikawa et al.
+2021], and to look-up and (optionally) interpolate these parameters
+depending on the input vector x ∈R𝑑. This arrangement trades a
+larger memory footprint for a smaller computational cost: whereas
+for each gradient propagated backwards through the network, every
+weight in the fully connected MLP network must be updated, for
+the trainable input encoding parameters (“feature vectors”), only
+a very small number are affected. For example, with a trilinearly
+interpolated 3D grid of feature vectors, only 8 such grid points need
+to be updated for each sample back-propagated to the encoding. In
+this way, although the total number of parameters is much higher
+for a parametric encoding than a fixed input encoding, the number
+of FLOPs and memory accesses required for the update during train-
+ing is not increased significantly. By reducing the size of the MLP,
+such parametric models can typically be trained to convergence
+much faster without sacrificing approximation quality.
+ACM Trans. Graph., Vol. 41, No. 4, Article 102. Publication date: July 2022.
+
+Instant Neural Graphics Primitives with a Multiresolution Hash Encoding
+•
+102:3
+(a) No encoding
+(b) Frequency
+[Mildenhall et al. 2020]
+(c) Dense grid
+Single resolution
+(d) Dense grid
+Multi resolution
+(e) Hash table (ours)
+𝑇= 214
+(f) Hash table (ours)
+𝑇= 219
+411 k + 0 parameters
+438 k + 0
+10 k + 33.6 M
+10 k + 16.3 M
+10 k + 494 k
+10 k + 12.6 M
+11:28 (mm:ss) / PSNR 18.56
+12:45 / PSNR 22.90
+1:09 / PSNR 22.35
+1:26 / PSNR 23.62
+1:48 / PSNR 22.61
+1:47 / PSNR 24.58
+Fig. 2. A demonstration of the reconstruction quality of different encodings and parametric data structures for storing trainable feature embeddings.
+
+
+==========================================================================================
+### 2203.09517_TensoRF  (pages=33, img=2203.09517_TensoRF_fig.png)
+==========================================================================================
+TensoRF: Tensorial Radiance Fields
+Anpei Chen1⋆
+Zexiang Xu2⋆
+Andreas Geiger3
+Jingyi Yu1
+Hao Su4
+1ShanghaiTech University
+2Adobe Research
+3University of T¨ubingen and MPI-IS, T¨ubingen
+4UC San Diego
+https://apchenstu.github.io/TensoRF/
+Abstract. We present TensoRF, a novel approach to model and recon-
+struct radiance fields. Unlike NeRF that purely uses MLPs, we model the
+radiance field of a scene as a 4D tensor, which represents a 3D voxel grid
+with per-voxel multi-channel features. Our central idea is to factorize the
+4D scene tensor into multiple compact low-rank tensor components. We
+demonstrate that applying traditional CANDECOMP/PARAFAC (CP)
+decomposition – that factorizes tensors into rank-one components with
+compact vectors – in our framework leads to improvements over vanilla
+NeRF. To further boost performance, we introduce a novel vector-matrix
+(VM) decomposition that relaxes the low-rank constraints for two modes
+of a tensor and factorizes tensors into compact vector and matrix factors.
+Beyond superior rendering quality, our models with CP and VM decom-
+positions lead to a significantly lower memory footprint in comparison to
+previous and concurrent works that directly optimize per-voxel features.
+Experimentally, we demonstrate that TensoRF with CP decomposition
+achieves fast reconstruction (< 30 min) with better rendering quality
+and even a smaller model size (< 4 MB) compared to NeRF. Moreover,
+TensoRF with VM decomposition further boosts rendering quality and
+outperforms previous state-of-the-art methods, while reducing the recon-
+struction time (< 10 min) and retaining a compact model size (< 75
+MB).
+1
+Introduction
+Modeling and reconstructing 3D scenes as representations that support high-
+quality image synthesis is crucial for computer vision and graphics with various
+applications in visual effects, e-commerce, virtual and augmented reality, and
+robotics. Recently, NeRF [37] and its many follow-up works [70,31] have shown
+success on modeling a scene as a radiance field and enabled photo-realistic
+rendering of scenes with highly complex geometry and view-dependent appearance
+effects. Despite the fact that (purely MLP-based) NeRF models require small
+memory, they take a long time (hours or days) to train. In this work, we pursue
+⋆Equal contribution.
+Research done when Anpei Chen was in a remote internship with UCSD.
+arXiv:2203.09517v2 [cs.CV] 29 Nov 2022
+
+2
+A. Chen, Z. Xu et al.
+ TensoRF-VM
+ Scene
+NeRF
+PlenOctrees
+ Quantitative Results on the Synthetic NeRF Dataset
+Plenoxels
+Ours
+NeRF
+31.01
+PSNR Method
+(Point sizes correspond to PNSRs)
+30.38
+31.71
+31.71
+31.95
+31.56
+32.52
+33.14
+PlenOctrees
+Plenoxels
+DVGO
+Ours-CP-384-30k
+Ours-VM-192-15k
+Ours-VM-192-30k
+SNeRG
+DVGO
+SNeRG
+Fig. 1: Left: We model a scene as a tensorial radiance field using a set of vectors
+(v) and matrices (M) that describe scene appearance and geometry along their
+corresponding axes. These vector/matrix factors are used to compute volume
+density σ and view-dependent RGB color via vector-matrix outer products for
+realistic volume rendering. Right: In comparison with previous and concurrent
+methods, our TensoRF models can achieve the best rendering quality and are
+the only methods that can simultaneously achieve fast reconstruction and high
+compactness. (Our models are denoted with their decomposition techniques,
+number of components, and training steps.)
+a novel approach that is both efficient in training time and compact in memory
+footprint, and at the same time achieves state-of-the-art rendering quality.
+To do so, we propose TensoRF, a novel radiance field representation that is
+highly compact and also fast to reconstruct, enabling efficient scene reconstruction
+and modeling. Unlike coordinate-based MLPs used in NeRF, we represent radiance
+fields as an explicit voxel grid of features. Note that it is unclear whether voxel
+grid representation can benefit the efficiency of reconstruction: While previous
+work has used feature grids [31,68,20], they require large GPU memory to store
+the voxels whose size grows cubically with resolution, and some even require
+pre-computing a NeRF for distillation, leading to very long reconstruction time.
+Our work addresses the inefficiency of voxel grid representations in a principled
+framework, leading to a family of simple yet effective methods. We leverage the
+fact that a feature grid can naturally be seen as a 4D tensor, where three of its
+modes correspond to the XYZ axes of the grid and the fourth mode represents the
+feature channel dimension. This opens the possibility of exploiting classical tensor
+decomposition techniques – which have been widely applied to high-dimensional
+data analysis and compression in various fields [27] – for radiance field modeling.
+We, therefore, propose to factorize the tensor of radiance fields into multiple low-
+rank tensor components, leading to an accurate and compact scene representation.
+Note that our central idea of tensorizing radiance fields is general and can be
+potentially adopted to any tensor decomposition technique.
+In this work, we first attempt the classic CANDECOMP/PARAFAC (CP)
+decomposition [7]. We show that TensoRF with CP decomposition can already
+achieve photo-realistic rendering and lead to a more compact model than NeRF
+that is purely MLP based (see Fig. 1 and Tab. 1). However, experimentally, to
+further push reconstruction quality for complex scenes, we have to use more
+component factors, which undesirably increases training time.
+
+TensoRF: Tensorial Radiance Fields
+3
+Therefore, we present a novel vector-matrix (VM) decomposition technique
+that effectively reduces the number of components required for the same expression
+capacity, leading to faster reconstruction and better rendering. In particular,
+inspired by the CP and block term decomposition [13], we propose to factorize the
+full tensor of a radiance field into multiple vector and matrix factors per tensor
+component. Unlike the sum of outer products of pure vectors in CP decomposition,
+we consider the sum of vector-matrix outer products (see Fig. 2). In essence,
+we relax the ranks of two modes of each component by jointly modeling two
+modes in a matrix factor. While this increases the model size compared to pure
+vector-based factorization in CP, we enable each component to express more
+complex tensor data of higher ranks, thus significantly reducing the required
+number of components in radiance field modeling.
+With CP/VM decomposition, our approach compactly encodes spatially
+varying features in the voxel grid. Volume density and view-dependent color can be
+decoded from the features, supporting volumetric radiance field rendering. Because
+a tensor expresses discrete data, we also enable efficient trilinear interpolation
+for our representation to model a continuous field. Our representation supports
+various types of per-voxel features with different decoding functions, including
+neural features – depending on an MLP to regress view-dependent colors from
+the features – and spherical harmonics (SH) features (coefficients) – allowing
+for simple color computation from the fixed SH functions and leading to a
+representation without neural networks.
+Our tensorial radiance fields can be effectively reconstructed from multi-view
+images and enable realistic novel view synthesis. In contrast to previous works that
+directly reconstruct voxels, our tensor factorization reduces space complexity from
+O(n3) to O(n) (with CP) or O(n2) (with VM), significantly lowering memory
+footprint. Note that, although we leverage tensor decomposition, we are not
+addressing a decomposition/compression problem, but a reconstruction problem
+based on gradient decent, since the feature grid/tensor is unknown. In essence,
+our CP/VM decomposition offers low-rank regularization in the optimization,
+leading to high rendering quality. We present extensive evaluation of our approach
+with various settings, covering both CP and VM models, different numbers of
+components and grid resolutions. We demonstrate that all models are able to
+achieve realistic novel view synthesis results that are on par or better than
+previous state-of-the-art methods (see Fig. 1 and Tab. 1). More importantly, our
+approach is of high computation and memory efficiency. All TensoRF models
+can reconstruct high-quality radiance fields in 30 min; our fastest model with
+VM decomposition takes less than 10 min, which is significantly faster (about
+100x) than NeRF and many other methods, while requiring substantially less
+memory than previous and concurrent voxel-based methods. Note that, unlike
+concurrent works [50,38] that require unique data structures and customized
+CUDA kernels, our model’s efficiency gains are obtained using a standard PyTorch
+implementation. As far as we know, our work is the first that views radiance field
+modeling from a tensorial perspective and pose the problem of radiance field
+reconstruction as one of low-rank tensor reconstructions.
+
+4
+A. Chen, Z. Xu et al.
+2
+Related Work
+Tensor decomposition. Tensor decomposition [27] has been studied for decades
+with diverse applications in vision, graphics, machine learning, and other fields
+[43,24,59,14,1,23]. In general, the most widely used decompositions are Tucker
+decomposition [58] and CP decomposition [7,19], both of which can be seen as
+generalizations of the matrix singular value decomposition (SVD). CP decompo-
+sition can also be seen as a special Tucker decomposition whose core tensor is
+diagonal. By combining CP and Tucker decomposition, block term decomposition
+(BTD) has been proposed with its many variants [13] and used in many vision
+and learning tasks [2,67,66]. In this work, we leverage tensor decomposition for
+radiance field modeling. We directly apply CP decomposition and also introduce
+a new vector-matrix decomposition, which can be seen as a special BTD.
+Scene representations and radiance fields. Various scene representations,
+including meshes [18,61], point clouds [47], volumes [22,48], implicit functions
+[35,46], have been extensively studied in recent years. Many neural representa-
+tions [10,71,53,33,4] are proposed for high-quality rendering or natural signal
+representation [52,56,29]. NeRF [37] introduces radiance fields to address novel
+view synthesis and achieves photo-realistic quality. This representation has been
+quickly extended and applied in diverse graphics and vision applications, includ-
+ing generative models [9,40], appearance acquisition [3,5], surface reconstruction
+[62,42], fast rendering[49,68,20,17], appearance editing [64,32], dynamic capture
+[28,44] and generative model [41,8]. While leading to realistic rendering and
+a compact model, NeRF with its pure MLP-based representation has known
+limitations in slow reconstruction and rendering. Recent methods [68,31,20] have
+leveraged a voxel grid of features in radiance field modeling, achieving fast render-
+ing. However, these grid-based methods still require long reconstruction time and
+even lead to high memory costs, sacrificing the compactness of NeRF. Based on
+feature grids, we present a novel tensorial scene representation, leveraging tensor
+factorization techniques, leading to fast reconstruction and compact modeling.
+Other methods design generalizable network modules trained across scenes
+to achieve image-dependent radiance field rendering [57,69,63,12] and fast recon-
+struction [11,65]. Our approach focuses on radiance field representation and only
+considers per-scene optimization (like NeRF). We show that our representation
+can already lead to highly efficient radiance field reconstruction without any
+across-scene generalization.
+
+
+==========================================================================================
+### 2304.06706_ZipNeRF  (pages=16, img=2304.06706_ZipNeRF_fig.png)
+==========================================================================================
+Zip-NeRF: Anti-Aliased Grid-Based Neural Radiance Fields
+Jonathan T. Barron
+Ben Mildenhall
+Dor Verbin
+Pratul P. Srinivasan
+Peter Hedman
+Google Research
+(a) Ground Truth
+(b) Our Model
+(c) mip-NeRF 360 [3]
+(d) iNGP [21]
+(e) mip-NeRF 360 + iNGP
+Figure 1: (a) Test-set images from the mip-NeRF 360 dataset [3] with renderings from (b) our model and (c, d, e) three
+state-of-the-art baselines. Our model accurately recovers thin structures and finely detailed foliage, while the baselines either
+oversmooth or exhibit aliasing in the form of jaggies and missing scene content. PSNR values for each patch are inset.
+Abstract
+Neural Radiance Field training can be accelerated
+through the use of grid-based representations in NeRF’s
+learned mapping from spatial coordinates to colors and vol-
+umetric density. However, these grid-based approaches lack
+an explicit understanding of scale and therefore often in-
+troduce aliasing, usually in the form of jaggies or missing
+scene content. Anti-aliasing has previously been addressed
+by mip-NeRF 360, which reasons about sub-volumes along
+a cone rather than points along a ray, but this approach is
+not natively compatible with current grid-based techniques.
+We show how ideas from rendering and signal processing
+can be used to construct a technique that combines mip-
+NeRF 360 and grid-based models such as Instant NGP to
+yield error rates that are 8% – 77% lower than either prior
+technique, and that trains 24× faster than mip-NeRF 360.
+In Neural Radiance Fields (NeRF), a neural network is
+trained to model a volumetric representation of a 3D scene
+such that novel views of that scene can be rendered via ray-
+tracing [19]. NeRF has proven to be an effective tool for
+tasks such as view synthesis [17], generative media [25],
+robotics [33], and computational photography [18].
+The original NeRF model used a multilayer perceptron
+(MLP) to parameterize the mapping from spatial coordi-
+nates to colors and densities. Though compact and expres-
+sive, MLPs are slow to train, and recent work has acceler-
+ated training by replacing or augmenting MLPs with voxel-
+grid-like datastructures [7, 15, 27, 35]. One example is In-
+stant NGP (iNGP), which uses a pyramid of coarse and fine
+grids (the finest of which are stored using a hash map) to
+construct learned features that are processed by a tiny MLP,
+enabling greatly accelerated training [21].
+In addition to being slow, the original NeRF model was
+also aliased: NeRF reasons about individual points along a
+ray, which results in “jaggies” in rendered images and lim-
+its NeRFs ability to reason about scale. Mip-NeRF [2] re-
+solved this issue by casting cones instead of rays, and by
+featurizing the entire volume within a conical frustum for
+1
+arXiv:2304.06706v3 [cs.CV] 26 Oct 2023
+
+Fine ←→Coarse
+Method
+(a) Input / Baseline, 14.6 dB
+(b) Ground-truth
+(c) Downweighting, 24.3 dB
+(d) Multisampling, 25.2 dB
+(e) Our Approach, 26.5 dB
+Figure 2: Here we show a toy 1-dimensional iNGP [21] with 1 feature per scale. Each subplot represents a different strategy
+for querying the iNGP at all coordinates along the x axis — imagine a Gaussian moving left to right, where each line is the
+iNGP feature for each coordinate, and where each color is a different scale in the iNGP. (a) The naive solution of querying
+the Gaussian’s mean results in features with piecewise-linear kinks, where the high frequencies past the bandwidth of the
+Gaussian are large and inaccurate. (b) The true solution, obtained by convolving the iNGP features with a Gaussian —
+an intractable solution in practice — results in coarse features that are smooth but informative and fine features that are
+near 0. (c) We can suppress unreliable high frequencies by downweighing them based on the scale of the Gaussian (color
+bands behind each feature indicate the downweighting), but this results in unnaturally sharp discontinuities in coarse features.
+(d) Alternatively, supersampling produces reasonable coarse scales features but erratic fine-scale features. (e) We therefore
+multisample isotropic sub-Gaussians (5 shown here) and use each sub-Gaussian’s scale to downweight frequencies.
+use as input to the MLP. Mip-NeRF and its successor mip-
+NeRF 360 [3] showed that this approach enables highly ac-
+curate rendering on challenging real-world scenes.
+Regrettably, the progress made on these two problems
+of fast training and anti-aliasing are, at first glance, incom-
+patible with each other. This is because mip-NeRF’s anti-
+aliasing strategy depends critically on the use of positional
+encoding [28, 30] to featurize a conical frustum into a dis-
+crete feature vector, but current grid-based approaches do
+not use positional encoding, and instead use learned fea-
+tures that are obtained by interpolating into a hierarchy of
+grids at a single 3D coordinate. Though anti-aliasing is a
+well-studied problem in rendering [8, 9, 26, 31], most ap-
+proaches do not generalize naturally to inverse-rendering in
+grid-based NeRF models like iNGP.
+In this work, we leverage ideas from multisampling,
+statistics, and signal processing to integrate iNGP’s pyra-
+mid of grids into mip-NeRF 360’s framework. We call our
+model “Zip-NeRF” due to its speed, its similarity with mip-
+NeRF, and its ability to fix zipper-like aliasing artifacts. On
+the mip-NeRF 360 benchmark [3], Zip-NeRF reduces er-
+ror rates by as much as 19% and trains 24× faster than the
+previous state-of-the-art. On our multiscale variant of that
+benchmark, which more thoroughly measures aliasing and
+scale, Zip-NeRF reduces error rates by as much as 77%.
+1. Preliminaries
+Mip-NeRF 360 and Instant NGP (iNGP) are both NeRF-
+like [19]: A pixel is rendered by casting a 3D ray and fea-
+turizing locations at distances t along the ray, and those fea-
+tures are fed to a neural network whose outputs are alpha-
+composited to render a color. Training consists of repeat-
+edly casting rays corresponding to pixels in training im-
+ages and minimizing (via gradient descent) the difference
+between each pixel’s rendered and observed colors.
+Mip-NeRF 360 and iNGP differ significantly in how co-
+ordinates along a ray are parameterized. In mip-NeRF 360,
+a ray is subdivided into a set of intervals [ti, ti+1), each
+of which represents a conical frustum whose shape is ap-
+proximated with a multivariate Gaussian, and the expected
+positional encoding with respect to that Gaussian is used as
+input to a large MLP [2]. In contrast, iNGP trilinearly in-
+terpolates into a hierarchy of differently-sized 3D grids to
+produce feature vectors for a small MLP [21]. Our model
+combines mip-NeRF 360’s overall framework with iNGP’s
+featurization approach, but naively combining these two ap-
+proaches introduces two forms of aliasing:
+1. Instant NGP’s feature grid approach is incompati-
+ble with mip-NeRF 360’s scale-aware integrated po-
+sitional encoding technique, so the features produced
+by iNGP are aliased with respect to spatial coordinates
+and thus produce aliased renderings. In Section 2, we
+address this by introducing a multisampling-like solu-
+tion for computing prefiltered iNGP features.
+2. Using iNGP dramatically accelerates training, but this
+reveals a problem with mip-NeRF 360’s online distil-
+lation approach that causes highly visible “z-aliasing”
+(aliasing along a ray), wherein scene content errati-
+cally disappears as the camera moves. In Section 3
+we resolve this with a new loss function that prefilters
+along each ray when computing the loss function used
+to supervise online distillation.
+
+(a) Training
+(b) Testing
+Figure 3: Here we show a toy 3D ray with an exaggerated
+pixel width (viewed along the ray as an inset) divided into
+4 frustums denoted by color. We multisample each frustum
+with a hexagonal pattern that matches the frustum’s first and
+second moments. Each pattern is rotated around the ray and
+flipped along the ray (a) randomly when training and (b)
+deterministically when rendering.
+2. Spatial Anti-Aliasing
+Mip-NeRF uses features that approximate the integral
+over the positional encoding of the coordinates within a sub-
+volume, which is a conical frustum. This results in Fourier
+features whose amplitudes are small when the feature si-
+nusoid’s period is larger than the standard deviation of the
+Gaussian — the features express the spatial location of the
+sub-volume only at the wavelengths that are larger than the
+size of the sub-volume. Because this feature encodes both
+position and scale, the MLP that consumes it is able to learn
+a multi-scale representation of the 3D scene that renders
+anti-aliased images. Grid-based representations like iNGP
+do not natively allow for sub-volumes to be queried, and in-
+stead use trilinear interpolation at a single point to construct
+features for use in an MLP, which results in learned models
+that cannot reason about scale or aliasing.
+We resolve this by turning each conical frustum into a
+set of isotropic Gaussians, using a combination of multi-
+sampling and feature-downweighting: The anisotropic sub-
+volume is first converted into a set of points that approx-
+imate its shape, and then each point is assumed to be an
+isotropic Gaussian with some scale. This isotropic assump-
+tion lets us approximate the true integral of the feature grid
+over a sub-volume by leveraging the fact that the values in
+the grid are zero-mean. By averaging these downweighted
+features, we obtain scale-aware prefiltered features from an
+iNGP grid. See Figure 2 for a visualization.
+Anti-aliasing is well explored in the graphics literature.
+Mip mapping [31] (mip-NeRF’s namesake) precomputes a
+datastructure that enables fast anti-aliasing, but it is unclear
+how this approach can be applied to iNGP’s hash-based
+datastructures. Supersampling techniques [8] adopt a brute-
+force approach to anti-aliasing and use a large number of
+samples; we will demonstrate that this is less effective and
+more expensive than our approach. Multisampling tech-
+niques [11] construct a small set of samples, and then pool
+information from those multisamples into an aggregate rep-
+resentation that is provided to an expensive rendering pro-
+cess — a strategy that resembles our approach.
+Multisampling
+Following mip-NeRF [2], we assume
+each pixel corresponds to a cone with radius ˙rt, where t
+is distance along the ray. Given an interval along the ray
+[t0, t1), we would like to construct a set of multisamples
+that approximate the shape of that conical frustum. We use
+a 6-point hexagonal pattern whose angles θj are:
+ \ bo ldsym bol { \thet a } = \l e ft [\, 0, \sfrac {2\pi }{3}, \sfrac {4\pi }{3}, \sfrac {3\pi
+
+
+==========================================================================================
+### 2308.04079_3DGS_Kerbl2023  (pages=14, img=2308.04079_3DGS_Kerbl2023_p1.png)
+==========================================================================================
+3D Gaussian Splatting for Real-Time Radiance Field Rendering
+BERNHARD KERBL∗, Inria, Université Côte d’Azur, France
+GEORGIOS KOPANAS∗, Inria, Université Côte d’Azur, France
+THOMAS LEIMKÜHLER, Max-Planck-Institut für Informatik, Germany
+GEORGE DRETTAKIS, Inria, Université Côte d’Azur, France
+Ground Truth
+InstantNGP (9.2 fps) 
+Plenoxels (8.2 fps) 
+Train: 7min, PSNR: 22.1
+Train: 26min, PSNR: 21.9
+Mip-NeRF360 (0.071 fps) 
+Train: 48 h, PSNR: 24.3
+Ours (135 fps) 
+Train: 6 min, PSNR: 23.6
+Ours (93 fps) 
+Train: 51min, PSNR: 25.2
+Fig. 1. Our method achieves real-time rendering of radiance fields with quality that equals the previous method with the best quality [Barron et al. 2022],
+while only requiring optimization times competitive with the fastest previous methods [Fridovich-Keil and Yu et al. 2022; Müller et al. 2022]. Key to this
+performance is a novel 3D Gaussian scene representation coupled with a real-time differentiable renderer, which offers significant speedup to both scene
+optimization and novel view synthesis. Note that for comparable training times to InstantNGP [Müller et al. 2022], we achieve similar quality to theirs; while
+this is the maximum quality they reach, by training for 51min we achieve state-of-the-art quality, even slightly better than Mip-NeRF360 [Barron et al. 2022].
+Radiance Field methods have recently revolutionized novel-view synthesis
+of scenes captured with multiple photos or videos. However, achieving high
+visual quality still requires neural networks that are costly to train and ren-
+der, while recent faster methods inevitably trade off speed for quality. For
+unbounded and complete scenes (rather than isolated objects) and 1080p
+resolution rendering, no current method can achieve real-time display rates.
+We introduce three key elements that allow us to achieve state-of-the-art
+visual quality while maintaining competitive training times and importantly
+allow high-quality real-time (≥30 fps) novel-view synthesis at 1080p resolu-
+tion. First, starting from sparse points produced during camera calibration,
+we represent the scene with 3D Gaussians that preserve desirable proper-
+ties of continuous volumetric radiance fields for scene optimization while
+avoiding unnecessary computation in empty space; Second, we perform
+interleaved optimization/density control of the 3D Gaussians, notably opti-
+mizing anisotropic covariance to achieve an accurate representation of the
+scene; Third, we develop a fast visibility-aware rendering algorithm that
+supports anisotropic splatting and both accelerates training and allows real-
+time rendering. We demonstrate state-of-the-art visual quality and real-time
+rendering on several established datasets.
+CCS Concepts: • Computing methodologies →Rendering; Point-based
+models; Rasterization; Machine learning approaches.
+∗Both authors contributed equally to the paper.
+Authors’ addresses: Bernhard Kerbl, bernhard.kerbl@inria.fr, Inria, Université Côte
+d’Azur, France; Georgios Kopanas, georgios.kopanas@inria.fr, Inria, Université Côte
+d’Azur, France; Thomas Leimkühler, thomas.leimkuehler@mpi-inf.mpg.de, Max-
+Planck-Institut für Informatik, Germany; George Drettakis, george.drettakis@inria.fr,
+Inria, Université Côte d’Azur, France.
+Publication rights licensed to ACM. ACM acknowledges that this contribution was
+authored or co-authored by an employee, contractor or affiliate of a national govern-
+ment. As such, the Government retains a nonexclusive, royalty-free right to publish or
+reproduce this article, or to allow others to do so, for Government purposes only.
+© 2023 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+0730-0301/2023/8-ART1 $15.00
+https://doi.org/10.1145/3592433
+Additional Key Words and Phrases: novel view synthesis, radiance fields, 3D
+gaussians, real-time rendering
+ACM Reference Format:
+Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Dret-
+takis. 2023. 3D Gaussian Splatting for Real-Time Radiance Field Render-
+ing. ACM Trans. Graph. 42, 4, Article 1 (August 2023), 14 pages. https:
+//doi.org/10.1145/3592433
+1
+INTRODUCTION
+Meshes and points are the most common 3D scene representations
+because they are explicit and are a good fit for fast GPU/CUDA-based
+rasterization. In contrast, recent Neural Radiance Field (NeRF) meth-
+ods build on continuous scene representations, typically optimizing
+a Multi-Layer Perceptron (MLP) using volumetric ray-marching for
+novel-view synthesis of captured scenes. Similarly, the most efficient
+radiance field solutions to date build on continuous representations
+by interpolating values stored in, e.g., voxel [Fridovich-Keil and Yu
+et al. 2022] or hash [Müller et al. 2022] grids or points [Xu et al. 2022].
+While the continuous nature of these methods helps optimization,
+the stochastic sampling required for rendering is costly and can
+result in noise. We introduce a new approach that combines the best
+of both worlds: our 3D Gaussian representation allows optimization
+with state-of-the-art (SOTA) visual quality and competitive training
+times, while our tile-based splatting solution ensures real-time ren-
+dering at SOTA quality for 1080p resolution on several previously
+published datasets [Barron et al. 2022; Hedman et al. 2018; Knapitsch
+et al. 2017] (see Fig. 1).
+Our goal is to allow real-time rendering for scenes captured with
+multiple photos, and create the representations with optimization
+times as fast as the most efficient previous methods for typical
+real scenes. Recent methods achieve fast training [Fridovich-Keil
+ACM Trans. Graph., Vol. 42, No. 4, Article 1. Publication date: August 2023.
+arXiv:2308.04079v1 [cs.GR] 8 Aug 2023
+
+1:2
+•
+Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Drettakis
+and Yu et al. 2022; Müller et al. 2022], but struggle to achieve the
+visual quality obtained by the current SOTA NeRF methods, i.e.,
+Mip-NeRF360 [Barron et al. 2022], which requires up to 48 hours of
+training time. The fast – but lower-quality – radiance field methods
+can achieve interactive rendering times depending on the scene
+(10-15 frames per second), but fall short of real-time rendering at
+high resolution.
+Our solution builds on three main components. We first intro-
+duce 3D Gaussians as a flexible and expressive scene representation.
+We start with the same input as previous NeRF-like methods, i.e.,
+cameras calibrated with Structure-from-Motion (SfM) [Snavely et al.
+2006] and initialize the set of 3D Gaussians with the sparse point
+cloud produced for free as part of the SfM process. In contrast to
+most point-based solutions that require Multi-View Stereo (MVS)
+data [Aliev et al. 2020; Kopanas et al. 2021; Rückert et al. 2022], we
+achieve high-quality results with only SfM points as input. Note
+that for the NeRF-synthetic dataset, our method achieves high qual-
+ity even with random initialization. We show that 3D Gaussians
+are an excellent choice, since they are a differentiable volumetric
+representation, but they can also be rasterized very efficiently by
+projecting them to 2D, and applying standard 𝛼-blending, using an
+equivalent image formation model as NeRF. The second component
+of our method is optimization of the properties of the 3D Gaussians
+– 3D position, opacity 𝛼, anisotropic covariance, and spherical har-
+monic (SH) coefficients – interleaved with adaptive density control
+steps, where we add and occasionally remove 3D Gaussians during
+optimization. The optimization procedure produces a reasonably
+compact, unstructured, and precise representation of the scene (1-5
+million Gaussians for all scenes tested). The third and final element
+of our method is our real-time rendering solution that uses fast GPU
+sorting algorithms and is inspired by tile-based rasterization, fol-
+lowing recent work [Lassner and Zollhofer 2021]. However, thanks
+to our 3D Gaussian representation, we can perform anisotropic
+splatting that respects visibility ordering – thanks to sorting and 𝛼-
+blending – and enable a fast and accurate backward pass by tracking
+the traversal of as many sorted splats as required.
+To summarize, we provide the following contributions:
+• The introduction of anisotropic 3D Gaussians as a high-quality,
+unstructured representation of radiance fields.
+• An optimization method of 3D Gaussian properties, inter-
+leaved with adaptive density control that creates high-quality
+representations for captured scenes.
+• A fast, differentiable rendering approach for the GPU, which
+is visibility-aware, allows anisotropic splatting and fast back-
+propagation to achieve high-quality novel view synthesis.
+Our results on previously published datasets show that we can opti-
+mize our 3D Gaussians from multi-view captures and achieve equal
+or better quality than the best quality previous implicit radiance
+field approaches. We also can achieve training speeds and quality
+similar to the fastest methods and importantly provide the first
+real-time rendering with high quality for novel-view synthesis.
+2
+RELATED WORK
+We first briefly overview traditional reconstruction, then discuss
+point-based rendering and radiance field work, discussing their
+similarity; radiance fields are a vast area, so we focus only on directly
+related work. For complete coverage of the field, please see the
+excellent recent surveys [Tewari et al. 2022; Xie et al. 2022].
+2.1
+Traditional Scene Reconstruction and Rendering
+The first novel-view synthesis approaches were based on light fields,
+first densely sampled [Gortler et al. 1996; Levoy and Hanrahan 1996]
+then allowing unstructured capture [Buehler et al. 2001]. The advent
+of Structure-from-Motion (SfM) [Snavely et al. 2006] enabled an
+entire new domain where a collection of photos could be used to
+synthesize novel views. SfM estimates a sparse point cloud during
+camera calibration, that was initially used for simple visualization
+of 3D space. Subsequent multi-view stereo (MVS) produced im-
+pressive full 3D reconstruction algorithms over the years [Goesele
+et al. 2007], enabling the development of several view synthesis
+algorithms [Chaurasia et al. 2013; Eisemann et al. 2008; Hedman
+et al. 2018; Kopanas et al. 2021]. All these methods re-project and
+blend the input images into the novel view camera, and use the
+geometry to guide this re-projection. These methods produced ex-
+cellent results in many cases, but typically cannot completely re-
+cover from unreconstructed regions, or from “over-reconstruction”,
+when MVS generates inexistent geometry. Recent neural render-
+ing algorithms [Tewari et al. 2022] vastly reduce such artifacts and
+avoid the overwhelming cost of storing all input images on the GPU,
+outperforming these methods on most fronts.
+2.2
+Neural Rendering and Radiance Fields
+Deep learning techniques were adopted early for novel-view synthe-
+sis [Flynn et al. 2016; Zhou et al. 2016]; CNNs were used to estimate
+blending weights [Hedman et al. 2018], or for texture-space solutions
+[Riegler and Koltun 2020; Thies et al. 2019]. The use of MVS-based
+geometry is a major drawback of most of these methods; in addition,
+the use of CNNs for final rendering frequently results in temporal
+flickering.
+Volumetric representations for novel-view synthesis were ini-
+tiated by Soft3D [Penner and Zhang 2017]; deep-learning tech-
+niques coupled with volumetric ray-marching were subsequently
+proposed [Henzler et al. 2019; Sitzmann et al. 2019] building on a con-
+tinuous differentiable density field to represent geometry. Rendering
+using volumetric ray-marching has a significant cost due to the large
+number of samples required to query the volume. Neural Radiance
+Fields (NeRFs) [Mildenhall et
+
+
+==========================================================================================
+### [2016] COLMAP  (pages=10, img=[2016] COLMAP_fig.png)
+==========================================================================================
+Structure-from-Motion Revisited
+Johannes L. Sch¨onberger1,2∗, Jan-Michael Frahm1
+1University of North Carolina at Chapel Hill
+2Eidgen¨ossische Technische Hochschule Z¨urich
+jsch@inf.ethz.ch, jmf@cs.unc.edu
+Abstract
+Incremental Structure-from-Motion is a prevalent strat-
+egy for 3D reconstruction from unordered image collec-
+tions.
+While incremental reconstruction systems have
+tremendously advanced in all regards, robustness, accu-
+racy, completeness, and scalability remain the key problems
+towards building a truly general-purpose pipeline. We pro-
+pose a new SfM technique that improves upon the state of
+the art to make a further step towards this ultimate goal.
+The full reconstruction pipeline is released to the public as
+an open-source implementation.
+1. Introduction
+Structure-from-Motion (SfM) from unordered images
+has seen tremendous evolution over the years. The early
+self-calibrating metric reconstruction systems [42, 6, 19,
+16, 46] served as the foundation for the ﬁrst systems on
+unordered Internet photo collections [48, 53] and urban
+scenes [45]. Inspired by these works, increasingly large-
+scale reconstruction systems have been developed for hun-
+dreds of thousands [1] and millions [20, 62, 51, 47] to re-
+cently a hundred million Internet photos [30]. A variety
+of SfM strategies have been proposed including incremen-
+tal [53, 1, 20, 62], hierarchical [23], and global approaches
+[14, 61, 56]. Arguably, incremental SfM is the most popular
+strategy for reconstruction of unordered photo collections.
+Despite its widespread use, we still have not accomplished
+to design a truly general-purpose SfM system. While the
+existing systems have advanced the state of the art tremen-
+dously, robustness, accuracy, completeness, and scalability
+remain the key problems in incremental SfM that prevent its
+use as a general-purpose method. In this paper, we propose
+a new SfM algorithm to approach this ultimate goal. The
+new method is evaluated on a variety of challenging datasets
+and the code is contributed to the research community as an
+open-source implementation named COLMAP available at
+https://github.com/colmap/colmap.
+∗This work was done at the University of North Carolina at Chapel Hill.
+Figure 1. Result of Rome with 21K registered out of 75K images.
+2. Review of Structure-from-Motion
+SfM is the process of reconstructing 3D structure from
+its projections into a series of images taken from different
+viewpoints. Incremental SfM (denoted as SfM in this paper)
+is a sequential processing pipeline with an iterative recon-
+struction component (Fig. 2). It commonly starts with fea-
+ture extraction and matching, followed by geometric veriﬁ-
+cation. The resulting scene graph serves as the foundation
+for the reconstruction stage, which seeds the model with
+a carefully selected two-view reconstruction, before incre-
+mentally registering new images, triangulating scene points,
+ﬁltering outliers, and reﬁning the reconstruction using bun-
+dle adjustment (BA). The following sections elaborate on
+this process, deﬁne the notation used throughout the paper,
+and introduce related work.
+2.1. Correspondence Search
+The ﬁrst stage is correspondence search which ﬁnds
+scene overlap in the input images I = {Ii | i = 1...NI}
+and identiﬁes projections of the same points in overlapping
+images. The output is a set of geometrically veriﬁed image
+pairs ¯C and a graph of image projections for each point.
+Feature Extraction.
+For each image Ii, SfM detects sets
+Fi = {(xj, fj) | j = 1...NFi} of local features at loca-
+tion xj ∈R2 represented by an appearance descriptor fj.
+The features should be invariant under radiometric and ge-
+ometric changes so that SfM can uniquely recognize them
+in multiple images [41]. SIFT [39], its derivatives [59], and
+more recently learned features [9] are the gold standard in
+terms of robustness. Alternatively, binary features provide
+better efﬁciency at the cost of reduced robustness [29].
+
+Correspondence Search
+Incremental Reconstruction
+Images
+Reconstruction
+Initialization
+Bundle Adjustment
+Triangulation
+Feature Extraction
+Matching
+Geometric Verification
+Image Registration
+Outlier Filtering
+Figure 2. Incremental Structure-from-Motion pipeline.
+Matching.
+Next, SfM discovers images that see the same
+scene part by leveraging the features Fi as an appearance
+description of the images. The na¨ıve approach tests every
+image pair for scene overlap; it searches for feature cor-
+respondences by ﬁnding the most similar feature in image
+Ia for every feature in image Ib, using a similarity met-
+ric comparing the appearance fj of the features. This ap-
+proach has computational complexity O(N 2
+I N 2
+Fi) and is
+prohibitive for large image collections. A variety of ap-
+proaches tackle the problem of scalable and efﬁcient match-
+ing [1, 20, 37, 62, 28, 50, 30]. The output is a set of poten-
+tially overlapping image pairs C = {{Ia, Ib} | Ia, Ib ∈
+I, a < b} and their associated feature correspondences
+Mab ∈Fa × Fb.
+Geometric Veriﬁcation.
+The third stage veriﬁes the po-
+tentially overlapping image pairs C.
+Since matching is
+based solely on appearance, it is not guaranteed that cor-
+responding features actually map to the same scene point.
+Therefore, SfM veriﬁes the matches by trying to estimate a
+transformation that maps feature points between images us-
+ing projective geometry. Depending on the spatial conﬁg-
+uration of an image pair, different mappings describe their
+geometric relation. A homography H describes the trans-
+formation of a purely rotating or a moving camera capturing
+a planar scene [26]. Epipolar geometry [26] describes the
+relation for a moving camera through the essential matrix
+E (calibrated) or the fundamental matrix F (uncalibrated),
+and can be extended to three views using the trifocal ten-
+sor [26]. If a valid transformation maps a sufﬁcient number
+of features between the images, they are considered geo-
+metrically veriﬁed. Since the correspondences from match-
+ing are often outlier-contaminated, robust estimation tech-
+niques, such as RANSAC [18], are required. The output
+of this stage is a set of geometrically veriﬁed image pairs ¯C,
+their associated inlier correspondences ¯
+Mab, and optionally
+a description of their geometric relation Gab. To decide on
+the appropriate relation, decision criterions like GRIC [57]
+or methods like QDEGSAC [21] can be used. The output
+of this stage is a so-called scene graph [54, 37, 49, 30] with
+images as nodes and veriﬁed pairs of images as edges.
+2.2. Incremental Reconstruction
+The input to the reconstruction stage is the scene graph.
+The outputs are pose estimates P = {Pc ∈SE(3) | c =
+1...NP } for registered images and the reconstructed scene
+structure as a set of points X = {Xk ∈R3 | k = 1...NX}.
+Initialization.
+SfM initializes the model with a carefully
+selected two-view reconstruction [7, 52]. Choosing a suit-
+able initial pair is critical, since the reconstruction may
+never recover from a bad initialization. Moreover, the ro-
+bustness, accuracy, and performance of the reconstruction
+depends on the seed location of the incremental process.
+Initializing from a dense location in the image graph with
+many overlapping cameras typically results in a more robust
+and accurate reconstruction due to increased redundancy. In
+contrast, initializing from a sparser location results in lower
+runtimes, since BAs deal with overall sparser problems ac-
+cumulated over the reconstruction process.
+Image Registration.
+Starting from a metric reconstruc-
+tion, new images can be registered to the current model by
+solving the Perspective-n-Point (PnP) problem [18] using
+feature correspondences to triangulated points in already
+registered images (2D-3D correspondences). The PnP prob-
+lem involves estimating the pose Pc and, for uncalibrated
+cameras, its intrinsic parameters.
+The set P is thus ex-
+tended by the pose Pc of the newly registered image. Since
+the 2D-3D correspondences are often outlier-contaminated,
+the pose for calibrated cameras is usually estimated using
+RANSAC and a minimal pose solver, e.g. [22, 34]. For un-
+calibrated cameras, various minimal solvers, e.g. [10], or
+sampling-based approaches, e.g. [31], exist. We propose a
+novel robust next best image selection method for accurate
+pose estimation and reliable triangulation in Sec. 4.2.
+Triangulation.
+A newly registered image must observe
+existing scene points. In addition, it may also increase scene
+coverage by extending the set of points X through triangu-
+lation. A new scene point Xk can be triangulated and added
+to X as soon as at least one more image, also covering the
+new scene part but from a different viewpoint, is registered.
+Triangulation is a crucial step in SfM, as it increases the sta-
+bility of the existing model through redundancy [58] and it
+enables registration of new images by providing additional
+2D-3D correspondences. A large number of methods for
+multi-view triangulation exist [27, 5, 25, 35, 40, 3, 44, 32].
+These methods suffer from limited robustness or high com-
+putational cost for use in SfM, which we address by propos-
+ing a robust and efﬁcient triangulation method in Sec. 4.3.
+Bundle Adjustment.
+Image registration and triangula-
+tion are separate procedures, even though their products are
+highly correlated – uncertainties in the camera pose propa-
+gate to triangulated points and vice versa, and additional tri-
+angulations may improve the initial camera pose through in-
+creased redundancy. Without further reﬁnement, SfM usu-
+ally drifts quickly to a non-recoverable state. BA [58] is the
+joint non-linear reﬁnement of camera parameters Pc and
+point parameters Xk that minimizes the reprojection error
+E =
+X
+j ρj
+
+∥π (Pc, Xk) −xj∥2
+2
+
+(1)
+using a function π that projects scene points to image space
+
+and a loss function ρj to potentially down-weight outliers.
+Levenberg-Marquardt [58, 26] is the method of choice for
+solving BA problems. The special structure of parameters
+in BA problems motivates the Schur complement trick [8],
+in which one ﬁrst solves the reduced camera system and
+then updates the points via back-substitution. This scheme
+is commonly more efﬁcient, since the number of cameras is
+usually smaller than the number of points. There are two
+choices for solving the system: exact and inexact step al-
+gorithms. Exact methods solve the system by storing and
+factoring it as a dense or sparse matrix [13, 38] with a space
+complexity of O(N 2
+P ) and a time complexity of O(N 3
+P ).
+Inexact methods approximately solve the system, usually
+by using an iterative solver, e.g. preconditioned conjugate
+gradients (PCG), which has O(NP ) time and space com-
+plexity [4, 63]. Direct algorithms are the method of choice
+for up to a few hundred cameras but they are too expen-
+sive in large-scale settings. While sparse direct methods re-
+duce the complexity by a large factor for sparse problems,
+they are prohibitive for large unstructured photo collections
+due to typically much denser connectivity graphs [54, 4].
+In this case, indirect algorithms are the method of choice.
+Especially for Internet photos, BA spends signiﬁcant time
+on optimizing
+
+
+==========================================================================================
+### [2017] Structure-from-Motion survey  (pages=40, img=[2017] Structure-from-Motion survey_fig.png)
+==========================================================================================
+A Survey of Structure from Motion
+Onur ¨Ozye¸sil†
+Vladislav Voroninski‡
+Ronen Basri§
+Amit Singer¶
+Abstract
+The structure from motion (SfM) problem in computer vision is the problem of recovering
+the three-dimensional (3D) structure of a stationary scene from a set of projective measurements,
+represented as a collection of two-dimensional (2D) images, via estimation of motion of the cameras
+corresponding to these images. In essence, SfM involves the three main stages of (1) extraction
+of features in images (e.g., points of interest, lines, etc.) and matching these features between
+images, (2) camera motion estimation (e.g., using relative pairwise camera positions estimated
+from the extracted features), and (3) recovery of the 3D structure using the estimated motion
+and features (e.g., by minimizing the so-called reprojection error). This survey mainly focuses on
+relatively recent developments in the literature pertaining to stages (2) and (3). More speciﬁcally,
+after touching upon the early factorization-based techniques for motion and structure estimation,
+we provide a detailed account of some of the recent camera location estimation methods in the
+literature, followed by discussion of notable techniques for 3D structure recovery. We also cover
+the basics of the simultaneous localization and mapping (SLAM) problem, which can be viewed
+as a speciﬁc case of the SfM problem. Further, our survey includes a review of the fundamentals
+of feature extraction and matching (i.e., stage (1) above), various recent methods for handling
+ambiguities in 3D scenes, SfM techniques involving relatively uncommon camera models and image
+features, and popular sources of data and SfM software.
+1
+Introduction
+Recovering the 3-dimensional structure of a scene from images is a fundamental goal of computer
+vision. A particularly eﬀective approach to 3D reconstruction involves the use of many images of
+a stationary scene. This problem, commonly referred to as multiview structure from motion (SfM)
+(depicted in Figure 1), is the subject of a large body of research in computer vision, starting with
+the seminal paper of Longuet-Higgins [40]. A comprehensive and in-depth summary of this enormous
+body of work can be found in [30].
+Modern methods usually solve the multiview SfM problem using bundle adjustment techniques,
+which aim to optimize a cost function known as the total reprojection error (cf. §4 for a more detailed
+and general discussion of bundle adjustment). With this cost function, given n images of a stationary
+scene, the objective is to simultaneously determine the structure (3D coordinates of scene points)
+and the calibration parameters of each of the n cameras that minimize the discrepancy between
+image measurements and their predictive model. For instance, in the speciﬁc case of pairwise point
+correspondences between images, let us denote by {Pj}p
+j=1 ⊆R3 the unknown positions of scene
+†INTECH
+Investment
+Management
+LLC,
+One
+Palmer
+Square,
+Suite
+441,
+Princeton,
+NJ
+08542,
+USA
+(oozyesil@intechjanus.com).
+‡Helm.ai, Menlo Park, CA 94025, USA (vlad@helm.ai).
+§Department of Computer Science and Applied Mathematics, Weizmann Institute of Science, Rehovot, 76100, IS-
+RAEL (ronen.basri@weizmann.ac.il).
+¶Department
+of
+Mathematics
+and
+PACM,
+Princeton
+University,
+Princeton,
+NJ
+08544-1000,
+USA
+(amits@math.princeton.edu).
+1
+arXiv:1701.08493v2 [cs.CV] 9 May 2017
+
+Figure 1: The structure from motion (SfM) problem.
+points, by {Ci}n
+i=1 the 3 × 4 camera matrices, where the entries of each Ci encode the location of
+camera i, its orientation and internal calibration parameters. Also, let (xij, yij) ∈R2 denote the
+measured projection of point Pj onto the image plane of camera Ci. Then, we can deﬁne a (relatively
+simple) bundle adjustment instance based on a sum of least squares cost function as
+minimize
+{Pj},{Ci}
+X
+i∼j
+
+xij −CT
+i1Pj
+CT
+i3Pj
+2
++
+
+yij −CT
+i2Pj
+CT
+i3Pj
+2
+,
+(1)
+where, Cik ∈R4 denotes the k’th row of Ci (1 ≤k ≤3), i ∼j means that the j’th scene point
+is visible by the i’th camera, and we abuse notation and identify the representation [Pj, 1] ∈R4
+of Pj in homogeneous coordinates by Pj. Unfortunately, as a result of the special structure of the
+camera matrices and the cost function in (1), the bundle adjustment problem (1) is not convex, and its
+(na¨ıve) optimization in realistic settings typically converges to an (often undesired) local minimum. It
+is therefore critical to develop methods that can initialize bundle adjustment, i.e. that provide initial
+camera motion (and intrinsic calibration) and 3D structure estimates, as closely as possible to the
+true solution.
+In 2006 Snavely et al. [65] presented a sequential pipeline for SfM, demonstrating that it can
+produce accurate reconstructions in practical scenarios where hundreds, or even thousands of inde-
+pendently captured photographs are provided, sparking a huge interest in the development of eﬃcient
+SfM techniques for large, unordered image sets (cf. §4). The suggested pipeline begins by detecting
+keypoints in each image. It then uses the SIFT descriptor [42] to compare those keypoints across
+images and to produce a set of potential matches. Random sampling and consensus (RANSAC) [9]
+is applied next, to robustly estimate essential matrices between pairs of images (for computation of
+relative motion of camera pairs) and to discard outlier matches. Then, starting with a pair of images
+for which the largest number of inlier matches were found and then greedily adding one image at at
+a time, bundle adjustment is solved repeatedly. Although this sequential pipeline is computationally
+challenging, it successfully deals with large collections of images, producing in many cases highly accu-
+rate reconstructions. However, it is based on greedy steps that may not result in an optimal solution.
+Clearly, global approaches, which consider all images simultaneously (at least for the initial camera
+motion estimation), may potentially yield improved solutions. Indeed a number of recent methods
+attempt to globally estimate the camera locations (cf. §3) and orientations. In this survey, for the ini-
+tial camera motion estimation part of SfM, we focus on methods for camera location estimation in §3,
+and refer the reader to other surveys that review the problems of camera orientation and calibration
+recovery [77].
+2
+
+The outline of this survey is as follows. In §2, we shortly discuss some of the early works in the
+literature that introduce the basic SfM framework and the relatively simple factorization methods. §3
+covers some of the recent work on camera location estimation from pairwise keypoint matches, such as
+the simpler least squares methods based on the (homogeneous) epipolar constraints, relatively stable
+convex methods based on a linearized representation (cf. (16)) of pairwise direction measurements,
+heuristic methods for outlier rejection in pairwise directions, etc. We provide part of the key ideas
+and methods in the literature for 3D structure estimation, with an emphasis on contemporary meth-
+ods aimed at processing large, unordered sets of images, in §4. Details of inﬂuential works on the
+simultaneous localization and mapping (SLAM) problem, which has recently experienced a dramatic
+increase of popularity, are discussed in §5. Some of the remaining crucial topics in the vast SfM lit-
+erature, including methods for feature point extraction and matching, works on handling instabilities
+induced by symmetries and ambiguities in the images, methods for relatively uncommon types of
+cameras (e.g., omnidirectional cameras), techniques using alternative basic measurements (e.g., based
+on lines instead of feature points), some of the important software packages and popular datasets, etc.,
+are considered in §6. Lastly, we conclude with a discussion of the current state and possible future
+directions for the SfM problem in §7.
+As it is, rather unfortunately, the fate of any survey on a topic having an extensive body of
+literature like SfM, we are unable to cover every important work in the ﬁeld. In essence, we try to
+focus on relatively recent SfM techniques. For earlier works in the literature, we refer the reader to
+other sources, e.g. [75, 30, 52].
+2
+Early Works
+This section covers some of the relatively early works on SfM, which have introduced the basic problem
+formalism and the factorization based methods. We ﬁrst consider the seminal work [40] that introduced
+the ﬁrst linear method based on point correspondences, later named the eight point algortihm, to solve
+the SfM problem for a pair of cameras. Speciﬁcally, for a pair of cameras, [40] aims to estimate the
+relative camera motion, i.e. relative rotation and translation, and the 3D coordinates of the scene points
+captured by these cameras. Here, we represent the i’th camera using its orientation Ri ∈SO(3) and
+its location ti ∈R3 by (Ri, ti). Considering that we can always ﬁx the (intrinsic) coordinate system
+of one of the two cameras to be the global coordinate system (i.e., we can set Ri = I and ti = 0,
+since an absolute coordinate system cannot be determined from point correspondences), solving for
+the relative motion for a camera pair, and for the scene points based on the computed motion, then
+corresponds to actually solving the SfM problem for the pair. The problem setup1 involves a simple
+pinhole camera model (also see, e.g., §4 in [54] or [30]), in which a scene point P ∈R3 is represented
+in the i’th image plane by pi ∈R3 (as in Figure 2). Here, we obtain pi by ﬁrst representing P, in the
+i’th camera’s coordinate system, as Pi = RT
+i (P −ti) = (Px
+i , Py
+i , Pz
+i )T and then projecting it to the
+i’th image plane by pi = (fi/P z
+i )Pi, where Ri ∈SO(3), ti ∈R3 and fi ∈R+ denote the orientation,
+the location of the focal point and the focal length of the i’th camera, respectively. For a pair of
+cameras i and j as in Figure 2, we can restate the coplanarity of the points P, ti and tj, i.e. that
+[(P −ti) × (P −tj)]T (ti −tj) = 0, in terms of the observable corresponding point measurements
+pi, pj (cf. Figure 3 for a depiction of a set of corresponding points between a pair of images) and the
+camera parameters as
+pT
+i
+
+RT
+i (tj −ti)
+
+× RT
+i Rj
+
+pj =.. pT
+i Eijpj = 0 ,
+(2)
+1We note that, our notation and type of projective measurement (or, equivalently, the global coordinate system)
+are diﬀerent from those of [40], even though both choices are equivalent (i.e., any

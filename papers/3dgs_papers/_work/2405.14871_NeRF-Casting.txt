@@ -1,0 +1,1011 @@
+NeRF-Casting: Improved View-Dependent Appearance with Consistent
+Reflections
+DOR VERBIN, Google, USA
+PRATUL P. SRINIVASAN, Google, USA
+PETER HEDMAN, Google, UK
+BEN MILDENHALL, Google, USA
+BENJAMIN ATTAL, Carnegie Mellon University, USA
+RICHARD SZELISKI, Google, USA
+JONATHAN T. BARRON, Google, USA
+Interactive webpage at https://nerf-casting.github.io
+(a) Zip-NeRF [Barron et al. 2023]
+(b) UniSDF [Wang et al. 2023]
+(c) Ours
+(d) Ground truth
+Fig. 1. Our method, NeRF-Casting, recovers and renders scenes with higher-quality reflections than prior work. Here we show cropped renderings and a
+ground-truth image for a scene in our dataset (top), as well as a slice from a video rendering along a smooth camera path (one horizontal row of pixels stacked
+vertically across multiple video frames) to emphasize the continuity of high-frequency reflected content in our result (bottom). Please see the videos provided
+in the supplemental webpage to observe the accurate motion of our rendered reflections.
+Neural Radiance Fields (NeRFs) typically struggle to reconstruct and render
+highly specular objects, whose appearance varies quickly with changes in
+viewpoint. Recent works have improved NeRF’s ability to render detailed
+specular appearance of distant environment illumination, but are unable
+to synthesize consistent reflections of closer content. Moreover, these tech-
+niques rely on large computationally-expensive neural networks to model
+outgoing radiance, which severely limits optimization and rendering speed.
+We address these issues with an approach based on ray tracing: instead of
+querying an expensive neural network for the outgoing view-dependent
+radiance at points along each camera ray, our model casts reflection rays
+from these points and traces them through the NeRF representation to render
+feature vectors which are decoded into color using a small inexpensive net-
+work. We demonstrate that our model outperforms prior methods for view
+synthesis of scenes containing shiny objects, and that it is the only existing
+NeRF method that can synthesize photorealistic specular appearance and
+reflections in real-world scenes, while requiring comparable optimization
+time to current state-of-the-art view synthesis models.
+CCS Concepts: • Computing methodologies →Reflectance modeling; Ray
+tracing; 3D imaging.
+Additional Key Words and Phrases: View synthesis, neural radiance fields,
+reflections
+1
+INTRODUCTION
+Neural Radiance Fields (NeRFs) represent a 3D scene’s underlying
+geometry and color using neural networks, for the goal of render-
+ing novel unobserved views of the scene. Early variants of NeRF
+used multi-layer perceptrons (MLPs) to map from 3D coordinates
+to volume densities and view-dependent colors. However, the large
+MLPs needed to represent detailed 3D geometry and color are ex-
+tremely slow to train and evaluate. Recent work has focused on
+making NeRF more efficient by replacing large MLPs with voxel-
+grid-like data structures or combinations of grids and small MLPs.
+These methods have enabled scaling NeRF to representing detailed
+large-scale scenes, but their benefits are limited to 3D geometry and
+mostly diffuse color.
+Scaling NeRF’s ability to model realistic view-dependent appear-
+ance is still a challenge. State-of-the-art models for view synthesis
+of shiny objects with high-frequency view-dependent appearance
+are limited in two ways. First, they are only able to synthesize accu-
+rate reflections of distant environment illumination and struggle to
+render convincing reflections of nearby scene content. Second, they
+arXiv:2405.14871v1  [cs.CV]  23 May 2024
+
+2
+•
+Verbin et al.
+rely on large MLPs to represent the view-dependent outgoing radi-
+ance at any point and struggle to scale to larger real-world scenes
+with detailed reflections.
+We present an approach that solves both of these issues by intro-
+ducing ray tracing into NeRF’s rendering model. Instead of querying
+an expensive MLP for the view-dependent appearance at each point
+along a camera ray, our method casts reflection rays from these
+points into the NeRF geometry, samples properly anti-aliased fea-
+tures from the reflected scene content, and uses a small MLP to
+decode these features into reflected color. Casting rays into the re-
+covered NeRF naturally synthesizes consistent reflections of nearby
+and distant content. Moreover, computing appearance by ray tracing
+reduces the burden of representing highly-detailed view-dependent
+functions at each point in the scene with a large MLP.
+Our approach is both more efficient than prior work for improv-
+ing NeRF’s view-dependent appearance and renders higher quality
+specular reflections, particularly of nearby content.
+2
+RELATED WORK
+A Neural Radiance Field [Mildenhall et al. 2020] consists of an MLP
+that maps from a 3D coordinate within the scene to the correspond-
+ing volume density and view-dependent color at that position. NeRF
+renders rays passing through a scene by querying the MLP at sam-
+pled points along each ray and integrating the returned volume
+densities and colors into a single color. Evaluating an MLP hundreds
+of millions of times to render a single image can be prohibitively
+slow, so recent research has focused on making NeRF more efficient
+and scalable. In particular, many effective methods trade compute
+for storage and leverage data structures based on voxel grids to ac-
+celerate NeRF’s optimization and rendering. These include standard
+voxel grids [Fridovich-Keil et al. 2022; Karnewar et al. 2022; Sun et al.
+2022], low-rank tensor factorizations [Chen et al. 2022], and voxel
+pyramids with hash maps [Müller et al. 2022]. These methods are
+primarily focused on scaling NeRF’s representation of 3D volume
+density to represent larger and more detailed scenes. However, they
+do not usually modify NeRF’s representation of view-dependent
+color, which is a 5D function of both position and viewing direction.
+A separate line of work has focused on improving NeRF’s ability
+to reconstruct and render highly specular (or shiny) content. Ref-
+NeRF [Verbin et al. 2022] demonstrated that reparameterizing outgo-
+ing radiance as a function of the reflected view direction is effective
+in cases where geometry is estimated accurately. However, Ref-
+NeRF’s parameterization of outgoing radiance is most effective for
+objects that are mainly illuminated by distant light sources, which is
+often the case for synthetically-generated scenes. Furthermore, the
+outgoing radiance at every point must be encoded in the weights of
+an MLP. In the case of highly glossy objects, this MLP must have a
+large enough capacity to represent the entire environment viewed
+from any point in the scene, and is therefore costly to evaluate.
+Other works that focus on recovering specular appearance with
+NeRF also adopt Ref-NeRF’s reparameterization of view-dependent
+appearance. ENVIDR [Liang et al. 2023] pre-trains the MLP that
+maps from reflection direction to color to effectively encode a prior
+on view-dependent appearance. UniSDF [Wang et al. 2023] improves
+Ref-NeRF’s geometry representation to obtain smoother normals
+that are better for rendering surface reflection. SpecNeRF [Ma et al.
+2023] modifies Ref-NeRF’s encoding of view directions to vary spa-
+tially according to a set of optimized 3D Gaussians, which helps
+the view-dependent color network model reflections of nearby con-
+tent. However, this encoding does not ensure accurate reflections
+when light sources are occluded. NeAI [Zhuang et al. 2024] traces
+reflection cones within an MLP-based NeRF to compute specular
+appearance, but requires ground-truth geometry and masks that sep-
+arate the object from the environment in order to supervise the MLP
+that represents reflected lighting. Work concurrent to ours by Wu
+et al. [2024] proposes a Neural Directional Encoding that also traces
+cones through the NeRF model to simulate near-field reflections.
+However, they rely on a large MLP to represent geometry, which
+is slow to train and render compared to more modern grid-based
+representations. Furthermore, they primarily focus on synthetic
+scenes with clearly separated near-field and distant content.
+The methods discussed above address the same problem as our
+work: improving view-dependent appearance in view synthesis. An
+alternative approach to synthesizing specular appearance is inverse
+rendering: estimating representations of scene materials and light-
+ing, alongside geometry. Many existing works combine NeRF with
+inverse rendering and explicitly model light transport through the
+3D scene to recover representations that can render specular ap-
+pearance [Bi et al. 2020; Jin et al. 2023; Mai et al. 2023; Srinivasan
+et al. 2021]. However, these techniques must perform expensive
+Monte Carlo integration over the entire hemisphere of incoming
+lighting (using hundreds to thousands of sampled reflection rays) to
+estimate outgoing radiance at any point in the scene, and they are
+typically orders of magnitude slower than standard NeRF models.
+Our proposed method specifically focuses on rendering specular
+appearance for view synthesis and is able to render accurate reflec-
+tions with low computational overhead compared to existing view
+synthesis models.
+3
+PRELIMINARIES AND NOTATION
+Neural Radiance Fields [Mildenhall et al. 2020] uses volume render-
+ing to combine the densities and emitted view-dependent radiance
+values at samples along rays:
+¯c =
+∑︁
+𝑖
+𝑤(𝑖)c(𝑖) ,
+(1)
+𝑤(𝑖) =
+
+1 −exp
+
+−𝜏(𝑖) 
+𝑡(𝑖+1) −𝑡(𝑖)
+exp©­
+«
+−
+∑︁
+𝑗<𝑖
+𝜏(𝑗) 
+𝑡(𝑗+1) −𝑡(𝑗)ª®
+¬
+where 𝑡(𝑖) is the 𝑖th sample along the ray, and 𝜏(𝑖) and c(𝑖) are the
+volume density and color (respectively) at the𝑖th sample location, o+
+𝑡(𝑖)d, where o is the ray’s origin and d its direction. Throughout this
+paper we denote the volume-rendered values with a “bar”, similar
+to ¯c on the left of Equation 1.
+Mip-NeRF [Barron et al. 2021] replaces infinitesimal rays with
+pixel cones with origin o, direction d and radius ¤𝑟(determined by
+the pixel footprint on the image plane). Casting cones instead of
+rays prevents aliasing in the scene representation and as a result,
+prevents aliasing in the rendered images. To represent large-scale
+unbounded scenes, mip-NeRF 360 [Barron et al. 2022] allocates
+
+NeRF-Casting: Improved View-Dependent Appearance with Consistent Reflections
+•
+3
+higher representational capacity to points near the cameras using a
+spatial contraction function that maps all points in R3 to a sphere
+of radius 2:
+C(x) =
+(
+x
+if ∥x∥≤1,
+
+2 −
+1
+∥x∥
+
+x
+∥x∥
+if ∥x∥> 1 .
+(2)
+In order to represent density and color, Zip-NeRF accelerates
+mip-NeRF 360 by replacing its large MLP with a hash encoding,
+based on Instant Neural Graphics Primitives [Müller et al. 2022],
+followed by a smaller MLP. To prevent aliasing, Zip-NeRF replaces
+point samples of the hash encoding grid with their expectation over
+3D Gaussians. Since these expected values cannot be computed ex-
+actly, they are approximated using two components: multisampling
+and downweighting. Multisampling replaces each Gaussian with
+multiple smaller Gaussians, and downweighting multiplies each of
+the gathered features at these samples by a multiplier designed to
+prevent voxels much smaller than the Gaussian from affecting the
+features. The contraction function in Equation 2 must be taken into
+account when computing the appropriate amount of downweight-
+ing: the determinant of the Jacobian of C, det 𝐽C, “deflates” the
+Gaussians’ volumes, so Zip-NeRF downweights the grid resolution
+𝑛ℓby erf
+√
+8𝜎(x)𝑛ℓ
+
+−1
+, where:
+𝜎(x) = 𝛾· ¤𝑟∥x −o∥3√︁
+det 𝐽C(x) ,
+(3)
+where 𝛾is a fixed hyperparameter.
+4
+MODEL
+We design our method with three goals in mind: First, we want to
+model accurate detailed reflections without relying on computation-
+ally expensive MLP evaluations. Second, we would like to only cast
+a small number of reflected rays. Third, we would like to minimize
+the computation required to query our representation at each point
+along these reflection rays.
+Our representation of 3D volume density and features is based on
+Zip-NeRF. As described in Section 3, Zip-NeRF uses a multi-scale
+hashgrid to store 3D features, a small MLP (1 layer, width 64) to
+decode these features into density, and a larger MLP (3 layers, width
+256) to decode these features into color. This means that querying
+the density and feature for samples along rays is cheap relative
+to evaluating color. Considering these constraints, we propose the
+following procedure to render specular appearance:
+(1) Query volume density along each camera ray to compute
+the ray’s expected termination point and surface normal.
+(2) Cast a reflected cone through the expected termination point
+in the reflection direction.
+(3) Use a small MLP to combine the accumulated reflection
+feature with other sampled quantities (such as the diffuse
+color features and per-sample blending weights) to produce
+a color value for each sample along the ray.
+(4) Alpha composite these samples and densities into the final
+color.
+These steps are illustrated in Figure 2 and explained in more detail
+below.
+Section 4.1 describes how our method estimates the cone of re-
+flection rays to be traced. Section 4.2 details how our model traces a
+o
+d
+o
+J
+OdoKmhFMTIe+gQ5MrOisqW72I+Gg2En4XUlXisRWMvJxcHuX1hK3HAiDGZI6ywe1ia3SBmKGXEBbDSpEZ6jKcm8KhAnOrdyi7se6QMK6n8ESbs0E2GRVzrJS/8zTZFfdXgjf6MBKYsK3X7SXSx9sG2ypRkqmt+FpRC+kryp3uWiroxROBV7lXDQiPDtqVhSRXBhi29grCivwQz5APY3zjg8D3eE6Q/xnj7QAKcokl50iUFuqmJoryWmrislGed8hVZnbKLadUaOt3kztTZKnI1Gzsut8VKXJfk2kvqozlNv56RtFrYfhCGUEjE6FZ3hzVlF2SHkqZlFcZQcdjbE6gbnaNPp+oH73wBpZr7+7cf9aC61r9gpeSly+I8G7VD1NWuCFs9D2eFXFioGkYyWFJOFrWC7dy0ukgSaMjCtHZyNEhqAz0RLdoeOjsY18a5VRQ+J0ocjXmzjtd+oyfZibN+fpfOcmeFg+3YSWbHc
+dfwC9GfHUNriunySB+M3j9YRylx+sV2QMvwEvwCsTgLUjBMTgBE4CBAF/BN/C96X3o/ez92t1dXdnzXkOtqT3+x/1VgE</latexit>d
+¯n
+vMF(d0, ¯)
+o0
+R
+RBvGLkpJp/DP6TC6I0leKzWTak5Ohc0JpiZDx01u/DCikLOTKzqrYL5876yXAw7CS+qaRrJQFrOTrb3f4LpxK3nAiDGdK6SIeNKS1ShmJGXARbTRqE5+icF4ViBNd2i51F+97ZBrXUvkjTNyhVxkWca2XvPI3Q476ui+At/owEpiwjdftJdJLH2wTDFQjJdOb8KJWCF9L3tQfSktF0xoi8Cr3umWxkXFobTylimDl5BWFfoxnyIcxfgBR5Js8J8hPyHg7goJcYsk5ElMLdsQRXkjNXHFqCy6eUg1LW2SrobToI539WZubZI5m4yclzvj5a7Iyk0k91Gdp97NyUMWdj+KYyglYvRcdIY3ZzVle5DnZpakSbX2RCrW5yjq063H7n/DZBm5uvfNyv6FL7ig1Sl6Ii2LUVirnZF2Op5OKvkwkLVMl
+LAKeVk0SgY9iboIsugIQsT7OxgkDUGeiJahB46Oxg3xrlVFD4nShyMebuOF8boSXbirN/fpbPcWeFgWDvJ7Djt+hv5j5Fe/wY3leNskL4bvP0TvLD9RfZAa/Aa/AGpOA9yMEhOAITgMEF+Aq+ge+9L70fvZ+9X6ur21trzkuwIb3f/wAb+1sO</latexit>¯x
+d
++ABf+AFfGTio1XcSzL3te/PWomJUm8HgV2djs3v/oOth8Gjx0+ePutPz/WslaYjLFkUp0WSBNGBRkbahg5rRBvGDkpJh9buwnP4jSVIpvZlGRnKNzQUuKkfGqs94MGlR/t/v0rYNvLr8D2H4h5MhMi9LO3R0ecIaqCv0PLlbws1406A9aCm8y8YqJwIqOzrY3fsOJxDUnwmCGtM7iQWVyi5ShmBEXwFqTCuEZOieZwXiROe27YoL97xmE
+pZS+V+YsNVeRVjEtV7wns2iertkZ5qw0jgQlbe91eIL3wdaVDdRIyfS6el4qhK8lb8qPuaWiqg0ReJl7WbPQyLCZWjihimDFp5BWFfoinyIcxfrZB4Ds9I8gP3g5gIJcYMk5EhMLdV0RXklNXHZM/aoUg1yW0U21aoUIu76plaGyXORkPn6c54qcuSfF2T+qjOQ+/GpE0Wdi8IQyglYvRctIXpyVlu5CnZhrFUbLbyhCrW4zDq0
+a3F7jLBkgz9fWvP+63f6F9xQYpJS9cFufZsFmitnZF2PJ5OC3k3EJVM5LBCeVkXinY7E3DiySBhsxNIyeH/aQy0APRvOmhs/1RZxbRuEzosThiNereM0YPciOnfX7u3CWO38OsFk7yewobvsb+MOIr5/BTeY46cfv+jqL0+pEtsBrsAP2Qw+gBR8AUdgD4Cf52QKez+afb67svlq6bnRWmBdgjbo7/wCjt3N1</latexit>
+⌧(i),
+b(i), β(i)
+Color 
+Decoder
+n(i)
+⌧(i)
+j , f (i)
+j
+x(i)
+x(i)
+j
+c(i)
+P ¯fj
+K
+⇢(i),
+Fig. 2. Our model architecture for rendering a single ray with origin o and
+direction d. We sample 𝑁points x(𝑖) along the ray and use a spatial encoder
+based on Zip-NeRF to encode each point into density 𝜏(𝑖), roughness 𝜌(𝑖),
+and surface normal n(𝑖). These are alpha composited to compute a single
+expected termination point ¯x, a von Mises-Fisher distribution (vMF) width
+¯𝜅, and surface normal ¯n. Then d is reflected around that surface to construct
+a vMF distribution over reflected rays vMF(d′, ¯𝜅). We sample 𝐾reflected
+rays (𝐾= 5) with location o′ and directions d′
+𝑗(as in Figure 3). These 𝐾
+rays are then cast, and points along them are encoded with the same model
+as the initial ray into 𝑁′ densities 𝜏(𝑖)
+𝑗
+and features f (𝑖)
+𝑗
+. These features
+are alpha composited along each ray to get per-ray features ¯f𝑗, and the
+composited features are averaged into a single reflection feature f. This
+feature is broadcast over the original ray’s samples and passed, along with
+bottleneck features b(𝑖), mixing coefficients 𝛽(𝑖), and viewing direction d,
+to the color decoder to produce RGB colors c(𝑖) for each point along the
+ray. These colors are alpha composited to render a pixel color ¯c.
+o
+d
+o
+d
+¯x
+¯n
+¯n
+d0
+1
+˙r
+˙r
+o
+d
+¯n
+d0
+y
+dPdvWcnWrYKkzGWTKqzCmnCqCBjQw0jZ40iFeMnFazD8F/+pkoTaX4ZJYNKTm6ELSmGBkPFZAjM61qK92r891k0B90El9X0rWSgLUcn+9t/4UTiVtOhMEMaV2kg8aUFilDMSMugq0mDcIzdEKrwrEiS5tl7OLDzwyiWup/BEm7tDLDIu41kte+ZshR3VF8AbfRgJTNjG63aO9NIH2wQD1UjJ9Ca8qBXCV5I39fvSUtG0hgi8yr1uWxkHoaT6gi2LClVxBW1Jcf4ynyYzvfBT5Js8I8l9jvB1BQeZYco7ExELdNkR3khNXDEsV/8h1aS0SWo7o0Ed7/LN3NokczYZOi+3xstdkZWbSO6jOk+9nZOHLOxBFM
+dQSsTohegMb05ryvYhz80SZNsv7MhVjc4h5ed7iBy/xsgzdTXv/m4n82l9hUbpJScuyIti2EYoq52RdjqeTit5MJC1TJSwAnlZNEoGOYm6CLoCELE+zsJ81BnoiWoQeOtsfNca5VRQ+I0ocjni7jhe+0ZPs2Fk/v0tnubPCwTB2ktlR2vU38ouRXl2D68pJ1k/f9t98HCX50XpFdsAL8BK8Bil4B3JwBI7BGAgwVfwDXzvfen96P3s/Vpd3d5ac56Den9/gfU3lhA</latexit>
+o0
+x
+oYaRo1oRxAtGDovpu9Z/eEqUplJ8NvOa5BydCFpRjIyHjf3oKyJQkYqgTixpx/fu13IkZkUlS3dsxchLJCycIrqGrnx5vRoD/oJLyqxEslAkvZP95a/wNLiRtOhMEMaZ3Fg9rkFilDMSMugI0mNcJTdEIyr7ZJ6Nx2dblwxyNlWEnljzBh15kWMS1nvPC32xT1pd9LfhfH0YCE7byuj1Deu6DrYIt1UjJ9Co8qxTCl5I31ZvcUlE3hgi8yL1qWGhk2PY9LKki2LC5VxBW1Jcf4gnyYyfThD4nk8J8uMz3g6gIGdYco5EaFu/IQor6UmLhvmWTceqcrcRrHtjBp1vIs3U2ujxNlo6LxcGy91WZKvIqmP6jz1ek7aZmF3gjCEUiJGT0RneHNSUbYNeWomURwl250NsfqPc3jR6XYC968
+B0kx8/auP+/2da1+xQUrJM5fFeTZsl6irXRG2eB5OCjmzUDWMZLCknMxqBdu9aXWRJNCQmWntZK+f1AZ6Ipq1PXS2P6qNc4sofEqU2BvxZhmvHaMn2bGzfn/nznJnhYPt2klmR3HX38B/jPjyN7iqHCT9+FX/5adRlL5dfpEN8AQ8BbsgBq9BCj6AfTAGHwB38B38KP3tfezd97tbi6vrbkPAYr0v9F60yZq0=</latexit>
+vMF(d0, ¯)
+o0
+L
+BkUp1WSBNGBZkYahg5bRBvGLkpJp/DP6TC6I0leKzWTak5Ohc0JpiZDx01u/DCikLOTKzqrYL5876yXAw7CS+qaRrJQFrOTrb3f4LpxK3nAiDGdK6SIeNKS1ShmJGXARbTRqE5+icF4ViBNd2i51F+97ZBrXUvkjTNyhVxkWca2XvPI3Q476ui+At/owEpiwjdftJdJLH2wTDFQjJdOb8KJWCF9L3tQfSktF0xoi8Cr3umWxkXFobTylimDl5BWFfoxnyIcxfgBR5Js8J8hPyHg7goJcYsk5ElMLdsQRXkjNXHFqCy6eUg1LW2SrobToI539WZubZI5m4yclzvj5a7Iyk0k91Gdp97NyUMWdj+KYyglYvRcdIY3ZzVle5DnZpakSbX2RCrW5
+yjq063H7n/DZBm5uvfNyv6FL7ig1Sl6Ii2LUVirnZF2Op5OKvkwkLVMlLAKeVk0SgY9iboIsugIQsT7OxgkDUGeiJahB46Oxg3xrlVFD4nShyMebuOF8boSXbirN/fpbPcWeFgWDvJ7Djt+hv5j5Fe/wY3leNskL4bvP0TvLD9RfZAa/Aa/AGpOA9yMEhOAITgMEF+Aq+ge+9L70fvZ+9X6ur21trzkuwIb3f/wAb+1sO</latexit>¯x
+x
+oYaRo1oRxAtGDovpu9Z/eEqUplJ8NvOa5BydCFpRjIyHjf3oKyJQkYqgTixpx/fu13IkZkUlS3dsxchLJCycIrqGrnx5vRoD/oJLyqxEslAkvZP95a/wNLiRtOhMEMaZ3Fg9rkFilDMSMugI0mNcJTdEIyr7ZJ6Nx2dblwxyNlWEnljzBh15kWMS1nvPC32xT1pd9LfhfH0YCE7byuj1Deu6DrYIt1UjJ9Co8qxTCl5I31ZvcUlE3hgi8yL1qWGhk2PY9LKki2LC5VxBW1Jcf4gnyYyfThD4nk8J8uMz3g6gIGdYco5EaFu/IQor6UmLhvmWTceqcrcRrHtjBp1vIs3U2ujxNlo6LxcGy91WZKvIqmP6jz1ek7aZmF3gjCEUiJGT0RneHNSUbYNeWomURwl250NsfqPc3jR6XYC968
+B0kx8/auP+/2da1+xQUrJM5fFeTZsl6irXRG2eB5OCjmzUDWMZLCknMxqBdu9aXWRJNCQmWntZK+f1AZ6Ipq1PXS2P6qNc4sofEqU2BvxZhmvHaMn2bGzfn/nznJnhYPt2klmR3HX38B/jPjyN7iqHCT9+FX/5adRlL5dfpEN8AQ8BbsgBq9BCj6AfTAGHwB38B38KP3tfezd97tbi6vrbkPAYr0v9F60yZq0=</latexit>
+vMF(d0, ¯)
+o0
+L
+BkUp1WSBNGBZkYahg5bRBvGLkpJp/DP6TC6I0leKzWTak5Ohc0JpiZDx01u/DCikLOTKzqrYL5876yXAw7CS+qaRrJQFrOTrb3f4LpxK3nAiDGdK6SIeNKS1ShmJGXARbTRqE5+icF4ViBNd2i51F+97ZBrXUvkjTNyhVxkWca2XvPI3Q476ui+At/owEpiwjdftJdJLH2wTDFQjJdOb8KJWCF9L3tQfSktF0xoi8Cr3umWxkXFobTylimDl5BWFfoxnyIcxfgBR5Js8J8hPyHg7goJcYsk5ElMLdsQRXkjNXHFqCy6eUg1LW2SrobToI539WZubZI5m4yclzvj5a7Iyk0k91Gdp97NyUMWdj+KYyglYvRcdIY3ZzVle5DnZpakSbX2RCrW5
+yjq063H7n/DZBm5uvfNyv6FL7ig1Sl6Ii2LUVirnZF2Op5OKvkwkLVMlLAKeVk0SgY9iboIsugIQsT7OxgkDUGeiJahB46Oxg3xrlVFD4nShyMebuOF8boSXbirN/fpbPcWeFgWDvJ7Djt+hv5j5Fe/wY3leNskL4bvP0TvLD9RfZAa/Aa/AGpOA9yMEhOAITgMEF+Aq+ge+9L70fvZ+9X6ur21trzkuwIb3f/wAb+1sO</latexit>¯x
+(a)
+e
+A/sTZCS/oxkaeYbf+OZ8cyoYlSbfv/P1nbn1u07d3fuRfcfPHy0u7f/+ETLWmEyxJdTZCmjAqyNBQw8hZpQjiI0ZOR/N3wX/6mShNpfhkmoqUHE0FnVCMjIfgRyqmjMQKNS+i872k3+u3El9V0pWSgJUcn+9v/4VjiWtOhMEMaV2k/cqUFilDMSMugrUmFcJzNCWFVwXiRJe2TdrFXY+M4lU/gTt+g6wyKudcNH/iZHZqYv+wJ4rQ8jgQnbeN1eIN34YJtgoBopmd6EFxOF8
+KXkzeRNamoakMEXuY+qVlsZByaGo+pItiwxisIK+rLj/EM+TDGtz6KIEdzgvzfG9HUJALDlHYmyhriuiK+kJq4YlAUMSUk1Lm2S2taoUMtbv5lbm2TOJgPn5cZ4uSuychPJfVTnqTdz8pCF7UZxDKVEjE5Fa3hzNqHsAPLczJI0yQ5aG2J1jXOw7nTdyP1vgDQzX/m434G+0rNkgpeGKtCwGYja2hVhy+fhbCQXFqakQKOKSeLSsEwN0EXWQYNWZhgZ4e9rDLQE9Ei9
+NDZ3lFlnFtG4XOixOERr1fxwjd6kh06+e3cZY7KxwMYyeZPUrb/obFSC+vwVXlJOulr3ovP2RJ/na1IjvgKXgGnoMUvAY5eA+OwRBgUIGv4Bv43vnS+dH52fm1vLq9teI8ARvS+f0PvSJX4g=</latexit>Single ray,
+zero roughness
+(b)
+Ray distribution,
+zero roughness (1/= 0)
+(c)
+Ray distribution,
+general roughness (1/> 0)
+d0
+3
+d0
+2
+d0
+3
+d0
+1
+d0
+2
+Fig. 3. We visualize the reflection cone tracing procedure described in Sec-
+tion 4.1. (a) A basic model for reflections: a ray cast from a camera ray origin
+o along view direction d that terminates at a coordinate ¯x with a surface nor-
+mal ¯n is “mirrored” around the surface tangent to yield a reflected “camera
+ray origin” o′ and direction d′. This model does not consider that Zip-NeRF
+traces pixel cones instead of camera rays, which we address by (b) casting
+a reflection cone with radius ¤𝑟instead of a ray, and parameterizing not
+just a single reflected ray direction but a von Mises-Fisher distribution over
+reflected rays vMF(d′, ¯𝜅), where ¯𝜅is the inverse-roughness of the surface.
+We approximate this distribution with a small set of rays {d′
+𝑗}. (c) When
+the surface is not a perfect mirror, the reflection cone widens and the origin
+of the reflected ray cone must be pulled closer to the surface location to
+maintain the same intersection with the pixel cone.
+small set of rays within this cone and computes volume density and
+features at sampled points along these rays. Section 4.3 presents
+the complete appearance model that decodes the accumulated re-
+flection feature into a specular color. Finally, Section 4.4 provides
+additional details describing how our model of 3D geometry and
+features differs from the standard Zip-NeRF architecture.
+
+4
+•
+Verbin et al.
+4.1
+Reflection Cone Tracing
+For a given ray with origin o and direction d, we sample 𝑁points
+{x(𝑖)}𝑁
+𝑖=1 along it, and evaluate the NeRF to get a collection of 3D
+quantities such as the surface normal (and others to be defined
+shortly). We then alpha composite these quantities to get the ex-
+pected surface termination point ¯x, and the ray’s associated surface
+normal ¯n, by applying the volume rendering typically used for color
+{c(𝑖)}𝑁
+𝑖=1 in Equation 1 to the sample points {x(𝑖)}𝑁
+𝑖=1 and normals
+{n(𝑖)}𝑁
+𝑖=1:
+¯x =
+𝑁
+∑︁
+𝑖=1
+𝑤(𝑖)x(𝑖) ,
+¯n =
+𝑁
+∑︁
+𝑖=1
+𝑤(𝑖)n(𝑖) .
+(4)
+We then construct a new reflected ray with direction d′ by re-
+flecting the initial ray about the surface normal:
+d′ = d −2(¯n · d)¯n .
+(5)
+Tracing a single reflection ray cannot be used to render materials
+that are not perfect mirrors, and it ignores the fact that Zip-NeRF
+traces cones instead of rays for each pixel. Accordingly, we model a
+cone-like distribution of reflected rays. The shape of this distribution
+is affected by two factors: the radius of the original pixel cone cast
+from the camera, and the roughness of the surface at the expected
+termination point of the camera ray, as visualized in Figure 3. We
+start by modeling both the cone-like distribution of reflected rays
+and the distribution of reflection directions due to surface roughness
+as von Mises-Fisher (vMF, i.e. a normalized spherical Gaussian)
+distributions centered at the mirror reflection direction d′. The vMF
+width (reciprocal of its concentration parameter 𝜅) for the pixel cone
+distribution is the pixel radius ¤𝑟, and the vMF width for the surface
+roughness is a quantity 𝜌that we parameterize at any point in space.
+The reflected ray cone at the camera ray’s expected termination
+point is modeled as a vMF distribution vMF(d′, ¯𝜅), whose width
+¯𝜅−1 is the sum of the pixel ray cone’s radius ¤𝑟and the composited
+roughness ¯𝜌along the primary ray:
+¯𝜅−1 = ¤𝑟+ ¯𝜌.
+(6)
+In order to ensure that the cross-section of the reflected ray cone
+at the surface matches that of the incident ray, we apply a roughness-
+dependent shift to the reflected ray cone’s origin so that it intersects
+¯x while having the incident ray’s radius ¤𝑟∥o −¯x∥(see Figure 3(c)
+and Appendix A for more details):
+o′ = ¯x −∥o −¯x∥
+¤𝑟
+¤𝑟+ ¯𝜌d′ .
+(7)
+Note that when the accumulated roughness ¯𝜌is zero, o′ is not shifted
+towards the surface, and is instead perfectly mirrored to the other
+side of the surface.
+4.2
+Conical Reflected Features
+Now that we have defined a vMF distribution over reflected rays,
+our goal is to estimate the expected volume-rendered feature over
+the vMF distribution, which we can then decode to a reflected color.
+This expected feature can be written as:
+¯f★= E𝝎∼vMF(d′,¯𝜅)
+¯f(𝝎)
+
+=
+∫
+S2
+¯f(𝝎) vMF 𝝎; d′, ¯𝜅 𝑑𝝎,
+(8)
+where ¯f(𝝎) is the feature vector accumulated in the direction 𝝎.
+Estimating this integral using Monte Carlo over randomly-sampled
+rays is prohibitively expensive since each sample requires volumet-
+ric rendering along the ray. Inspired by Zip-NeRF, we approximate
+this integral using a small set of representative samples combined
+with feature downweighting. However, unlike Zip-NeRF, we per-
+form both of these operations in the 2D directional domain rather
+than in 3D Euclidean space.
+Directional Sampling. Instead of sampling a large number of ran-
+dom reflection rays, we select a representative set of rays using
+unscented directional sampling [Kurz et al. 2016]. We evaluate 𝐾
+rays {(o′
+𝑗, d′
+𝑗)}𝐾
+𝑗=1 (in our experiments we set 𝐾= 5) selected to
+maintain the mean d′ and concentration ¯𝜅, by setting d′
+1 = d′ and
+{d′
+𝑗}𝐾
+𝑗=2 placed on a circle around d′ whose radius depends on ¯𝜅.
+During optimization we randomly rotate the samples rigidly on the
+circle and during evaluation we fix them. A more detailed descrip-
+tion of this procedure is provided in Appendix B.
+For each of the 𝐾sampled rays (o′
+𝑗, d′
+𝑗), we evaluate the volume
+density and appearance features at 𝑁′ sample points along the ray,
+and volume render them into the feature ¯f(d′
+𝑗). In order to generate
+these 𝑁′ samples we use the same procedure as sampling the 𝑁
+rays on the camera rays (see supplement for more details). The 𝐾
+features are then averaged to yield a single feature vector for the
+reflected cone:
+¯f(d′
+𝑗) =
+𝑁′
+∑︁
+𝑖=1
+𝑤(𝑖)
+𝑗
+f
+
+x(𝑖)
+𝑗
+
+,
+¯f = 1
+𝐾
+𝐾
+∑︁
+𝑗=1
+¯f
+
+d′
+𝑗
+
+,
+(9)
+where 𝑤(𝑖)
+𝑗
+and x(𝑖)
+𝑗
+are the 𝑗th reflected ray’s 𝑖th sample weight
+and 3D location, respectively, and f(x) is the feature at x.
+Reflection Feature Downweighting. The directional sampling de-
+scribed above helps select a small representative set of rays to aver-
+age. However, for surfaces with high roughness, the sampled rays
+can be distant from one another relative to the underlying 3D grid
+cells. This means that the feature from Equation 9 may be aliased,
+and small variations in the reflected ray directions can cause large
+variations in appearance.
+In order to prevent this, we adapt the “feature downweighting”
+technique from Zip-NeRF to our directional setting. We do this by
+multiplying features corresponding to voxels that are small relative
+to the vMF cone by a small multiplier, reducing their effect on the
+rendering color. Following Zip-NeRF, we define the downweighted
+feature at a point x as:
+faa(x) = erf
+√
+8𝝂𝜎(x)
+
+−1
+⊙f(x) ,
+(10)
+where 𝜎(x) is the (scalar) scale of the cone at the point x (defined
+below), 𝝂is a vector of the same dimension as f containing the
+scale of NGP grid resolution corresponding to every entry of f, ⊙
+denotes elementwise multiplication, and the reciprocal and erf(·)
+are taken elementwise. The downweighted feature faa(x) is used in
+Equation 9 in place of the original feature f(x).
+Since we focus on large scenes, which require using a contraction
+function C (Equation 2), it is particularly important to consider
+the behavior of 𝜎(x) in the nonlinear region of the contraction.
+
+NeRF-Casting: Improved View-Dependent Appearance with Consistent Reflections
+•
+5
+Zip-NeRF scales 𝜎(x) by the geometric mean of the contraction
+function’s 3D Jacobian’s eigenvalues (Equation 3). This has the un-
+fortunate effect of causing 𝜎(x) to approach 0 (i.e., applying no
+downweighting) for points x far from the origin, because C strongly
+contracts distant points towards the origin. As a result, using Zip-
+NeRF’s downweighting function would result in significant aliasing
+in reflections of distant content. We instead use the Jacobian deter-
+minant restricted to the (2D) directional domain, and define:
+𝜎(x) = 𝛾· (¤𝑟+ ¯𝜌)
+x −o′
+√︃
+det Jdir
+C (x) ,
+(11)
+where 𝛾is a fixed scale multiplier which we set to 16 in all experi-
+ments, and:
+det Jdir
+C (x) = det JC(x) ·
+
+𝜕
+𝜕∥x∥
+
+C(x) ·
+x
+∥x∥
+
+−1
+(12)
+=
+ 2 max(1, ∥x∥) −1
+max(1, ∥x∥)2
+
+2 .
+(13)
+Note that when the point x is far from the origin, the scale in Equa-
+tion 11 approaches a constant, 𝜎
+∥x∥→∞
+−−−−−−−→2𝛾(¤𝑟+ ¯𝜌), in contrast to
+Zip-NeRF’s scale, which approaches zero and therefore does not
+downweight distant content. While this may be less noticeable in
+Zip-NeRF, properly downweighting distant content is crucial for us
+to prevent aliasing in reflections of distant illumination.
+4.3
+Color Decoder
+The role of the color decoder is to assign a color to every sample
+point along a ray. Inspired by UniSDF [Wang et al. 2023], our color
+decoder uses a convex combination of two color components:
+c
+
+x(𝑖), d
+
+= 𝛽(𝑖)c𝑣
+
+x(𝑖), d
+
++
+
+1 −𝛽(𝑖)
+c𝑟
+
+x(𝑖), d′
+,
+(14)
+where 𝛽(𝑖) ∈[0, 1] is a weighting coefficient output by the geometry
+encoder followed by a sigmoid nonlinearity. The first color compo-
+nent c𝑣is similar to the typical NeRF view-dependent appearance
+model:
+c𝑣
+
+x(𝑖), d
+
+= 𝑔
+
+x(𝑖), b(𝑖), n(𝑖), d
+
+,
+(15)
+and the second component c𝑟, designed to model glossy appearance,
+is computed as:
+c𝑟
+
+x(𝑖), d′
+= ℎ
+
+x(𝑖), b(𝑖), n(𝑖), d · n(𝑖), d′, ¯f
+
+,
+(16)
+where 𝑔and ℎare small MLPs (see supplement for more details), and
+¯f is the reflection feature introduced in Section 4.2. The bottleneck
+vector b, similar to 𝛽, is also output by a small MLP applied to
+geometry features. Note that unlike UniSDF, we apply 𝛽in 3D space
+rather than in image space, and therefore the reflected features ¯f are
+fed into the color decoder at every sample along the camera ray. We
+find that this is useful for convergence since early in optimization,
+when geometry is still fuzzy, every point along the ray can make
+use of the reflected feature. See full description of the color decoder
+in the supplement.
+4.4
+Geometry Representation and Regularization
+Our geometry representation is based on that of Zip-NeRF [Bar-
+ron et al. 2023]. See its full description in Appendix C.1. Like Ref-
+NeRF [Verbin et al. 2022], we apply orientation loss to the normals,
+Input image
+(a) Our recovered surface normals
+(b) Symmetric loss 𝜆𝑛= 𝜆˜𝑛= 10−2
+(c) Symmetric loss 𝜆𝑛= 𝜆˜𝑛= 10−3
+(d) Shared reflection features
+(e) Single dilated cone
+Fig. 4. An ablation study showing the effect of different design choices on
+our recovered normals. Replacing (a) our model’s asymmetric predicted
+normal loss (Equation 17) with the standard symmetric one tends to (b)
+oversmooth or (c) underconstrain geometry, preventing the normal vectors
+from converging to the correct solution. (d) Using reflected features ¯f which
+are also used for other appearance components such as the bottleneck vector
+b, or (e) using a single cone instead of 𝐾directional sampling cones also
+often result in poor recovery of surface normals.
+and we make use of predicted normals ˜n output by a small MLP
+applied to the NGP features. Unlike Ref-NeRF, we use an asymmet-
+ric predicted normal loss which allows separate multipliers for the
+gradients flowing from the geometry normals n (i.e. the normalized
+negative gradient of density) and rendering weights 𝑤along the ray
+to the predicted normals ˜n, and vice versa:
+Lpred = 𝜆𝑛L𝑝(𝑤, n, sg( ˜n)) + 𝜆˜𝑛L𝑝(sg(𝑤), sg(n), ˜n) ,
+(17)
+where L𝑝(𝑤, n, ˜n) =
+𝑁
+∑︁
+𝑖=1
+𝑤(𝑖)n(𝑖) −˜n(𝑖)2.
+(18)
+Where sg(·) is a stop-gradient operator, which prevents gradients
+from flowing to its input.
+In all of our experiments we use the asymmetric predicted normal
+loss with 𝜆𝑛= 10−3 and 𝜆˜𝑛= 0.3. This strongly ties the predicted
+normals to the ones corresponding to the NeRF’s density, while
+not oversmoothing geometry. This allows the predicted normals to
+resemble the geometry normals while being significantly smoother,
+which makes them useful for computing the reflection directions
+and creating accurate specular highlights.
+
+6
+•
+Verbin et al.
+PSNR↑
+SSIM↑
+LPIPS↓
+UniSDF
+33.38
+0.961
+0.042
+Zip-NeRF
+33.09
+0.960
+0.041
+Ref-NeRF*
+32.59
+0.957
+0.042
+Ours with single downweighted cone
+33.63
+0.964
+0.038
+Ours with single dilated cone
+33.72
+0.964
+0.038
+Ours without downweighting
+33.63
+0.964
+0.038
+Ours with 3D Jacobian
+33.65
+0.963
+0.039
+Ours without near-field reflections
+33.30
+0.962
+0.040
+Ours
+33.91
+0.965
+0.036
+Table 1. Average results across the three real scenes from Ref-NeRF [Verbin
+et al. 2022] and four new real scenes we captured ourselves. Metrics only
+report performance on shiny image regions. The “Ref-NeRF*” baseline is
+an improved version of Ref-NeRF that uses Zip-NeRF’s geometry model,
+sampling and optimization procedure, but with Ref-NeRF’s appearance
+model. See the supplement for many more quantitative results.
+5
+EXPERIMENTS AND RESULTS
+We evaluate our method on four datasets. First, we use the three
+real scenes from Ref-NeRF [Verbin et al. 2022] to demonstrate that
+our method decisively outperforms baselines for reconstructing
+and rendering highly reflective objects. Second, we use the nine
+scenes from mip-NeRF 360 [Barron et al. 2022] to show that our
+method’s performance is not limited to shiny scenes and that we are
+on par with state-of-the-art techniques for rendering novel views of
+large-scale mostly-diffuse scenes. Third, we use four newly-captured
+scenes to demonstrate specific effects and capabilities of our method,
+such as its ability to accurately capture near-field reflections. Finally,
+we show results on the synthetic Shiny Blender dataset from Ref-
+NeRF [Verbin et al. 2022].
+Throughout this section we provide quantitative and qualitative
+results showing the benefit of our methods and the effects of its com-
+ponents. However, image error metrics are frequently dominated
+by effects prevalent in real data, such as camera miscalibration, and
+illumination and appearance changes, and because the smooth mo-
+tion of the reflections is a key benefit of our method, we supplement
+our paper with an interactive project page containing many video
+results demonstrating these effects, and encourage the reader to
+view it.
+We implement our method in JAX [Bradbury et al. 2018]. Op-
+timization is done using 8 V100 GPUs, which takes our method
+approximately 100 minutes to optimize for a single scene, compared
+with 50 minutes for Zip-NeRF and 200 minutes for UniSDF. All of our
+experiments are performed using the same set of hyperparameters
+(see supplement).
+5.1
+Evaluation Details
+We evaluate all results using the three metrics commonly used for
+view synthesis: PSNR, SSIM [Wang et al. 2004], and LPIPS [Zhang
+et al. 2018]. In addition to these metrics, which are computed over
+entire images, we compute “masked” PSNR, SSIM, and LPIPS. These
+masked metrics are computed by compositing the shiny regions
+(in both the rendered and ground truth images) onto a white back-
+ground, and then computing the standard metrics. We compute the
+masked metrics for all of our newly-captured scenes as well as the
+three scenes from the Ref-NeRF real dataset. The masked metrics
+are used to highlight the benefit of our method by focusing on shiny
+regions of the captured scenes. See supplement for examples of
+these masks.
+5.2
+Baseline Comparisons
+We compare our method with prior work designed for photorealis-
+tic view synthesis for general scenes without significant reflective
+surfaces [Barron et al. 2023; Kerbl et al. 2023], as well as methods
+specially-designed for scenes with shiny objects [Liang et al. 2023;
+Verbin et al. 2022; Wang et al. 2023], as well as concurrent work such
+as NDE [Wu et al. 2024] and SpecNeRF [Ma et al. 2023]. All base-
+line experiments were done with the gracious help of the original
+authors, or otherwise using the official codebases.
+Table 1 shows a comparison of our results with prior work, using
+the masked metrics, showing that our method is indeed more ac-
+curate than prior work in regions featuring shiny surfaces. This is
+further exemplified qualitatively by our results in Figures 1, 4, 5, 6, 7,
+and 8. Our supplemental webpage also shows an interactive com-
+parison of our results with those obtained by prior work.
+Our supplemental tables also show per-scene breakdowns of
+the metrics in Table 1, as well as their unmasked counterparts,
+metrics on the standard mip-NeRF 360 dataset [Barron et al. 2022]
+featuring mostly-diffuse scenes, and the Shiny Blender dataset from
+Ref-NeRF [Verbin et al. 2022], on top of two additional shiny scenes
+from the standard Blender dataset [Mildenhall et al. 2020]).
+5.3
+Ablation Studies
+In this section we carefully ablate the key components of our method
+to justify our design decisions. Table 1, and Tables 2 and 3 in the
+supplement contain quantitative results for these ablation studies,
+and the supplemental webpage contains video comparisons for
+them.
+Tracing cones through the recovered scene synthesizes more accurate
+reflections. Figure 6 shows that replacing the cone tracing operation
+with simply gathering reflection features at infinity (which depends
+only on the reflection direction) still recovers far-field reflections,
+but cannot accurately reproduce near-field reflections.
+Asymmetric predicted normal loss, separate reflection features, and
+multiple cones are all crucial for recovering accurate geometry. Fig-
+ure 4(b,c) demonstrates the importance of our asymmetric normal
+loss (Equation 17). Using Ref-NeRF’s normal loss can oversmooth
+geometry when its weight is too high. It can also result in incorrect
+geometry when turned too low, since the predicted normals can
+greatly deviate from the ones corresponding to geometry, which lets
+them overfit to each image’s specular highlights without properly
+generalizing to unseen views.
+Figure 4(d) shows that using the same NGP components for both
+the reflected features ¯f and the appearance bottleneck vector b may
+also result in poorly-recovered geometry, due to the strong depen-
+dence of the reflection features on the surface normals. Additionally,
+in Figure 4(e) we show that using a single Zip-NeRF cone with radius
+¤𝑟′ = ¤𝑟+ ¯𝜌instead of our directional sampling can lead to inaccurate
+
+NeRF-Casting: Improved View-Dependent Appearance with Consistent Reflections
+•
+7
+(a) Single reflection ray
+(b) No downweighting
+(c) 3D Jacobian
+(d) Ours
+Ground truth
+Fig. 5. Ablation of our reflection anti-aliasing components. Using (a) a single reflection ray instead of five, (b) not downweighting reflection features, or (c)
+using Zip-NeRF’s 3D Jacobian instead of restricting it to the 2D directional Jacobian, all result in inaccurate reflections. Even for low-roughness objects such
+as the shiny spheres shown here, aliasing in the reflections during optimization prevents the model from accurately reconstructing both the reflective surface
+geometry as well as the reflected content.
+geometry. This is because the model is only supervised at cone radii
+corresponding to the pixel footprints ¤𝑟, and therefore evaluating
+it with dilated radii ¤𝑟′ may not correspond to the true underlying
+geometry, adversely affecting reconstruction.
+Anti-aliasing methods improve recovered geometry and reflections.
+Figure 5 visualizes the impact of our reflection anti-aliasing strate-
+gies on rendered specularities. Using only a single reflection ray,
+omitting the reflection feature downweighting, or using Zip-NeRF’s
+3D Jacobian instead of our 2D directional Jacobian for downweight-
+ing, all decrease the accuracy of rendered reflections. Intuitively,
+if reflections are aliased during optimization, the model is unable
+to recover accurate surface geometry or accurate geometry and
+features for the reflected content.
+5.4
+Discussion
+Our method quantitatively outperforms existing view synthesis
+techniques, particularly for shiny surfaces that display detailed
+specular reflections. However, we believe that the qualitative visual
+improvement substantially outweighs the quantitative improvement
+in image metrics and we strongly urge readers to view our supple-
+mentary videos. Most notably, the smooth and consistent motion of
+reflections synthesized by our method is strikingly more realistic
+than the view-dependent appearance rendered by baseline meth-
+ods. This suggests that standard image error metrics (PSNR, SSIM,
+etc.) are not adequate for evaluating the quality of view-dependent
+appearance.
+5.5
+Limitations
+While our method is successful in its goal of accurately reconstruct-
+ing and rendering reflective surfaces, it is not able to fully model
+certain effects. Because we only reflect from the expected termi-
+nation point of each camera ray, our method struggles to render
+semi-transparent surfaces. Additionally, the camera operator is fre-
+quently visible in reflective surfaces and our model does not consider
+this potential source of error.
+6
+CONCLUSION
+We have presented a method for rendering scenes containing highly
+specular objects, by using a neural radiance field. Our method relies
+on reflecting cones off of surfaces in the scene and tracing them
+through the NeRF, and on a novel set of techniques designed to anti-
+alias these reflections, and is able to synthesize accurate detailed
+reflections of both distant and near-field content that consistently
+and smoothly moves across surfaces. We demonstrate that our ap-
+proach quantitatively outperforms prior view synthesis models, and
+that it provides great qualitative improvement over prior work’s
+realism in rendering novel views.
+ACKNOWLEDGMENTS
+We wish to thank Georgios Kopanas, Christian Richardt, Li Ma,
+and Liwen Wu for helping with comparison results and figures. We
+would also like to thank Cassidy Curtis, Janne Kontkanen, Alek-
+sander Hołyński, Alex Trevithick, and Georgios Kopanas for ideas
+and comments on our work.
+REFERENCES
+Jonathan T. Barron, Ben Mildenhall, Matthew Tancik, Peter Hedman, Ricardo Martin-
+Brualla, and Pratul P. Srinivasan. 2021. Mip-NeRF: A Multiscale Representation for
+Anti-Aliasing Neural Radiance Fields. ICCV (2021).
+Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P. Srinivasan, and Peter Hedman.
+2022. Mip-NeRF 360: Unbounded Anti-Aliased Neural Radiance Fields. CVPR (2022).
+Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P. Srinivasan, and Peter Hedman.
+2023. Zip-NeRF: Anti-Aliased Grid-Based Neural Radiance Fields. ICCV (2023).
+Sai Bi, Zexiang Xu, Pratul P. Srinivasan, Ben Mildenhall, Kalyan Sunkavalli, Milos
+Hasan, Yannick Hold-Geoffroy, David Kriegman, and Ravi Ramamoorthi. 2020.
+Neural Reflectance Fields for Appearance Acquisition. arXiv (2020).
+James Bradbury, Roy Frostig, Peter Hawkins, Matthew James Johnson, Chris Leary,
+Dougal Maclaurin, George Necula, Adam Paszke, Jake VanderPlas, Skye Wanderman-
+Milne, and Qiao Zhang. 2018. JAX: composable transformations of Python+NumPy
+programs. http://github.com/google/jax.
+Anpei Chen, Zexiang Xu, Andreas Geiger, Jingyi Yu, and Hao Su. 2022. TensoRF:
+Tensorial Radiance Fields. ECCV (2022).
+Sara Fridovich-Keil, Alex Yu, Matthew Tancik, Qinhong Chen, Benjamin Recht, and
+Angjoo Kanazawa. 2022. Plenoxels: Radiance fields without neural networks. CVPR
+(2022).
+Haian Jin, Isabella Liu, Peijia Xu, Xiaoshuai Zhang, Songfang Han, Sai Bi, Xiaowei
+Zhou, Zexiang Xu, and Hao Su. 2023. TensoIR: Tensorial Inverse Rendering. CVPR
+(2023).
+Animesh Karnewar, Tobias Ritschel, Oliver Wang, and Niloy Mitra. 2022. ReLU Fields:
+The Little Non-linearity That Could. SIGGRAPH (2022).
+Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Drettakis. 2023.
+3D Gaussian Splatting for Real-Time Radiance Field Rendering. SIGGRAPH (2023).
+
+8
+•
+Verbin et al.
+Diederik P. Kingma and Jimmy Ba. 2015. Adam: A method for stochastic optimization.
+ICLR (2015).
+Gerhard Kurz, Igor Gilitschenski, and Uwe D Hanebeck. 2016. Unscented von Mises–
+Fisher Filtering. IEEE Signal Processing Letters (2016).
+Ruofan Liang, Huiting Chen, Chunlin Li, Fan Chen, Selvakumar Panneer, and Nandita
+Vijaykumar. 2023. ENVIDR: Implicit Differentiable Renderer with Neural Environ-
+ment Lighting. ICCV (2023).
+Li Ma, Vasu Agrawal, Haithem Turki, Changil Kim, Chen Gao, Pedro Sander, Michael
+Zollhöfer, and Christian Richardt. 2023. SpecNeRF: Gaussian Directional Encoding
+for Specular Reflections. arXiv 2312.13102 (2023).
+Alexander Mai, Dor Verbin, Falko Kuester, and Sara Fridovich-Keil. 2023. Neural
+microfacet fields for inverse rendering. ICCV (2023).
+Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik, Jonathan T. Barron, Ravi Ra-
+mamoorthi, and Ren Ng. 2020. NeRF: Representing Scenes as Neural Radiance Fields
+for View Synthesis. ECCV (2020).
+Thomas Müller, Alex Evans, Christoph Schied, and Alexander Keller. 2022. Instant
+Neural Graphics Primitives with a Multiresolution Hash Encoding. SIGGRAPH
+(2022).
+Keunhong Park, Utkarsh Sinha, Jonathan T. Barron, Sofien Bouaziz, Dan B. Goldman,
+Steven M. Seitz, and Ricardo Martin-Brualla. 2021. Nerfies: Deformable Neural
+Radiance Fields. ICCV (2021).
+Pratul P. Srinivasan, Boyang Deng, Xiuming Zhang, Matthew Tancik, Ben Mildenhall,
+and Jonathan T. Barron. 2021. NeRV: Neural reflectance and visibility fields for
+relighting and view synthesis. CVPR (2021).
+Cheng Sun, Min Sun, and Hwann-Tzong Chen. 2022. Direct Voxel Grid Optimization:
+Super-fast Convergence for Radiance Fields Reconstruction. CVPR (2022).
+Dor Verbin, Peter Hedman, Ben Mildenhall, Todd Zickler, Jonathan T. Barron, and
+Pratul P. Srinivasan. 2022. Ref-NeRF: Structured View-Dependent Appearance for
+Neural Radiance Fields. CVPR (2022).
+Fangjinhua Wang, Marie-Julie Rakotosaona, Michael Niemeyer, Richard Szeliski, Marc
+Pollefeys, and Federico Tombari. 2023.
+UniSDF: Unifying Neural Representa-
+tions for High-Fidelity 3D Reconstruction of Complex Scenes with Reflections.
+arXiv:2312.13285 (2023).
+Zhou Wang, Alan C. Bovik, Hamid R. Sheikh, and Eero P. Simoncelli. 2004. Image
+quality assessment: from error visibility to structural similarity. IEEE TIP (2004).
+Liwen Wu, Sai Bi, Zexiang Xu, Fujun Luan, Kai Zhang, Iliyan Georgiev, Kalyan
+Sunkavalli, and Ravi Ramamoorthi. 2024. Neural Directional Encoding for Effi-
+cient and Accurate View-Dependent Appearance Modeling. CVPR (2024).
+Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shechtman, and Oliver Wang. 2018.
+The Unreasonable Effectiveness of Deep Features as a Perceptual Metric. CVPR
+(2018).
+Yiyu Zhuang, Qi Zhang, Xuan Wang, Hao Zhu, Ying Feng, Xiaoyu Li, Ying Shan, and
+Xun Cao. 2024. NeAI: A Pre-convoluted Representation for Plug-and-Play Neural
+Ambient Illumination. AAAI (2024).
+
+NeRF-Casting: Improved View-Dependent Appearance with Consistent Reflections
+•
+9
+(a) UniSDF
+(b) Ours without traced cones
+(c) Ours
+Ground truth
+Fig. 6. Two examples showing that (a) tracing cones and intersecting them with the geometry of the NeRF allows our model to recover and render near-field
+reflections such as the statue head and cone reflected in the balls, and the cord and artwork reflected in the toaster. This is in contrast to (b) our model
+with the feature grid only queried infinitely-far away, or (c) UniSDF, both of which only use the reflection direction. Note that both our model in (a) and our
+ablated model in (b) are capable of rendering accurate far-field reflections, while UniSDF renders blurry reflections even for far-field content.
+(a) Zip-NeRF
+(b) UniSDF
+(c) SpecNeRF
+(d) NDE
+(e) Ours
+Ground truth
+Fig. 7. By reflecting rays into the geometry of the model, our method (e) is able to render specular reflections that are more accurate than those rendered
+by existing techniques (a-d), which tend to be limited by the capacity of their representation of view-dependent appearance. Notice the high-frequency
+reflections rendered by our model, including sharp details in the tree branches and building reflected in the sphere on the right of the image.

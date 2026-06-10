@@ -1,0 +1,1441 @@
+Published as a conference paper at ICLR 2025
+HYPER-CONNECTIONS
+Defa Zhu, Hongzhi Huang, Zihao Huang, Yutao Zeng, Yunyao Mao, Banggu Wu,
+Qiyang Min, Xun Zhou
+Seed-Foundation-Model Team, ByteDance
+{zhudefa,huanghongzhi.51,huangzihao.notabot,yutao.zeng,
+maoyunyao.myy,wubanggu,minqiyang,zhouxun}@bytedance.com
+ABSTRACT
+We present hyper-connections, a simple yet effective method that can serve as an
+alternative to residual connections. This approach specifically addresses common
+drawbacks observed in residual connection variants, such as the seesaw effect
+between gradient vanishing and representation collapse. Theoretically, hyper-
+connections allow the network to adjust the strength of connections between fea-
+tures at different depths and dynamically rearrange layers. We conduct experiments
+focusing on the pre-training of large language models, including dense and sparse
+models, where hyper-connections show significant performance improvements
+over residual connections. Additional experiments conducted on vision tasks also
+demonstrate similar improvements. We anticipate that this method will be broadly
+applicable and beneficial across a wide range of AI problems.
+1
+INTRODUCTION
+100
+200
+300
+400
+500
+Tokens (Billions)
+2.275
+2.300
+2.325
+2.350
+2.375
+2.400
+Loss
+x1.8 0.027
+Training Loss
+OLMoE-1B-7B
+OLMoE-1B-7B-DHCx4
+100
+200
+300
+400
+500
+Tokens (Billions)
+2.65
+2.70
+2.75
+2.80
+2.85
+Loss
+x1.8 0.028
+C4 en val. loss
+OLMoE-1B-7B
+OLMoE-1B-7B-DHCx4
+100
+200
+300
+400
+500
+Tokens (Billions)
+57.5
+60.0
+62.5
+65.0
+67.5
+70.0
+Accuracy (%)
+HellaSwag Acc.
+OLMoE-1B-7B
+OLMoE-1B-7B-DHCx4
+100
+200
+300
+400
+500
+Tokens (Billions)
+32.5
+35.0
+37.5
+40.0
+42.5
+45.0
+47.5
+Accuracy (%)
+ARC Challenge Acc.
+OLMoE-1B-7B
+OLMoE-1B-7B-DHCx4
+Figure 1: The performance of the baseline model OLMoE-1B-7B and the model with hyper-
+connections, OLMoE-1B-7B-DHC×4. (1) and (2) show the training loss (0.99 EMA smoothed)
+and the C4-en validation loss, respectively. Our method converges 1.8 times faster compared to the
+baseline and maintains a significant advantage at the 500B tokens. (3) and (4) show the accuracy
+curves on HellaSwag and ARC-Challenge, demonstrating the superior performance of the
+OLMoE-1B-7B-DHC×4 model.
+Deep learning has achieved tremendous success across various domains, where residual connections
+(He et al., 2016) have been instrumental in contemporary neural network architectures, including
+transformers and CNNs. Residual connections help mitigate the problem of gradient vanishing,
+enabling the effective training of very deep networks. However, it is important to acknowledge that
+residual connections are not infallible solutions and still present limitations that remain unresolved.
+The two main variants of residual connections, Pre-Norm and Post-Norm, each make distinct
+trade-offs between gradient vanishing and representation collapse. Pre-Norm applies normalization
+operations to the input before each residual block, effectively addressing the problem of gradient
+vanishing (Bengio et al., 1994; Glorot & Bengio, 2010). However, it can also lead to the issue of
+collapse in deep representations (Liu et al., 2020), where hidden features in deeper layers become
+highly similar, diminishing the contribution of additional layers as their number increases. In contrast,
+Post-Norm applies normalization after the output of each residual block, reducing the influence of a
+hidden state on subsequent layers. This approach can alleviate the issue of representation collapse but
+1
+arXiv:2409.19606v3  [cs.LG]  18 Mar 2025
+
+Published as a conference paper at ICLR 2025
+layer
++
++
+(c) Depth-connections
+(b) Hyper-connections
+𝛽!
+𝛼!,!
+𝛼#,#
+𝛽#
+h#
+h!
+layer
++
+(d) Width-connections
+𝛼#,$
+𝛼!,!
+𝛼#,#
+𝛼#,!
+𝛼!,#
+𝛼!,$
+h#
+h!
+layer
++
+𝛼#,$
+𝛼!,!
+𝛼#,#
+𝛼#,!
+𝛼!,#
+𝛼!,$
+h#
+h!
++
++
+𝛽!
+𝛽#
+: scalar, weights of hyper-connections
+: hidden vectors
+layer
+: attention or FFN
++
++
+ℎ
++
+layer
+(a) Residual connections
+Figure 2: Hyper-connections (HC) with an expansion rate of n = 2. (a) Residual connections.
+(b) Hyper-connections: β1, β2, α0,0, α0,1, α1,0, α1,1, α2,1, and α2,2 are learnable scalars or scalars
+predicted by the network , depending on the specific HC version. These connections enable lateral
+information exchange and vertical integration of features across depths. The Transformer with HC
+is shown in Fig. 17. They can be decoupled into depth-connections and width-connections. (c)
+Depth-connections perform a weighted sum between the layer output and the hidden vector h1. (d)
+Width-connections allow information exchange between the hidden vectors h1 and h2.
+also reintroduces the problem of vanishing gradients. The vanishing gradient and the representation
+collapse are like two ends of a seesaw, with these two variants making respective trade-offs between
+these issues. The key issue is that residual connections, including both Pre-Norm and Post-Norm
+variants, predefine the strength of connections between the output and input within a layer.
+0
+5
+10
+15
+20
+25
+30
+ 
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+ 
+Pre-Norm
+Hyper-Connection
+cos(hi
+0, hi+1
+0
+)
+Layer Index i
+Figure 3:
+Cosine similarity be-
+tween the input of the current
+and the previous layers for the
+OLMo-1B
+models
+(Groeneveld
+et al., 2024). The curve represents
+the median of similarity, while the
+shaded area indicates the range be-
+tween the 5th and 95th percentiles.
+The red curve shows the model
+with Pre-Norm, and the blue curve
+shows that with hyper-connections.
+Driven by the limitations of residual connections, an important
+question arises: Can neural networks autonomously learn the
+optimal strength of connections to improve performance? To
+address this, we propose hyper-connections (HC), which lead to
+significantly improved performance with a negligible increase
+in computation and parameters. We will show that both Post-
+Norm and Pre-Norm variants can be expressed as specific non-
+trainable forms of hyper-connections, as discussed in § 3.1.
+The core idea of hyper-connections (HC) is to propose learnable
+depth-connections and width-connections, as depicted in Fig.2
+(b). These connections flexibly integrate features vertically
+across depths, compared to the residual connections shown in
+Fig.2 (a). Depth-connections can be considered as a general-
+ized residual connections, assigning weights to the connections
+between the inputs and outputs of each layer. To enable the
+network to model different depth-connections simultaneously,
+we expand the network’s input into n copies, each having its
+own depth connection, as shown in Fig. 2 (b). This design
+allows multiple hidden vectors to reserve multiple patterns con-
+necting preceding layers, as shown in § 4.5. Moreover, we
+establish width connections between the n hidden vectors, al-
+lowing information exchange between hidden vectors within
+the same layer, as shown in Fig. 2 (b). We argue that n (> 1)
+hidden states are necessary. As analyzed in Appendix F, the
+seesaw effect persists when n = 1, and experiments show that it
+does not improve performance, as shown in Fig. 5. In contrast,
+when n > 1, hyper-connections can not only learn to adjust the
+strength of residuals but also rearrange layers, either sequentially or in parallel, as discussed in § 3.2.
+To further enhance flexibility, we introduce dynamic hyper-connections (DHC), enabling the network
+to adjust connection weights according to the input. Notably, although HC seem to increase the
+network’s width by n times, the additional parameters and computational cost are almost negligible,
+as analyzed in Appendix B. The Transformer with HC is shown in Fig. 17.
+Our research, primarily centered on large language models (LLMs) pre-training, also extends to visual
+generation and classification tasks. Using Pre-Norm as a baseline, we demonstrate the significant
+benefits of hyper-connections, including 1B and 7B dense models as well as 7B MoE models, as
+2
+
+Published as a conference paper at ICLR 2025
+detailed in § 4. The benefits are particularly prominent for OLMoE (Muennighoff et al., 2024) as
+presented in Fig.1. The model utilizing DHC converges 1.8 times faster and shows an improvement
+of 6 points on ARC-Challenge compared to the baseline trained with 500 B tokens. According to our
+visualization analysis, as shown in Fig.3, the baseline model tends toward representation collapse,
+characterized by high similarity between features of adjacent layers. In contrast, models with HC
+exhibit significantly lower similarity between features across adjacent layers and a wider range of
+similarities. This suggests that HC enhance the impact of each layer. Further discussion is provided
+in §4.5 and in Appendix F. These compelling pieces of evidence demonstrate the generality of the
+hyper-connections principle, and we anticipate their applicability in numerous other AI challenges.
+2
+METHOD
+2.1
+STATIC HYPER-CONNECTIONS
+Consider the hidden vector hk−1 ∈Rd (or hk−1 ∈Rd×1) as the input to the k-th layer, with
+the initial input h0 to the network. Initially, h0 ∈Rd is replicated n times to form the initial
+hyper hidden matrix H0 =
+ h0
+h0
+. . .
+h0⊺∈Rn×d. Here, n is the expansion rate. For
+the k-th layer, the input consists of the hyper hidden matrix from the previous layer Hk−1 =
+ hk−1
+1
+hk−1
+2
+. . .
+hk−1
+n
+⊺∈Rn×d. Finally, we sum the last hyper hidden matrix row-wise to
+obtain the required hidden vector, which is then passed through a final projector to produce the
+final output of the network (i.e., a normalization layer and an unembedding layer in transformers).
+To simplify the notation in subsequent analysis, we omit the layer index and simply denote the
+hyper-hidden matrix as H = (h1
+h2
+. . .
+hn)⊺.
+The hyper-connections (HC) can be represented by a matrix HC, where each element defines the
+connection weight. The matrix is structured as follows:
+HC =
+
+01×1
+B
+Am
+Ar
+
+=
+
+
+
+
+
+
+0
+β1
+β2
+· · ·
+βn
+α1,0
+α1,1
+α1,2
+· · ·
+α1,n
+α2,0
+α2,1
+α2,2
+· · ·
+α2,n
+...
+...
+...
+...
+...
+αn,0
+αn,1
+αn,2
+· · ·
+αn,n
+
+
+
+
+
+
+∈R(n+1)×(n+1).
+(1)
+Consider a network layer T , it integrates self-attention layers and feed-forward networks within
+transformers. The output of the HC, denoted by ˆH, can be simply formulated as follows:
+ˆH = HC(T , H) = B⊺T (H⊺Am)⊺+ Ar
+⊺H.
+(2)
+We use Am as weights to perform a weighted sum on the input H = (h1
+h2
+. . .
+hn)⊺to obtain
+the input h0 of the current layer T , which is given by:
+h⊺
+0 = Am
+⊺H,
+(3)
+While Ar is used to connect H and map it to a hyper hidden matrix H′, as shown below:
+H′ = Ar
+⊺H.
+(4)
+Subsequently, the output is given by:
+ˆH = B⊺(T h0)⊺+ H′.
+(5)
+The depth-connections can be decoupled as the following matrix, which is shown at Fig 2 (a):
+DC =
+
+B
+diag(Ar)
+
+=
+
+β1
+β2
+· · ·
+βn
+α1,1
+α2,2
+· · ·
+αn,n
+
+∈R2×n,
+(6)
+where the first row B represents the weights of the output of the current layer T , and the last row
+diag(Ar) represents the weights of the input. We use diag(Ar) to represent the flatten vector of the
+diagonal entries of Ar.
+3
+
+Published as a conference paper at ICLR 2025
+The width-connections matrix can be defined as follows, which is shown at Fig 2 (b):
+WC = (Am
+Ar) ∈Rn×(n+1).
+(7)
+The algorithm that employs hyper-connections is presented in Algorithm 1.
+2.2
+DYNAMIC HYPER-CONNECTIONS
+The entries of HC can dynamically depend on the input H, which the matrix representation of
+dynamic hyper-connections (DHC) is defined as follows:
+HC(H) =
+
+01×1
+B(H)
+Am(H)
+Ar(H)
+
+(8)
+Similarly, given a layer T and input H, we obtain the output of the DHC as follows:
+ˆH = HC(H)(T , H).
+(9)
+In practice, we combine the dynamic and static matrices to achieve DHC. The dynamic parameters are
+obtained through a linear transformation. To stabilize the training process, we introduce normalization
+before the linear transformation and apply the tanh activation function after it, scaling it by a small
+initial learnable factor. The following equations detail how these dynamic parameters are computed:
+H = norm(H)
+(10)
+B(H) = sβ ◦tanh(HWβ)⊺+ B ∈R1×n
+(11)
+Am(H) = sα ◦tanh(HWm) + Am ∈Rn×1
+(12)
+Ar(H) = sα ◦tanh(HWr) + Ar ∈Rn×n
+(13)
+Our experiments in § 4 demonstrate that dynamic hyper-connections outperform static hyper-
+connections in language modeling tasks. The PyTorch implementations for both the static and
+dynamic variants of hyper-connections are detailed in Algorithm 2 and 3.
+2.3
+INITIALIZATION
+In order to make the initialization of the hyper-connections equivalent to the Pre-Norm residual
+connections, we adopt the following initialization strategy. The dynamic parameters Wβ, Wm, and
+Wr in Eqs. 11, 12, and 13 are initialized to 0, while the static matrices are initialized as follows:
+01×1
+Bk
+Am
+k
+Ar
+k
+
+=
+
+01×1
+11×n
+ek mod n
+en×n
+
+,
+(14)
+where k is the index of the layer. mod denotes the modulo operation.
+3
+WHY HYPER-CONNECTIONS
+In this section, we elucidate the rationale behind hyper-connections. We explore how variants of
+residual connections, namely Pre-Norm and Post-Norm, can be viewed as non-trainable hyper-
+connections, and introduce the concept of sequential-parallel duality, demonstrating how hyper-
+connections can dynamically optimize layer arrangements to enhance network performance. A
+visulize analysis of hyper-connections through an unfolded view is discussed in § 4.5.
+3.1
+RESIDUAL CONNECTIONS AS NON-TRAINABLE HYPER-CONNECTIONS
+The Pre-Norm and Post-Norm residual connections can be represented as the following hyper-
+connections matrices with an expansion rate n = 1:
+4
+
+Published as a conference paper at ICLR 2025
+HCP reNorm =
+
+0
+1
+1
+1
+
+,
+(15)
+HCP ostNorm =
+
+
+0
+1
+√
+σ2
+i +σ2o+2σio
+1
+1
+√
+σ2
+i +σ2o+2σio
+
+,
+(16)
+where σi and σo denote the standard deviations of the input and output of the neural network layer,
+respectively, and σio is the covariance between them.
+For Pre-Norm, its hyper-connection matrix is a 2 × 2 matrix where the bottom right triangular part
+is filled with 1 and the rest is a placeholder 0. For Post-Norm, the weights depend on the variances
+and covariance of the input and output, forming a 2 × 2 matrix. Therefore, their hyper-connection
+matrices are non-trainable. In this work, we propose hyper-connections that can be (n + 1) × (n + 1)
+matrices, with weights that are trainable or even predicted based on the input. The complete derivation
+is provided in Appendix G.
+3.2
+SEQUENTIAL-PARALLEL DUALITY
+Given a series of neural network modules, we have the option to arrange them either sequentially or
+in parallel. However, hyper-connections offer an approach that learns to rearrange these layers in a
+configuration blending both sequential and parallel arrangements.
+layer 1
++
++
+(a) Sequential Arrangement 
+=
+layer 1
++
+(b) Parallel Arrangement 
+=
++
+layer 2
++
+=
+layer 2
++
++
+=
++
+Figure 4: Sequential and parallel arrangements of hyper-connections with n = 2.
+Without loss of generality, we set the expansion rate to n = 2. If the hyper-connections are learned as
+the following matrix, the neural network will be arranged sequentially:
+HC =
+ 0
+1
+1
+1
+1
+0
+0
+0
+1
+!
+.
+(17)
+In this case, the depth connection degenerates into a residual connection, as shown in Fig. 4 (a).
+When the hyper-connections for odd and even layers (with layer numbering starting from 1) are de-
+fined by the following matrices, the neural network will be arranged in parallel every two consecutive
+layers, similar to the arrangement of parallel transformer blocks in transformers (Wang, 2021), as
+shown in Fig. 4 (b). The general and complete derivation is provided in Appendix H.
+HCodd =
+ 0
+1
+0
+1
+1
+1
+1
+1
+1
+!
+,
+(18)
+HCeven =
+ 0
+0
+1
+0
+1
+0
+1
+0
+1
+!
+.
+(19)
+Thus, learning the hyper-connection matrix in various forms can create layer arrangements that
+surpass traditional sequential and parallel configurations, resulting in a soft-mixture or even dynamic
+5
+
+Published as a conference paper at ICLR 2025
+arrangement. For static hyper-connections, the layer arrangement within the network remains fixed
+after training. In contrast, dynamic hyper-connections allow the arrangement to adapt dynamically
+for each token.
+4
+RESULTS
+100
+150
+200
+250
+300
+350
+400
+450
+500
+Tokens (Billions)
+2.40
+2.45
+2.50
+2.55
+2.60
+Training Loss
+Training Loss vs Tokens
+OLMo-1B-baseline
+OLMo-1B-DHCx1
+OLMo-1B-DHCx2
+OLMo-1B-DHCx4
+OLMo-1B-DHCx8
+100
+150
+200
+250
+300
+350
+400
+450
+500
+Tokens (Billions)
+2.40
+2.45
+2.50
+2.55
+2.60
+Training Loss
+Training Loss vs Tokens
+OLMo-1B-baseline
+OLMo-1B-DHCx1 W/O tanh
+OLMo-1B-DHCx2  W/O tanh
+OLMo-1B-DHCx4  W/O tanh
+OLMo-1B-DHCx8  W/O tanh
+Figure 5: Comparison of training loss curves for different expansion rate. The left subfigure includes
+models with dynamic hyper-connections (DHC) at various expansion rates, while the right subfigure
+shows the effect of omitting the tanh function. Both subfigures illustrate how increasing the expansion
+rate leads to improved training loss performance over 500B tokens. Results are smoothed using an
+exponential moving average with a coefficient of 0.99.
+Table 1: Ablation study on expansion rates n with training on 500 B tokens.
+Methods
+V2 Eval
+Loss ↓
+V2 Eval
+PPL ↓
+V3 Eval
+Loss ↓
+V3 Eval
+PPL ↓
+Down Stream
+Avg, Acc. ↑
+OLMo-1B
+2.811
+18.023
+2.544
+14.229
+62.5
+OLMo-1B-DHC×1 W/O tanh
+2.822
+18.270
+2.556
+14.428
+62.3
+OLMo-1B-DHC×2 W/O tanh
+2.792
+17.663
+2.537
+14.033
+63.8
+OLMo-1B-DHC×4 W/O tanh
+2.779
+17.451
+2.516
+13.844
+64.4
+OLMo-1B-DHC×8 W/O tanh
+2.777
+17.425
+2.514
+13.819
+63.8
+OLMo-1B-DHC×1
+2.819
+18.125
+2.556
+14.418
+62.3
+OLMo-1B-DHC×2
+2.802
+17.950
+2.534
+14.114
+63.0
+OLMo-1B-DHC×4
+2.781
+17.509
+2.514
+13.826
+63.8
+OLMo-1B-DHC×8
+2.778
+17.445
+2.516
+13.843
+62.8
+We primarily conduct experiments on pre-training of large language model, including dense and
+Mixture-of-Experts (MoE) (Shazeer et al., 2017) models, and extend to visual generation and
+classification tasks. Due to space constraints, we include the vision experiments in the Appendix E.
+Experiment Settings. We employ the experimental setup outlined by OLMo (Groeneveld et al.,
+2024) for dense models and by OLMoE (Muennighoff et al., 2024) for MoE models. For dense
+models, we use dolmap-v1.5-sample (Soldaini et al., 2024) as our training dataset. We conduct
+ablation studies on 1B models and assess the effectiveness of our method at the 7B model scale. For
+MoE models, we train the OLMoE-1B-7B model, both with and without hyper-connections, on the
+OLMOE-MIX dataset. These models activate 1.3B out of a total of 7B parameters. All experiments
+are trained on 500B tokens.
+Implementation. We maintain the training configuration of the baseline model, replacing the residual
+connections with hyper-connections. The static component in Eqs. 1, 11, 12, 13 does not utilize weight
+decay, whereas the dynamic component does. Since the hyper hidden vectors of the final transformer
+block are ultimately summed, we ensure that the standard deviation (std) of the output (before the
+final layernorm and unembedding layers) remains consistent with the original. At initialization, we
+scale the std of the weights of the output module at all layers, including those of the second linear
+layer of the feedforward network and the output projector of the attention module, by a factor of √n,
+6
+
+Published as a conference paper at ICLR 2025
+where n represents the expansion rate. The parameters and computational overhead introduced by
+hyper-connections is negligible, see Table. 7 and 8.
+Metrics. In accordance with the methodology of OLMo (Groeneveld et al., 2024), we report
+the average perplexities (PPL) and losses on both the V2 and V3 validation sets, along with the
+average metrics for zero-shot evaluation on downstream benchmarks (refer to Table 13). We observe
+significant volatility in the zero-shot performance indicators for the datasets (highlighted in grey
+in Table 13), with fluctuations exceeding 20% across neighboring checkpoints. For more reliable
+and consistent results, we excludes these volatile datasets from our analysis. For the MoE models,
+in line with OLMoE, we also present losses on V3 validation sets, and accuracies on downstream
+benchmarks (refer to Table 14).
+4.1
+ABLATION STUDY
+We use the dynamic hyperconnections with an expansion rate of n = 4 and include the tanh function
+as the default method, marked with the suffix -DHC, while -SHC denotes static hyper-connections.
+The evaluation results are presented in Table 1, and the training loss curves are depicted in Fig. 5. We
+observe that with an expansion rate of n = 1, the performance of DHC is inferior to the baseline.
+However, for n > 1, DHC significantly outperforms the baseline, achieving superior results at n = 4,
+with the increase to n = 8 providing minimal additional benefits. Notably, OLMo-1B-DHC×8 W/O
+tanh excels on both V2 and V3 validation sets, with a reduction in V2 Eval Loss by 0.034 and
+V3 Eval Loss by 0.029 compared to the baseline. Furthermore, the decline rate of training losses
+for DHC (n ≥2) is steeper than that of the baseline, and DHC demonstrates greater stability, with no
+spikes observed in any DHC experiments.
+Static and dynamic hyper-connections. Table 2 presents an ablation study comparing SHC and
+DHC. All hyper-connection (HC) variants significantly outperform the baseline. At an expansion
+rate of 2, the improvements of DHC and SHC are similar. However, at an expansion rate of 4, DHC
+performs notably better than SHC.
+Table 2: Ablation study on static and dynamic hyper-connections with training on 500 B tokens.
+Methods
+V2 Eval
+Loss ↓
+V2 Eval
+PPL ↓
+V3 Eval
+Loss ↓
+V3 Eval
+PPL ↓
+Down Stream
+Avg, Acc. ↑
+OLMo-1B
+2.811
+18.023
+2.544
+14.229
+62.5
+OLMo-1B-SHC×2
+2.799
+17.778
+2.538
+14.152
+63.4
+OLMo-1B-DHC×2
+2.802
+17.950
+2.534
+14.114
+63.0
+OLMo-1B-DHC×2 W/O tanh
+2.792
+17.663
+2.529
+14.033
+63.8
+OLMo-1B-SHC×4
+2.791
+17.671
+2.528
+14.025
+63.6
+OLMo-1B-DHC×4
+2.781
+17.509
+2.515
+13.826
+63.8
+OLMo-1B-DHC×4 W/O tanh
+2.779
+17.451
+2.516
+13.844
+64.4
+The importance of B and WC. As shown in Table 3, not training WC leads to significant per-
+formance declines, with the V2 loss increasing by 0.021 and the V3 loss by 0.017, as seen when
+comparing the 4th and 6th lines of Table 3. In contrast, the impact is less pronounced when B is not
+trained. Therefore, ensuring the trainability of both WC and B is crucial.
+4.2
+COMPARISON WITH RELATED WORKS
+We implemented the Altup (Baykal et al., 2024) and ResiDual (Xie et al., 2023) methods in OLMo.
+Altup is motivated to widen the hidden dimension while maintaining low computation cost by passing
+only a part of hidden state to transformer blocks. By contrast, ResiDual is proposed to combine both
+Pre- and Post-Norm in a two-stream style. Both methods expand the hidden size by n times with
+negligible computational overhead, with ResiDual expanding it exactly 2 times. For a fair comparison,
+we set n = 2 in our experiments. Unfortunately, although these methods show gains in the early
+stages of training, they are gradually surpassed by the baseline, as demonstrated by the results in
+Table 4 and the training loss curves in Fig. 15.
+7
+
+Published as a conference paper at ICLR 2025
+Table 3: Ablation study on OLMo-1B-DHC×4. In the B or WC column, the symbol "✗" denotes
+parameters that are not trainable from initialization.
+WC
+B
+Tanh
+V2 Eval
+Loss ↓
+V2 Eval
+PPL ↓
+V3 Eval
+Loss ↓
+V3 Eval
+PPL ↓
+Down Stream
+Avg, Acc. ↑
+✗
+✓
+✗
+2.804
+17.912
+2.537
+14.145
+62.5
+✓
+✗
+✗
+2.781
+17.493
+2.518
+13.874
+63.6
+✓
+✓
+✗
+2.779
+17.773
+2.516
+13.823
+64.4
+✗
+✓
+✓
+2.802
+17.914
+2.532
+14.072
+63.4
+✓
+✗
+✓
+2.783
+17.504
+2.520
+13.906
+63.4
+✓
+✓
+✓
+2.781
+17.835
+2.515
+13.807
+63.8
+Table 4: Performance of related methods on OLMo-1B models.
+Methods
+V2 Eval
+Loss ↓
+V2 Eval
+PPL ↓
+V3 Eval
+Loss ↓
+V3 Eval
+PPL ↓
+Down Stream
+Avg, Acc. ↑
+OLMo-1B
+2.811
+18.023
+2.544
+14.229
+62.5
+OLMo-1B-ResiDual
+2.825
+18.375
+2.551
+14.346
+62.0
+OLMo-1B-Altup×2
+2.827
+18.268
+2.558
+14.454
+62.4
+OLMo-1B-DHC×2
+2.802
+17.950
+2.534
+14.114
+63.0
+OLMo-1B-DHC×2 W/O tanh
+2.792
+17.663
+2.529
+14.033
+63.8
+4.3
+7B MODELS
+100
+200
+300
+400
+500
+Tokens (Billions)
+2.2
+2.3
+2.4
+Loss
+Training Loss
+OLMo-7B
+OLMo-7B-DHCx4
+100
+200
+300
+400
+500
+Tokens (Billions)
+2.5
+2.6
+2.7
+Loss
+C4-en Loss
+OLMo-7B
+OLMo-7B-DHCx4
+100
+200
+300
+400
+500
+Tokens (Billions)
+55
+60
+65
+70
+Accuracy (%)
+HellaSwag Acc.
+OLMo-7B
+OLMo-7B-DHCx4
+100
+200
+300
+400
+500
+Tokens (Billions)
+82
+84
+86
+88
+90
+92
+Accuracy (%)
+SciQ Acc.
+OLMo-7B
+OLMo-7B-DHCx4
+Figure 6: (1) and (2) Training loss (0.99 EMA smoothed) and C4-en validation loss for OLMo-7B and
+OLMo-7B-DHC×4 models. (3) and (4) Accuracy curves on hellaswag and sciq, demonstrating
+the superior performance of the OLMo-7B-DHC×4 model.
+We evaluate the effectiveness of hyper-connections on the 7B model, training a model with DHCs with
+an expansion rate of 4, denoted as OLMo-7B-DHC×4. According to Table 5, OLMo-7B-DHC×4
+significantly outperforms the baseline OLMo-7B model in all average metrics. In the V2 evaluation,
+OLMo-7B-DHC×4 shows improvements of 0.022 for loss and 0.293 for PPL. Furthermore, the
+average score of downstream benchmarks 0.710 surpasses the baseline 0.701, with the results of
+specific tasks shown in Fig. 10.
+Based on Fig 6, the OLMo-7B-DHC×4 model consistently shows better metrics compared to baseline,
+including training and validation loss and accuracy in downstream benchmarks. Notably, after 400 B
+tokens, the model maintains its improvement without the gains diminishing. This indicates that the
+OLMo-7B-DHC×4 model continues to provide consistent benefits in reducing loss, even at higher
+token counts. Furthermore, according to Fig. 6, the baseline model exhibits frequent spikes, while
+our model with DHCs shows no spikes throughout the training. This shows that our approach not
+only achieves better loss but also ensures more stable training.
+4.4
+MOE MODELS
+We evaluate the effectiveness of hyper-connections on the Mixture-of-Experts (MoE) model. We
+retrain the original OLMoE-1B-7B model as the baseline and train a model that applies Dynamic
+8
+
+Published as a conference paper at ICLR 2025
+Table 5: Performance of 7B models. FLOPs refers to the computation per token in the forward pass.
+Methods
+Params
+(B)
+FLOPs
+(G)
+V2
+Loss ↓
+V2
+PPL ↓
+V3
+Loss ↓
+V3
+PPL ↓
+Tasks Avg.
+Acc. ↑
+OLMo-7B
+6.9
+13.36
+2.581
+14.316
+2.322
+11.324
+70.1
+OLMo-7B-DHC×4
+6.9
+13.38
+2.559
+14.023
+2.304
+11.120
+71.0
+Hyper-Connections (DHC) with n = 4, replacing the residual connections. The full results are shown
+in Fig. 9, which illustrates that hyper-connections outperform residual connections in almost all
+metrics. In many metrics, our method requires only half of the training tokens to achieve the same
+performance as the baseline. Fig. 1 and Table 6 highlight some of the results, such as a reduction
+in training loss of approximately 0.027, a reduction in loss on the C4-en validation set of 0.028, an
+improvement of 6 points on the ARC-Challengeand an improvement of 1.2 points on MMLU Var.
+Table 6: Downstream evaluations for MoE models training with 500B tokens under the OLMoE
+evaluation setting. ARC-C stands for ARC-Challenge, and ARC-E for ARC-Easy. MMLU Var is
+a modified version of MMLU that includes varying few-shot examples, providing stable feedback
+during early training, as outlined in the OLMoE setting (Muennighoff et al., 2024).
+Methods
+MMLU
+Var
+Hella-
+Swag
+ARC-C
+ARC-E
+PIQA
+Wino-
+Grande
+BoolQ
+OLMoE-1B-7B
+38.5
+69.5
+41.8
+72.8
+77.6
+64.4
+65.4
+OLMoE-1B-7B-DHC×4
+39.7
+70.2
+47.8
+76.7
+78.2
+64.6
+68.5
+4.5
+VISUALIZATION ANALYSIS
+0
+4
+8 12 16 20 24 28 32
+Hyper-Connection
+0
+4
+8
+12
+16
+20
+24
+28
+32
+0
+4
+8 12 16 20 24 28 32
+Post-Norm
+0
+4
+8
+12
+16
+20
+24
+28
+32
+0
+4
+8 12 16 20 24 28 32
+Pre-Norm
+0
+4
+8
+12
+16
+20
+24
+28
+32
+0
+4
+8 12 16 20 24 28 32
+Pre-Norm PTB
+0
+4
+8
+12
+16
+20
+24
+28
+32
+0
+4
+8 12 16 20 24 28 32
+Two-hop Residual
+0
+4
+8
+12
+16
+20
+24
+28
+32
+1.0
+0.5
+0.0
+0.5
+1.0
+←- PTB
+Figure 7: Visualization of connection matrices for hyper-connections and various related baseline
+methods. The attention layers, which have odd ids, are marked with green tick marks.
+In this section, we investigate the learned hyper-connection weights and show how the output of
+the former layer contributes to the latter ones. To this end, we convert hyper-connections to dense
+connections cross layers. Consider the input hidden vectors hk
+0 in k-th layer, it can be unfolded as a
+weighted summation over previous layer outputs:
+hk
+0 =
+k−1
+X
+j=0
+c(0)
+kj T j(hj
+0),
+(20)
+where c(0)
+kj describes how much layer-j (T j) contributes to layer-k’s input hk
+0. Then, C(0) denotes
+a dense connection weight matrix. In particular, let layer-0 be the word embedding and T 0 be an
+identity mapping, layer-L+1 be the hidden state before the unembedding layer, which is a summation
+over the last hidden vectors, i.e., hL+1
+0
+= P
+j hL
+j .
+OLMo-1B-DHC×4 model is adopted for visualization. We take the checkpoint at 500B tokens and
+forward random validation text to obtain dynamic hyper-connection weights. In addition, we show
+connection patterns for some related baseline methods. Finally, the visualization is illustrated in
+Fig. 13. We present the following findings, with more detailed discussions provided in Appendix F.
+9
+
+Published as a conference paper at ICLR 2025
+Connection patterns for baseline methods. For Pre-Norm baseline, the connection matrix is simply
+a lower triangular matrix with diagonal elements erased, because each transformer layer joins the
+residual equally. In the Pre-Norm parallel transformer block (PTB) baseline, the connection matrix
+appears jagged because the input to the FFN layer does not depend on the output of the previous
+attention layer. For Post-Norm baseline, the connection only holds for adjacent layers, as the weight
+for bottom layers decays every time the residual passes a post-norm layer. For the two-hop residual
+baseline (Ma et al., 2024), the outputs of attention layers are not added to residual and only contributes
+to the next one FFN layer, resulting in a vertical strip pattern in the connection matrix.
+Λ-shaped connection pattern. In the connection matrix for hyper-connections, a long-term decay
+pattern can be observed, where layers are generally preferred to rely on a few adjacent layer outputs.
+Moreover, the bottom layers (e.g. layer 0,2) are observed frequently used in most of subsequent layers.
+Therefore, the two patterns together form a Λ-shaped connection pattern. Note that the long-term
+decay pattern is a Post-Norm style pattern, while the frequently accessed pattern is Pre-Norm style,
+indicating that the hyper-connection introduces a free mixture of Pre- and Post-Norm architecture.
+Input word embedding is eliminated from model output. As per the first column in the connection
+matrix for layer inputs, the input word embedding contributes to most of the layers except for the final
+one. This last layer, which products the model’s output, is used for next token prediction. In most
+cases, keeping a component of input embedding in model output is harmful to next token prediction,
+especially when using a tied word embedding such as that employed by OLMo-1B. Similar results
+are found in previous works (Ma et al., 2023).
+Parallel transformer blocks are observed. As discussed in § 3.2, parallel transformer block, which
+performs attention and FFN in parallel, is a special case for hyper-connection. In practice, PTB-like
+patterns, which can be identified by the local jagged pattern, are surprisingly observed to be learned
+by hyper-connections. For instance, layer 11 has a minimal contribution to the input of layer 12 (refer
+to row 12 in the hyper-connection connection matrix). This suggests that layers 11 and 12 can operate
+in parallel, thereby forming a PTB module.
+Attention layers tend to have fewer long-term connections. It is observed that attention layers at
+the bottom barely have long-term contribution, a trend that persists until layer 17. Upon examining
+the connection matrix for hyper hiddens (refer to Fig. 13 in the appendix), it’s evident that the outputs
+of the FFN layers have significantly greater magnitudes than those of the attention layers. This pattern
+resembles a two-hop residual connection design, wherein the attention output contributes to the input
+of the following FFN layer, but doesn’t join the main residual path.
+5
+RELATED WORK
+Transformers (Vaswani et al., 2017) have revolutionized various fields, particularly natural language
+processing and computer vision. They rely heavily on residual connections to facilitate the training
+of deep models. Our hyper-connections approach can replace residual connections, providing stable
+training and consistent improvements in both natural language processing and computer vision.
+The issues of gradient vanishing and representation collapse (Bengio et al., 1994; Glorot &
+Bengio, 2010; Liu et al., 2020) have been extensively studied. The combinations of normalization
+techniques (Ioffe & Szegedy, 2015; Ba et al., 2016) and residual connections (He et al., 2016),
+like Pre-Norm and Post-Norm, actually reflects different emphases in solving these two issues.
+However, despite these advancements, the fundamental trade-off between gradient vanishing and
+representation collapse in deep networks remains a critical challenge. Building on these findings, our
+work introduces a novel approach that enables neural networks to autonomously learn the optimal
+strength of connections, potentially improving both gradient stability and representation quality.
+6
+CONCLUSION
+In conclusion, we have introduced hyper-connections as an effective alternative to residual connections
+in transformers. Our analysis reveals that hyper-connections not only overcome the limitations of
+residuals but also enable dynamic adjustments in network architecture. Experimental results confirm
+their promising benefits across various tasks, including pre-training of large language model, image
+generation, and image classification.
+10
+
+Published as a conference paper at ICLR 2025
+ACKNOWLEDGEMENTS
+This research was conducted at ByteDance Inc. We are grateful for the suggestions and assistance
+provided by Yaowei Zheng, Yuyu Zhang, Yunshui Li, Xiang Li, Bairen Yi, Zhenyi Lu and Xintian
+Han.
+REFERENCES
+Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E Hinton. Layer normalization. In arXiv preprint
+arXiv:1607.06450, 2016.
+Cenk Baykal, Dylan Cutler, Nishanth Dikkala, Nikhil Ghosh, Rina Panigrahy, and Xin Wang.
+Alternating updates for efficient transformers. Advances in Neural Information Processing Systems,
+36, 2024.
+Yoshua Bengio, Patrice Simard, and Paolo Frasconi. Learning long-term dependencies with gradient
+descent is difficult. IEEE transactions on neural networks, 5(2), 1994.
+Yonatan Bisk, Rowan Zellers, Jianfeng Gao, Yejin Choi, et al. Piqa: Reasoning about physical
+commonsense in natural language. In Proceedings of the AAAI conference on artificial intelligence,
+volume 34, 2020.
+Christopher Clark, Kenton Lee, Ming-Wei Chang, Tom Kwiatkowski, Michael Collins, and Kristina
+Toutanova. Boolq: Exploring the surprising difficulty of natural yes/no questions. arXiv preprint
+arXiv:1905.10044, 2019.
+Peter Clark, Isaac Cowhey, Oren Etzioni, Tushar Khot, Ashish Sabharwal, Carissa Schoenick, and
+Oyvind Tafjord. Think you have solved question answering? try arc, the ai2 reasoning challenge.
+arXiv:1803.05457v1, 2018.
+Ido Dagan, Oren Glickman, and Bernardo Magnini. The pascal recognising textual entailment
+challenge. In Machine learning challenges workshop. Springer, 2005.
+Marie-Catherine De Marneffe, Mandy Simons, and Judith Tonhauser. The commitmentbank: In-
+vestigating projection in naturally occurring discourse. In proceedings of Sinn und Bedeutung,
+volume 23, 2019.
+Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale
+hierarchical image database. In 2009 IEEE conference on computer vision and pattern recognition.
+Ieee, 2009.
+Bill Dolan and Chris Brockett. Automatically constructing a corpus of sentential paraphrases. In
+Third international workshop on paraphrasing (IWP2005), 2005.
+Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas
+Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, et al. An
+image is worth 16x16 words: Transformers for image recognition at scale.
+arXiv preprint
+arXiv:2010.11929, 2020.
+Xavier Glorot and Yoshua Bengio. Understanding the difficulty of training deep feedforward neural
+networks. In Proceedings of the thirteenth international conference on artificial intelligence and
+statistics. JMLR Workshop and Conference Proceedings, 2010.
+Dirk Groeneveld, Iz Beltagy, Pete Walsh, Akshita Bhagia, Rodney Kinney, Oyvind Tafjord,
+Ananya Harsh Jha, Hamish Ivison, Ian Magnusson, Yizhong Wang, et al. Olmo: Accelerat-
+ing the science of language models. arXiv preprint arXiv:2402.00838, 2024.
+Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for image
+recognition. In Proceedings of the IEEE conference on computer vision and pattern recognition,
+2016.
+11
+
+Published as a conference paper at ICLR 2025
+Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob
+Steinhardt. Measuring massive multitask language understanding. Proceedings of the International
+Conference on Learning Representations (ICLR), 2021.
+Sergey Ioffe and Christian Szegedy. Batch normalization: Accelerating deep network training by
+reducing internal covariate shift. In International conference on machine learning. PMLR, 2015.
+Matt Gardner Johannes Welbl, Nelson F. Liu. Crowdsourcing multiple choice science questions.
+2017.
+Vijay Korthikanti, Jared Casper, Sangkug Lym, Lawrence McAfee, Michael Andersch, Mohammad
+Shoeybi, and Bryan Catanzaro. Reducing activation recomputation in large transformer models.
+arXiv preprint arXiv:2205.05198, 2022.
+Liyuan Liu, Xiaodong Liu, Jianfeng Gao, Weizhu Chen, and Jiawei Han. Understanding the difficulty
+of training transformers. arXiv preprint arXiv:2004.08249, 2020.
+Haoyan Ma, Xiang Li, Xia Yuan, and Chunxia Zhao. Denseformer: A dense transformer framework
+for person re-identification. IET Computer Vision, 17(5), 2023.
+Xuezhe Ma, Xiaomeng Yang, Wenhan Xiong, Beidi Chen, Lili Yu, Hao Zhang, Jonathan May, Luke
+Zettlemoyer, Omer Levy, and Chunting Zhou. Megalodon: Efficient llm pretraining and inference
+with unlimited context length. arXiv preprint arXiv:2404.08801, 2024.
+Todor Mihaylov, Peter Clark, Tushar Khot, and Ashish Sabharwal. Can a suit of armor conduct
+electricity? a new dataset for open book question answering. In EMNLP, 2018.
+Niklas Muennighoff, Luca Soldaini, Dirk Groeneveld, Kyle Lo, Jacob Morrison, Sewon Min, Weijia
+Shi, Pete Walsh, Oyvind Tafjord, Nathan Lambert, Yuling Gu, Shane Arora, Akshita Bhagia,
+Dustin Schwenk, David Wadden, Alexander Wettig, Binyuan Hui, Tim Dettmers, Douwe Kiela, Ali
+Farhadi, Noah A. Smith, Pang Wei Koh, Amanpreet Singh, and Hannaneh Hajishirzi. Olmoe: Open
+mixture-of-experts language models, 2024. URL https://arxiv.org/abs/2409.02060.
+William Peebles and Saining Xie. Scalable diffusion models with transformers. arXiv preprint
+arXiv:2212.09748, 2022.
+Melissa Roemmele, Cosmin Adrian Bejan, and Andrew S Gordon. Choice of plausible alternatives:
+An evaluation of commonsense causal reasoning. In 2011 AAAI spring symposium series, 2011.
+Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Winogrande: An
+adversarial winograd schema challenge at scale. Communications of the ACM, 64(9), 2021.
+Maarten Sap, Hannah Rashkin, Derek Chen, Ronan LeBras, and Yejin Choi. Socialiqa: Commonsense
+reasoning about social interactions. arXiv preprint arXiv:1904.09728, 2019.
+N Shazeer, A Mirhoseini, K Maziarz, A Davis, Q Le, G Hinton, and J Dean. The sparsely-gated
+mixture-of-experts layer. Outrageously large neural networks, 2017.
+Richard Socher, Alex Perelygin, Jean Wu, Jason Chuang, Christopher D Manning, Andrew Y Ng, and
+Christopher Potts. Recursive deep models for semantic compositionality over a sentiment treebank.
+In Proceedings of the 2013 conference on empirical methods in natural language processing, 2013.
+Luca Soldaini, Rodney Kinney, Akshita Bhagia, Dustin Schwenk, David Atkinson, Russell Authur,
+Ben Bogin, Khyathi Chandu, Jennifer Dumas, Yanai Elazar, et al. Dolma: An open corpus of three
+trillion tokens for language model pretraining research. arXiv preprint arXiv:2402.00159, 2024.
+Alon Talmor, Jonathan Herzig, Nicholas Lourie, and Jonathan Berant. Commonsenseqa: A question
+answering challenge targeting commonsense knowledge. arXiv preprint arXiv:1811.00937, 2018.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz
+Kaiser, and Illia Polosukhin. Attention is all you need. In Advances in neural information
+processing systems, 2017.
+12
+
+Published as a conference paper at ICLR 2025
+Ben Wang. Mesh-Transformer-JAX: Model-Parallel Implementation of Transformer Language
+Model with JAX.
+https://github.com/kingoflolz/mesh-transformer-jax,
+May 2021.
+Mitchell Wortsman, Peter J Liu, Lechao Xiao, Katie Everett, Alex Alemi, Ben Adlam, John D
+Co-Reyes, Izzeddin Gur, Abhishek Kumar, Roman Novak, et al. Small-scale proxies for large-scale
+transformer training instabilities. arXiv preprint arXiv:2309.14322, 2023.
+Shufang Xie, Huishuai Zhang, Junliang Guo, Xu Tan, Jiang Bian, Hany Hassan Awadalla, Arul
+Menezes, Tao Qin, and Rui Yan. Residual: Transformer with dual residual connections. arXiv
+preprint arXiv:2304.14802, 2023.
+Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali Farhadi, and Yejin Choi. Hellaswag: Can a machine
+really finish your sentence? arXiv preprint arXiv:1905.07830, 2019.
+Biao Zhang and Rico Sennrich.
+Root mean square layer normalization.
+Advances in Neural
+Information Processing Systems, 32, 2019.
+13
+
+Published as a conference paper at ICLR 2025
+A
+TRANSFORMER WITH HYPER-CONNECTIONS
+Attention
++
++
++
+(b) Transformer with Hyper-Connections
+ℎ!
+Repeat
+Attention
+FFN
+Attention
+FFN
++
++
++
++
+(b) Transformer with Residual Connections
+FFN
++
++
++
+Attention
++
++
++
+FFN
++
++
++
++
+𝛼",!
+"
+𝛽"
+"
+h"
+!
+𝛼$,!
+"
+𝛼","
+"
+𝛼$,"
+"
+𝛼",$
+"
+𝛼$,$
+"
+𝛽$
+"
+h$
+!
+𝛼",!
+$
+𝛽"
+$
+h"
+"
+𝛼$,!
+$
+𝛼","
+$
+𝛼$,"
+$
+𝛼",$
+$
+𝛼$,$
+$
+𝛽$
+$
+h$
+"
+𝛼",!
+%
+𝛽"
+%
+h"
+$
+𝛼$,!
+%
+𝛼","
+%
+𝛼$,"
+%
+𝛼",$
+%
+𝛼$,$
+%
+𝛽$
+%
+h$
+$
+𝛼",!
+&
+𝛽"
+&
+h"
+%
+𝛼$,!
+&
+𝛼","
+&
+𝛼$,"
+&
+𝛼",$
+&
+𝛼$,$
+&
+𝛽$
+&
+h$
+%
+h"
+'
+h$
+(
+ℎ'
+ℎ!
+ℎ'
+Figure 8: Comparison between transformers with hyper-connections and that with residual connec-
+tions.
+14

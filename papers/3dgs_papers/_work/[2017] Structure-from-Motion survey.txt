@@ -1,0 +1,731 @@
+A Survey of Structure from Motion
+Onur ¨Ozye¸sil†
+Vladislav Voroninski‡
+Ronen Basri§
+Amit Singer¶
+Abstract
+The structure from motion (SfM) problem in computer vision is the problem of recovering
+the three-dimensional (3D) structure of a stationary scene from a set of projective measurements,
+represented as a collection of two-dimensional (2D) images, via estimation of motion of the cameras
+corresponding to these images. In essence, SfM involves the three main stages of (1) extraction
+of features in images (e.g., points of interest, lines, etc.) and matching these features between
+images, (2) camera motion estimation (e.g., using relative pairwise camera positions estimated
+from the extracted features), and (3) recovery of the 3D structure using the estimated motion
+and features (e.g., by minimizing the so-called reprojection error). This survey mainly focuses on
+relatively recent developments in the literature pertaining to stages (2) and (3). More speciﬁcally,
+after touching upon the early factorization-based techniques for motion and structure estimation,
+we provide a detailed account of some of the recent camera location estimation methods in the
+literature, followed by discussion of notable techniques for 3D structure recovery. We also cover
+the basics of the simultaneous localization and mapping (SLAM) problem, which can be viewed
+as a speciﬁc case of the SfM problem. Further, our survey includes a review of the fundamentals
+of feature extraction and matching (i.e., stage (1) above), various recent methods for handling
+ambiguities in 3D scenes, SfM techniques involving relatively uncommon camera models and image
+features, and popular sources of data and SfM software.
+1
+Introduction
+Recovering the 3-dimensional structure of a scene from images is a fundamental goal of computer
+vision. A particularly eﬀective approach to 3D reconstruction involves the use of many images of
+a stationary scene. This problem, commonly referred to as multiview structure from motion (SfM)
+(depicted in Figure 1), is the subject of a large body of research in computer vision, starting with
+the seminal paper of Longuet-Higgins [40]. A comprehensive and in-depth summary of this enormous
+body of work can be found in [30].
+Modern methods usually solve the multiview SfM problem using bundle adjustment techniques,
+which aim to optimize a cost function known as the total reprojection error (cf. §4 for a more detailed
+and general discussion of bundle adjustment). With this cost function, given n images of a stationary
+scene, the objective is to simultaneously determine the structure (3D coordinates of scene points)
+and the calibration parameters of each of the n cameras that minimize the discrepancy between
+image measurements and their predictive model. For instance, in the speciﬁc case of pairwise point
+correspondences between images, let us denote by {Pj}p
+j=1 ⊆R3 the unknown positions of scene
+†INTECH
+Investment
+Management
+LLC,
+One
+Palmer
+Square,
+Suite
+441,
+Princeton,
+NJ
+08542,
+USA
+(oozyesil@intechjanus.com).
+‡Helm.ai, Menlo Park, CA 94025, USA (vlad@helm.ai).
+§Department of Computer Science and Applied Mathematics, Weizmann Institute of Science, Rehovot, 76100, IS-
+RAEL (ronen.basri@weizmann.ac.il).
+¶Department
+of
+Mathematics
+and
+PACM,
+Princeton
+University,
+Princeton,
+NJ
+08544-1000,
+USA
+(amits@math.princeton.edu).
+1
+arXiv:1701.08493v2  [cs.CV]  9 May 2017
+
+Figure 1: The structure from motion (SfM) problem.
+points, by {Ci}n
+i=1 the 3 × 4 camera matrices, where the entries of each Ci encode the location of
+camera i, its orientation and internal calibration parameters. Also, let (xij, yij) ∈R2 denote the
+measured projection of point Pj onto the image plane of camera Ci. Then, we can deﬁne a (relatively
+simple) bundle adjustment instance based on a sum of least squares cost function as
+minimize
+{Pj},{Ci}
+X
+i∼j
+
+xij −CT
+i1Pj
+CT
+i3Pj
+2
++
+
+yij −CT
+i2Pj
+CT
+i3Pj
+2
+,
+(1)
+where, Cik ∈R4 denotes the k’th row of Ci (1 ≤k ≤3), i ∼j means that the j’th scene point
+is visible by the i’th camera, and we abuse notation and identify the representation [Pj, 1] ∈R4
+of Pj in homogeneous coordinates by Pj. Unfortunately, as a result of the special structure of the
+camera matrices and the cost function in (1), the bundle adjustment problem (1) is not convex, and its
+(na¨ıve) optimization in realistic settings typically converges to an (often undesired) local minimum. It
+is therefore critical to develop methods that can initialize bundle adjustment, i.e. that provide initial
+camera motion (and intrinsic calibration) and 3D structure estimates, as closely as possible to the
+true solution.
+In 2006 Snavely et al. [65] presented a sequential pipeline for SfM, demonstrating that it can
+produce accurate reconstructions in practical scenarios where hundreds, or even thousands of inde-
+pendently captured photographs are provided, sparking a huge interest in the development of eﬃcient
+SfM techniques for large, unordered image sets (cf. §4). The suggested pipeline begins by detecting
+keypoints in each image. It then uses the SIFT descriptor [42] to compare those keypoints across
+images and to produce a set of potential matches. Random sampling and consensus (RANSAC) [9]
+is applied next, to robustly estimate essential matrices between pairs of images (for computation of
+relative motion of camera pairs) and to discard outlier matches. Then, starting with a pair of images
+for which the largest number of inlier matches were found and then greedily adding one image at at
+a time, bundle adjustment is solved repeatedly. Although this sequential pipeline is computationally
+challenging, it successfully deals with large collections of images, producing in many cases highly accu-
+rate reconstructions. However, it is based on greedy steps that may not result in an optimal solution.
+Clearly, global approaches, which consider all images simultaneously (at least for the initial camera
+motion estimation), may potentially yield improved solutions. Indeed a number of recent methods
+attempt to globally estimate the camera locations (cf. §3) and orientations. In this survey, for the ini-
+tial camera motion estimation part of SfM, we focus on methods for camera location estimation in §3,
+and refer the reader to other surveys that review the problems of camera orientation and calibration
+recovery [77].
+2
+
+The outline of this survey is as follows. In §2, we shortly discuss some of the early works in the
+literature that introduce the basic SfM framework and the relatively simple factorization methods. §3
+covers some of the recent work on camera location estimation from pairwise keypoint matches, such as
+the simpler least squares methods based on the (homogeneous) epipolar constraints, relatively stable
+convex methods based on a linearized representation (cf. (16)) of pairwise direction measurements,
+heuristic methods for outlier rejection in pairwise directions, etc. We provide part of the key ideas
+and methods in the literature for 3D structure estimation, with an emphasis on contemporary meth-
+ods aimed at processing large, unordered sets of images, in §4. Details of inﬂuential works on the
+simultaneous localization and mapping (SLAM) problem, which has recently experienced a dramatic
+increase of popularity, are discussed in §5. Some of the remaining crucial topics in the vast SfM lit-
+erature, including methods for feature point extraction and matching, works on handling instabilities
+induced by symmetries and ambiguities in the images, methods for relatively uncommon types of
+cameras (e.g., omnidirectional cameras), techniques using alternative basic measurements (e.g., based
+on lines instead of feature points), some of the important software packages and popular datasets, etc.,
+are considered in §6. Lastly, we conclude with a discussion of the current state and possible future
+directions for the SfM problem in §7.
+As it is, rather unfortunately, the fate of any survey on a topic having an extensive body of
+literature like SfM, we are unable to cover every important work in the ﬁeld. In essence, we try to
+focus on relatively recent SfM techniques. For earlier works in the literature, we refer the reader to
+other sources, e.g. [75, 30, 52].
+2
+Early Works
+This section covers some of the relatively early works on SfM, which have introduced the basic problem
+formalism and the factorization based methods. We ﬁrst consider the seminal work [40] that introduced
+the ﬁrst linear method based on point correspondences, later named the eight point algortihm, to solve
+the SfM problem for a pair of cameras. Speciﬁcally, for a pair of cameras, [40] aims to estimate the
+relative camera motion, i.e. relative rotation and translation, and the 3D coordinates of the scene points
+captured by these cameras. Here, we represent the i’th camera using its orientation Ri ∈SO(3) and
+its location ti ∈R3 by (Ri, ti). Considering that we can always ﬁx the (intrinsic) coordinate system
+of one of the two cameras to be the global coordinate system (i.e., we can set Ri = I and ti = 0,
+since an absolute coordinate system cannot be determined from point correspondences), solving for
+the relative motion for a camera pair, and for the scene points based on the computed motion, then
+corresponds to actually solving the SfM problem for the pair. The problem setup1 involves a simple
+pinhole camera model (also see, e.g., §4 in [54] or [30]), in which a scene point P ∈R3 is represented
+in the i’th image plane by pi ∈R3 (as in Figure 2). Here, we obtain pi by ﬁrst representing P, in the
+i’th camera’s coordinate system, as Pi = RT
+i (P −ti) = (Px
+i , Py
+i , Pz
+i )T and then projecting it to the
+i’th image plane by pi = (fi/P z
+i )Pi, where Ri ∈SO(3), ti ∈R3 and fi ∈R+ denote the orientation,
+the location of the focal point and the focal length of the i’th camera, respectively. For a pair of
+cameras i and j as in Figure 2, we can restate the coplanarity of the points P, ti and tj, i.e. that
+[(P −ti) × (P −tj)]T (ti −tj) = 0, in terms of the observable corresponding point measurements
+pi, pj (cf. Figure 3 for a depiction of a set of corresponding points between a pair of images) and the
+camera parameters as
+pT
+i
+
+RT
+i (tj −ti)
+
+× RT
+i Rj
+
+pj =.. pT
+i Eijpj = 0 ,
+(2)
+1We note that, our notation and type of projective measurement (or, equivalently, the global coordinate system)
+are diﬀerent from those of [40], even though both choices are equivalent (i.e., any result obtained by using one can be
+represented in terms of the other). Our choices (more or less) reﬂect the common terminology in the literature (cf., e.g.,
+[54, 53, 4]). We also represent the epipolar constraints in their general form for a pair (i, j) to make use of them in the
+following sections.
+3
+
+tj
+ti
+P
+pi
+pj
+Epipoles
+Figure 2: The pinhole camera model
+where [t]× is the skew-symmetric matrix corresponding to the cross product with t and Eij =
+
+RT
+i (tj −ti)
+
+× RT
+i Rj is the essential matrix for the cameras i and j. Also let Tij ..=
+
+RT
+i (tj −ti)
+
+×
+and Rij ..= RT
+i Rj, yielding Eij = TijRij. [40] makes the crucial observation that, among the various
+equivalent restatements of the coplanarity of P, ti and tj, the useful property of (2), which is known
+as the epipolar constraint, is that it provides a basis for the estimation of the specially structured
+essential matrices in terms of the observable corresponding points. In other words, by ﬁxing the unde-
+termined scale for the entries of Eij (e.g., ∥Eij∥F = 1, or as in [40] ∥tj −ti∥= 1, which is equivalent
+to ∥Eij∥F =
+√
+2), we can solve for Eij ∈R3×3 from eight (linearly independent) epipolar constraints
+(2) corresponding to eight 3D points2. Although [40] does not provide any algorithm for this purpose,
+nor does it consider the eﬀects of uncertainties (i.e., noise) in the corresponding point measurements,
+the usual approach in the literature is simply to minimize the sum of squared errors in the epipolar
+constraints subject to the scale constraint, which is equivalent to ﬁnding the singular vector of the
+resulting data matrix corresponding to its smallest singular value. After estimating Eij (up to a sign
+to be determined later), [40] solves for Tij (up to another sign, again, to be determined later) by
+eliminating Rij using EijET
+ij = TijT T
+ij . [40] then solves for Rij, based on its orthogonality, and for the
+scene points using simple algebraic equations (cf. [40] for details). Lastly, the undetermined signs of
+Eij and Tij are ﬁxed by requiring the scene points to lie in front of both of the cameras. If the scene
+points are behind both of the cameras, the sign of Tij is altered and the relative rotation Rij and the
+scene points are recalculated. If the scene points fall behind one of the two cameras, the sign of Eij is
+altered and Tij, Rij and the scene points are recalculated. Additionally, [40] shortly discusses some of
+the degenerate cases of eight 3D points (such as the cases of all points corresponding to the vertices
+of a cube, at least seven points lying on a plane, six of the eight points corresponding to the vertices
+of a regular hexagon, at least four points lying on a line), for which the eight point estimation cannot
+be used. We note that, although [40] argues about the accuracy of the eight point algorithm, it was
+in fact observed to be sensitive to noise, which resulted in the construction of alternative methods,
+such as a normalized version of the eight point algorithm [31], for relative pairwise motion estimation.
+For further reading on alternative methods to obtain epipolar geometries between images, cf., e.g.,
+[89, 30].
+Another early work in the literature that introduced the factorization method for SfM is [73]. To
+model the SfM problem for objects that are relatively distant compared to their sizes, [73] assumes
+an orthographic camera model, in which the 3D points are measured via parallel projections onto the
+image plane (consequently ignoring the camera translation along the optical axis). Let the location
+of the j’th 3D point on the j’th camera plane be given by qij = (xij, yij) ∈R2. In the noiseless case,
+these orthographic measurements of m 3D points by n cameras are represented in [73] in terms of a
+2In fact, due to the special structure of Eij, it is well known (cf., e.g., [30]) that only ﬁve corresponding 3D points
+are suﬃcient to estimate Eij, however, this requires solving a nonlinear system of equations.
+4
+
+measurement matrix W ∈R2n×m satisfying
+W =
+
+
+x11
+. . .
+x1m
+...
+...
+...
+xn1
+. . .
+xnm
+y11
+. . .
+y1m
+...
+...
+...
+yn1
+. . .
+ynm
+
+
+.
+(3)
+The crucial observation that [73] makes is that, if the origin of the global reference system is chosen
+to be at the center of the 3D structure points (implying that each row of W sums to zero), then W
+can be decomposed into
+W = RS , for R =
+
+
+uT
+1
+...
+uT
+n
+vT
+1
+...
+vT
+n
+
+
+∈R2n×3 and S = [P1 . . . Pm] ∈R3×m ,
+(4)
+where uk and vk represent the orientation of the k’th camera (since, in the orthographic model, the
+third direction given by uk ×vk is parallel to the viewing direction of the cameras) and Pk is the k’th
+3D point. As a result, W has rank 3. In the noisy case, which may result in a higher rank for W, [73]
+considers a valid measurement matrix to be given by the best rank-3 approximation to the noisy W
+in the Frobenius norm sense, which is given by the singular value decomposition (SVD). Note that
+replacing R and S with RQ and Q−1S, for an arbitrary invertible matrix Q ∈R3×3 results in the
+same measurement matrix W. As a result, in order to compute R and S from W, [73] proposes to ﬁrst
+compute a decomposition of W using SVD, and then to solve for Q using the orthonormality of the n
+pairs (uk, vk). That is, for W = UW ΣW V T
+W representing the SVD of W, [73] ﬁrst lets ˆR = UW Σ1/2
+and ˆS = Σ1/2V T
+W , and then computes the solution R = ˆRQ and S = Q−1 ˆS, where Q is given to be a
+solution to the nonlinear system of 3n equations
+ˆuT
+k QQT ˆuk = ˆvT
+k QQT ˆvk = 1 , ˆuT
+k QQT ˆvk = 0 , k = 1, . . . , n
+(5)
+where ˆuk and ˆvk represent the k’th and (k+n)’th rows of ˆR (cf. (4)). [73] also extends the factorization
+method to the case of occlusions (i.e., to the case when all scene points are not visible by all of the
+cameras) and provides empirical evidence demonstrating the stability of their factorization approach
+on various experimental scenarios.
+An extension of the factorization methodology for the multiview SfM with perspective cameras
+was introduced in [70]. This time, [70] considers the basic image projection equations
+λijpij = CiPj , i = 1, . . . , n , j = 1, . . . , m ,
+(6)
+where, for the j’th 3D point represented (by abuse of notation) in the homogeneous coordinates by
+Pj ∈R4 and Ci denoting the i’th camera matrix, pij ∈R3 is the projection of the j’th point onto
+the i’th camera plane (in the homogeneous coordinates) and λij are the undetermined scales, termed
+as projective depths. Similar to [73], these projective measurements are collected in [70] into a rank-4
+measurement matrix Y ∈R3n×m given by
+Y =
+
+
+λ11p11
+. . .
+λ1mp1m
+...
+...
+...
+λn1pn1
+. . .
+λnmpnm
+
+=
+
+
+C1
+...
+Cn
+
+
+P1
+. . . Pm
+
+.
+(7)
+5
+
+The crucial point here is that we do not have direct access to the projective depths λij, and if λij were
+to be accurately estimated, which constitutes the main contribution of [70], a factorization technique
+similar to that of [73] could easily be applied. In order to achieve this goal, [70] considers the linear
+system of equations for pairs of cameras (i, j) given by
+Fijpjkλjk = (eij −pik)λik ,
+(8)
+where the fundamental matrix Fij ∈R3×3 satisﬁes Eij = KT
+i FijKj, for Ki denoting the i’th camera
+calibration matrix and Eij the essential matrix for the pair (i, j) (cf. (2)), and eij is the epipole on
+the i’th image plane (cf. Figure 2). Considering the homogeneous linear equations (8) for the minimal
+number of n−1 camera pairs, [70] estimates the projective depths up to global scale. After substitution
+of the recovered λij in (7), [70] proceeds similarly to [73] and factorizes Y into its camera and structure
+components using SVD (however, this time, there is no need to compute an undetermined multiplier
+Q since the camera and the structure parts of Y do not have particular forms). Lastly, [70] concludes
+with empirical results to evaluate the performance of their algorithm. A closely related approach,
+with an additional section for the extension of the algorithm in [70] to the case of lines, instead of
+points, as feature measurements is also given in [74].
+An excellent account of factorization-based methods, for various camera models and alternative
+feature measurements, can also be found in the survey [37].
+3
+Camera Location Estimation
+In this section we discuss parts of the existing literature focusing primarily on the camera location
+estimation part of the SfM problem. We consider the camera location estimation methods based on
+corresponding point estimates between pairs of images. In the majority of the methods we discuss,
+the corresponding point estimates are used to make relative motion measurements between pairs
+of images, which can be decomposed into pairwise rotational and translational measurements. The
+generic approach for these methods is to separately estimate the camera orientations based on the
+pairwise rotational measurements and to use these camera orientation estimates together with the
+pairwise translational measurements in order to solve for the camera locations. On the other hand,
+we also discuss some of the methods in the literature that, to some degree, deviate from the generic
+recipe mentioned above, and aim to jointly estimate camera orientations and locations, use local
+structure estimates for location estimation, consider triplets of cameras, etc.
+In order to concretize the generic approach mentioned above, consider the simple pinhole camera
+model introduced in §2 and depicted in Figure 2. As discussed in §2, the essential matrix estimates,
+computed, e.g., using the epipolar constraints (2) in the presence of suﬃciently many corresponding
+scene points (and the knowledge of the intrinsic camera parameters), can be uniquely factorized
+into relative rotational and translational parts, i.e. into estimates of RT
+i Rj and
+
+RT
+i (tj −ti)
+
+×. In
+general, the relative rotational parts are used for the estimation of camera orientations Ri (cf. [77] for
+a detailed account of the existing methods for camera orientation estimation). In order to estimate
+the camera locations, the estimated orientations can be used directly with the translational parts to
+obtain estimates of the pairwise directions γij = (ti −tj)/∥ti −tj∥. An alternative approach is to go
+back to the epipolar constraints (2) to rewrite them as a set of linear homogeneous equations in the
+camera locations ti given by
+(ti −tj)T yk
+ij = 0 , k = 1, . . . , mij
+(9)
+where yk
+ij are functions of Ri, Rj and the k’th corresponding points pk
+i , pk
+j , and mij denotes the
+number of corresponding points for the cameras i and j. These equations can then be used directly
+for camera location estimation, or to obtain pairwise direction estimates.
+6
+
+Figure 3: Two images from the Notre-Dame Cathedral set in [65], with corresponding feature points (extracted
+using the scale-invariant feature transform (SIFT) [42]).
+A crucial point to note about the estimates of the pairwise directions γij is that they lack any scale
+information pertaining to the distance ∥ti −tj∥between camera pairs. The diﬃculties3 arising from
+this homogeneity can be regarded as the most important contributor to the diversity of the camera
+location estimation methods in the literature.
+A relatively direct approach for location estimation from pairwise directions is based on the ho-
+mogeneous system of equations
+ I −γijγT
+ij
+
+(ti −tj) = 0 ,
+(10)
+which encapsulates the fact that the diﬀerence vectors ti−tj are parallel to the pairwise directions γij.
+In [10], the locations are estimated by minimizing the sum of squared errors in the system obtained by
+replacing γij in (10) with their estimates4 and using constraints to ﬁx the global scale and translation,
+given respectively by P
+i ∥ti∥2 = 1 and P
+i ti = 0, to prevent the trivial solution of ti ≡t for some
+t ∈R3, which is summarized as
+minimize
+{ti}
+X
+i∼j
+(ti −tj)T  I −γijγT
+ij
+
+(ti −tj)
+subject to
+X
+i
+∥ti∥2 = 1 ;
+X
+i
+ti = 0
+(11)
+Note that, considering the n locations stacked into a vector t ∈R3n, whose i’th 3 × 1 block is equal
+to ti, we can rewrite the cost function of (11) as tT Lt, for some appropriate L ∈R3n×3n, and the
+constraints as ∥t∥2 = 1 and V t = 0 (for V = I3 ⊗1T
+n). Then, the solution to the least squares
+problem (11) is given in terms of the (normalized) eigenvector corresponding to the fourth smallest
+eigenvalue of L, whose null space includes the three rows of V . The authors of [10] also (heuristically)
+identify various classes of problem instances, which they refer to as “problem pathologies”, resulting
+in relatively unstable solutions. Among the listed “pathologies”, an important one is the class of
+3Note that the pairwise relative motion measurements are invariant also to global orientation and location shifts, i.e.
+any global rotational shift of the form Ri →RRi and any global translation of the form ti →ti + t for R ∈SO(3) and
+t ∈R3 produce equivalent solutions. However, contrary to the case of invariance to scale transformations of the form
+ti →cti for c ∈R+, these invariances are not observed to result in any diﬃculties in motion estimation.
+4In [10], the authors actually assume a slightly more general setup, where the directional measurements are not
+necessarily unit length, i.e. they may have some scale-related part (the source of which was unspeciﬁed). They also
+propose a maximum covariance spectral solution, maximizing the alignment of ti −tj’s with γij’s, instead of penalizing
+their deviation. We do not discuss this method due to its inferior performance as reported by the authors of [10].
+7
+
+“underconstrained” instances, which possess additional degrees of freedom resulting in more than one
+sets of location estimates (not related to each other via a global translation and/or scale transforma-
+tion) that may be signiﬁcantly diﬀerent. As sources of these underconstrained instances the authors
+identify two (rather extreme) conditions, namely disconnectedness of the measurement graph5 and
+the collinearity of all the directions at a single node, and also provide heuristic solutions to resolve
+the extra degrees of freedom in such instances (these two conditions are in fact only speciﬁc examples
+of a rich set of algebraic conditions deﬁning underconstrained instances, as was fully characterized
+later in [54, 53]). A similar location estimation method based on the system of equations (10) is given
+in [26]. In this method, instead of directly minimizing the sum of squared errors in the system (10),
+an iteratively reweighted least squares solver, where in the k + 1’th iteration each equation in (10) is
+weighted with 1/∥tk
+i −tk
+j ∥for tk
+i denoting the solution of the k’th iteration, is used to democratize the
+contribution of each pair of cameras in the total cost function. Another approach, similar in spirit to
+these least squares methods, is introduced in [4]. This time, instead of the system of equations (10),
+a least squares method is used to minimize the sum of squared errors in the epipolar constraints (9).
+Figure 4: Estimates for a noisy, synthetic instance of the camera location estimation problem for 100 cameras,
+demonstrating the clustering estimates of the least squares (LS) method of [10] vs. estimates of the relatively
+stable semideﬁnite relaxation (SDR) solver in [54] (the line segments represent the error incurred by the SDR
+solution compared to the ground truth).
+Even though the least squares methods of [10, 26, 4] are computationally very eﬃcient and, for
+relatively small datasets, produce acceptable location estimates, the quality of their estimates degrades
+signiﬁcantly for large, sparse, unordered and noisy datasets (i.e. for most of the real datasets studied in
+the literature). Typically, they tend to produce spurious location estimates that tightly cluster around
+a small number of points (cf.
+Figure 4 for such a clustering synthetic instance).
+This undesired
+tendency can be intuitively explained by considering the least squares optimization problem (11),
+for which a clustering part of the solution results in a very small contribution to the cost function
+and a few locations, usually corresponding to nodes in the measurement graph having few edges,
+are separated from the cluster to satisfy the constraints. In order to resolve this diﬃculty, several
+diﬀerent methods have been proposed in the literature. A relatively straightforward starting point,
+which was introduced in [54], is to require the locations to satisfy a maximal proximity condition by
+incorporating “repulsion constraints” of the form ∥ti −tj∥≥c, for some ﬁxed c > 0 (taken to be
+c = 1 in [54]), into the least squares formulation of [10]. These non-convex constraints convert the
+5The measurement graph is composed of nodes for each camera i and has an edge between nodes i and j if there is
+a direction estimate for this pair.
+8
+
+least squares formulation into the notoriously diﬃcult problem of
+minimize
+{ti}i∈Vt⊆Rd
+X
+(i,j)∈Et
+Tr
+
+(ti −tj) (ti −tj)T  I −γijγT
+ij
+
+subject to
+∥ti −tj∥2
+2 ≥1, ∀(i, j) ∈Et ,
+X
+i
+ti = 0
+(12)
+To approximate this computationally diﬃcult problem, [54] ﬁrst introduces the rank-1, positive
+semideﬁnite matrix variable T ∈R3n×3n (for n denoting the number of cameras), the ij’th 3 × 3
+block Tij of which is given by Tij = titT
+j . Using T, the cost function and the non-convex constraints
+of (12) are given, respectively, as linear functions P
+i∼j Tr
+ Lij(T)
+ I −γijγT
+ij
+
+and Tr (Lij(T)) ≥1
+of T, where the operator Lij(.) satisﬁes
+Lij(T) = Tii + Tjj −Tij −Tji = (ti −tj) (ti −tj)T .
+(13)
+As a result of the linearity in T of the cost function and the constraints, the non-convexity of (12) is
+fully represented by the non-convex rank-1 constraint on T (note that positive semideﬁniteness is a
+convex constraint). As a result, [54] removes this ﬁnal non-convex constraint to obtain the semideﬁnite
+relaxation formulation given by
+minimize
+T
+X
+i∼j
+Tr
+ Lij(T)
+ I −γijγT
+ij
+
+subject to
+Tr (Lij(T)) ≥1 , ∀i ∼j ,
+Tr (V T) = 0 ,
+T ⪰0 .
+(14)
+The approximate solution ti in (12) is obtained to be the i’th 3 × 1 block of the leading eigenvector of
+the solution of the SDR (14). The tightness6 of this relaxation up to relatively high levels of noise is
+empirically demonstrated in [54], and also a stability of recovery result is proven, which quantiﬁes the
+amount of distortion in the location estimates to be on the order of the noise present in the pairwise
+directions, under fairly general assumptions for the noise model. In order to improve the quality
+of their location estimates, [54] proposes a “robust pairwise direction estimation” method based on
+the system (9), where yk
+ij’s are viewed as noisy samples from the 2D subspace orthogonal to γij and
+eﬃcient robust subspace recovery techniques are used to estimate each pairwise direction γij. Addi-
+tionally, and perhaps more importantly, a complete characterization of the well-posed instances of the
+location recovery from pairwise directions7 is provided in [54] by demonstrating its equivalence to the
+existing results in the ﬁeld of parallel rigidity theory. For instance, while camera orientation estimation
+only requires the connectivity of the measurement graph, connectivity alone is insuﬃcient to make
+a camera location estimation instance well-posed (cf. Figure 5 for such an instance). The complete
+characterization of well-posed instances of the location recovery problem (for arbitrary dimensions
+d ≥2) , via (generically) parallel rigid measurement graphs is summarized in Theorem 1.
+6Tightness here refers to obtaining the solution of the non-convex problem as the solution to the relaxed convex
+problem, i.e. the two globally optimal solutions are the same and hence there is no relaxation gap.
+7To be more accurate, in [54], the information assumed to be available is actually a collection of potentially incomplete
+and noisy versions of the pairwise lines (or unsigned directions), which can be represented by the projection matrices
+(ti −tj)(ti −tj)/∥ti −tj∥2. However, the well-posed instances for this case turns out to be the same as in the case of
+pairwise directions.
+9
+
+Figure 5:
+(a) A noiseless instance of the camera location estimation problem for 5 locations on a con-
+nected graph (we assume noiseless direction measurements between location pairs having an edge), which is
+not parallel rigid (in R2 and R3). Non-uniqueness is demonstrated by two non-congruent location solutions
+{t1, t2, t3, t4, t5} and {t1, t2, t3, t′
+4, t′
+5}, each of which can be obtained from the other by an independent
+rescaling of the solution for one of its maximally parallel rigid components, (b) Maximally parallel rigid com-
+ponents of the formation in (a), (c) A parallel rigid formation (in R2 and R3) obtained from the formation in
+(a) by adding the extra edge (1, 4) linking its maximally parallel rigid components
+Theorem 1. A graph G = (V, E) is generically parallel rigid in Rd if and only if it contains a
+nonempty set of edges E′ ⊆E, with (d −1)|E′| = d|V | −(d + 1), such that for all subsets E′′ of E′,
+we have
+(d −1)|E′′| ≤d|V (E′′)| −(d + 1) ,
+(15)
+where V (E′′) denotes the vertex set of the edges in E′′.
+The authors of [54] also provide eﬃcient algorithms for testing well-posedness, and algorithms for
+extracting maximal well-posed subproblems in the presence of an ill-posed instance. Additionally, [54]
+introduces an eﬃcient alternating direction augmented Lagrangian method (ADM) to solve the SDR
+(14), and a distributed algorithm to apply the SDR method for large sets of images.
+An alternative two step procedure, which is composed of the detection of outliers among the
+pairwise direction measurements, via a procedure named 1DSfM, followed by a (non-convex) location
+estimation method, is studied in [83] (cf. Figure 6, courtesy of [83], for a simpliﬁed illustration of
+the outlier detection procedure 1DSfM). The main idea in the outlier detection step, is to project
+all of the pairwise directions onto a one-dimensional (random) subspace and to try to solve the
+resulting ordering problem8 as consistently as possible, from which potential outliers can be identiﬁed
+as having larger inconsistencies. The detection procedure “solves” several of these randomized one-
+dimensional problems and identiﬁes the outliers as those directions having an inconsistency score
+larger than some value. After removal of outlier direction measurements, the locations are estimated
+by an unconstrained maximization, using the Levenberg-Marquardt algorithm, of the non-convex cost
+function P
+ij ˆγT
+ij(ti−tj)/∥ti−tj∥that measures the alignment of the pairwise directions (ti−tj)/∥ti−
+tj∥with their “cleaned” estimates ˆγij. Extensive experimental results on large datasets demonstrating
+the accuracy and the eﬃciency of their method are also provided in [83].
+Instead of the systems of equations (9) or (10), on which the various least squares methods are
+based, an alternative approach aiming to prevent the clustering phenomena is to consider the system
+of equations
+ti −tj −αijγij = 0 ,
+(16)
+8This ordering problem, namely the minimum feedback arc set problem, is known to be an NP-complete problem,
+hence [83] uses a heuristic/approximate method observed to perform well in the literature.
+10
+
+Figure 6: A simpliﬁed illustration (courtesy of [83]) of outlier detection via 1DSfM in [83]: (a) Ground truth
+camera locations with (potentially noisy) pairwise directions available for camera pairs connected with arrows
+(b) Available pairwise directions, with an outlier edge shown in red, and two directions, ˆi and p, for 1D
+projections (c) Projections of pairwise directions onto ˆi and p, resulting in two instances of the minimum
+feedback arc set problem (d) Solutions to the 1D problems in (c), depicting the violation (satisfaction) of
+the 1D constraints by the outlier edge (3, 0) in the 1D problem induced by ˆi (p), since outlier edges may be
+consistent with only some of the solutions to the 1D subproblems.
+where αij ..= ∥ti −tj∥. Note that, if we ignore this deﬁning (non-convex) relation between αij’s
+and ti’s, (16) turns out to be a linear system in αij’s and ti’s for given γij. This system forms the
+basis of the location estimation method used in [76], where the cost function is the sum of squares of
+the errors in (16) and the additional constraints αij ≥1 are used to prevent the trivially collapsing
+solution ti ≡0, αij ≡0. That is, for location estimation [76] solves
+minimize
+{ti},{αij}
+X
+i∼j
+∥ti −tj −αijγij∥2
+subject to
+X
+i
+ti = 0 ; αij ≥1
+(17)
+In fact, the main theme in [76] is to provide a distributed algorithm for camera motion estimation,
+i.e. joint estimation of orientations and locations. In this respect, [76] provides a consensus based
+three step algorithm, and local convergence and partial stability (for the rotational part) results. The
+quadratic location estimation method (17) is used to obtain an initial set of locations (i.e. constitutes
+the second step of their distributed algorithm), and then is fused with the rotational part to obtain
+a joint motion estimation method. In terms of the camera location estimation problem with given
+pairwise directions, the usage of the system (16) as an alternative to the systems (9) or (10) together
+with the relaxed repulsion constraints αij ≥1 is the crucial contribution of [76], since, as reported,
+e.g., by [53], this framework provides location estimates with acceptable quality, which do not tend
+to cluster for large and noisy datasets, while preserving computational eﬃciency. A closely related
+optimization method based on (16) and the constraints αij ≥1 is introduced in [49]. The cost function
+of this method is given by the maximum absolute deviation in the system (16)9. The authors of [49]
+also introduce robust rotation and pairwise direction estimation methods. We note, however, that
+9The method of [49] actually assumes the possibility of multiple pairwise direction measurements for each camera
+pair i and j, computed from each triangle the pair is in.
+11
+
+such maximal deviation penalty methods (i.e., ℓ∞norm minimization methods) are highly sensitive
+to outliers in the pairwise direction estimates.
+3.1
+Robust Convex Methods
+The existence of large proportion of outliers among pairwise direction estimates, e.g. stemming from
+systematically mismatched features between images as a result of symmetries or ambiguities in the im-
+ages (also see §6.2), manifests itself as large errors in the estimated locations. While for some datasets
+this diﬃculty may be tamed by preprocessing of the pairwise directions for rejection of outliers (e.g.,
+as in [83]), making use of consistencies in locally constructed 3D structures, etc., generally applicable
+eﬃcient algorithms, which are resilient to large number of outliers and which exhibit provable conver-
+gence to globally optimal solutions and admit theoretical guarantees of robustness, are of high value.
+We will consider two recent algorithms in this section having some of these desired properties.
+The ﬁrst location estimation algorithm, based on the system (16) and closely related to [76, 49],
+is given in [53], where this time, instead of using a cost function given as the sum of squared errors
+(as in [76]) or the maximum error (as in [49]) in the system of equations (16), the method minimizes
+the sum of unsquared errors in (16) (hence the name least unsquared deviations (LUD) method) by
+employing the same relaxed repulsion constraints αij ≥1. In other words, ti are estimated by solving
+minimize
+{ti},{αij}
+X
+i∼j
+∥ti −tj −αijγij∥
+subject to
+X
+i
+ti = 0 ; αij ≥1
+(18)
+The motivation in this formulation (mainly inspired by compressed sensing methods designed to re-
+cover corrupted signals from a minimal set of linear measurements), is to maintain robustness to
+outliers in the measurements of the pairwise directions γij. As a convex second-order cone program
+(SOCP), the LUD solver (18) is a computationally eﬃcient location estimator with guaranteed con-
+vergence to the globally optimal solution. More importantly, the rather interesting phenomenon of
+exact location recovery10 by the LUD method in the presence of suﬃciently many exact direction mea-
+surements (i.e. suﬃciently few outlier direction measurements), the number of which varies with the
+level of sparsity in the measurement graph and the number of cameras, is empirically demonstrated
+for the ﬁrst time in [53] (cf. Figure 7). An eﬃcient iteratively weighted least squares (IRLS) solver
+for the LUD problem (18) is provided in [53].
+Additionally, [53] introduces a (non-convex) direction estimation algorithm based on the system
+(9) (similar to [54], but more eﬃcient). The pairwise directions are estimated in a two step procedure
+that ﬁrst produces estimates of unsigned directions γ0
+ij = bijγij, and then computes the initially
+undetermined signs bij ∈{−1, +1} via the chirality requirement on the 3D points. In order to maintain
+robustness to outliers among estimates ˆyk
+ij of yk
+ij in (9) for the estimation of unsigned directions γ0
+ij,
+[53] considers the following (non-convex) problem:
+minimize
+γ0
+ij
+mij
+X
+k=1
+|(γ0
+ij)T ˆyk
+ij|
+subject to ∥γ0
+ij∥= 1
+(19)
+To obtain the estimate ˆγ0
+ij, a (heuristic) IRLS method is used, which is not guaranteed to converge
+to global optima (since the program (19) is not convex). However, [53] provides empirical evidence
+10Here, “exact location recovery” corresponds to the estimation of locations up to a global scale and translation (i.e.,
+up to a gauge freedom of kind ti →cti + t for arbitrary c > 0 and t ∈R3), whose ground truth values are known, with
+a total error smaller than a ﬁxed value, which may be chosen to represent machine precision errors.
+12

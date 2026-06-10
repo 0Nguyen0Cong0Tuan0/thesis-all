@@ -1,0 +1,40 @@
+\begin{titlepage}
+\newcommand{\HRule}{\rule{\linewidth}{0.5mm}}
+\centering
+
+% Thêm khung viền cho trang
+\AddToShipoutPictureBG*{%
+  \AtPageLowerLeft{%
+    \setlength{\unitlength}{1mm}%
+    \put(10,10){\framebox(\dimexpr\paperwidth-20mm,\dimexpr\paperheight-20mm){}}%
+  }%
+}
+
+\textsc{\LARGE ĐẠI HỌC QUỐC GIA TPHCM}\\[0.5cm]
+\textsc{\Large TRƯỜNG ĐẠI HỌC KHOA HỌC TỰ NHIÊN}\\[0.5cm]
+\textsc{\large KHOA CÔNG NGHỆ THÔNG TIN}\\[0.5cm]
+\includegraphics[scale=.25]{img/hcmus-logo.png}\\[0.5cm]
+
+{
+\huge{{\reporttitle}}\\[1cm]
+\Huge{\bfseries{\reportname}}
+}\\[1cm]
+
+
+
+\begin{center}
+
+	{\LARGE \emph{Giáo viên hướng dẫn}}\\[0.3cm]
+	{\large \teachername}\\[0.8cm]
+
+	{\LARGE \emph{Nhóm}}\\[0.3cm]
+	{\large \studentname}\\[0.8cm]
+
+        {\LARGE \emph{Hội đồng bảo vệ}}\\[0.3cm]
+	{\large \majorname}\\[0.8cm]
+\end{center}
+
+\vfill
+% Bạn có thể thêm năm học hoặc thông tin khác ở cuối trang nếu muốn
+Thành phố Hồ Chí Minh, năm \the\year
+\end{titlepage}

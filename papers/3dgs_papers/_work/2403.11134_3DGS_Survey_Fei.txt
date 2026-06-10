@@ -1,0 +1,1024 @@
+Computational Visual Media
+https://doi.org/10.1007/s41095-0xx-xxxx-x
+Research/Review Article
+Recent Advances in 3D Gaussian Splatting
+Tong Wu1, Yu-Jie Yuan1, Ling-Xiao Zhang1, Jie Yang1, Yan-Pei Cao2, Ling-Qi Yan3, and Lin Gao1(B)
+© The Author(s)
+Abstract
+The emergence of 3D Gaussian Splatting
+(3DGS) has greatly accelerated the rendering speed of novel
+view synthesis. Unlike neural implicit representations like
+Neural Radiance Fields (NeRF) that represent a 3D scene
+with position and viewpoint-conditioned neural networks,
+3D Gaussian Splatting utilizes a set of Gaussian ellipsoids
+to model the scene so that efficient rendering can be ac-
+complished by rasterizing Gaussian ellipsoids into images.
+Apart from the fast rendering speed, the explicit representa-
+tion of 3D Gaussian Splatting facilitates downstream tasks
+like dynamic reconstruction, geometry editing, and physi-
+cal simulation. Considering the rapid change and growing
+number of works in this field, we present a literature re-
+view of recent 3D Gaussian Splatting methods, which can
+be roughly classified into 3D reconstruction, 3D editing, and
+other downstream applications by functionality. Traditional
+point-based rendering methods and the rendering formula-
+tion of 3D Gaussian Splatting are also illustrated for a better
+understanding of this technique. This survey aims to help
+beginners get into this field quickly and provide experienced
+researchers with a comprehensive overview, which can stim-
+ulate the future development of the 3D Gaussian Splatting
+representation.
+Keywords
+3D Gaussian Splatting, radiance field, novel
+view synthesis, editing, generation
+1
+Introduction
+With the development of virtual reality and augmented real-
+ity, the demand for realistic 3D content is increasing. Tradi-
+1
+Institute of Computing Technology, Chinese Academy of
+Sciences,
+Beijing,
+China,
+100190.
+E-mail:
+Tong
+Wu,
+wutong19s@ict.ac.cn;
+Yu-Jie
+Yuan,
+yuanyujie@ict.ac.cn;
+Ling-Xiao
+Zhang,
+zhanglingxiao@ict.ac.cn;
+Jie
+Yang,
+yangjie01@ict.ac.cn; Lin Gao, gaolin@ict.ac.cn.
+2
+VAST. Yan-Pei Cao, caoyanpei@gmail.com.
+3
+Department of Computer Science, University of California.
+Ling-Qi Yan, lingqi@cs.ucsb.edu.
+Manuscript received: 2024-02-28;
+tional 3D content creation methods include 3D reconstruc-
+tion from scanners or multi-view images and 3D modeling
+with professional software. However, traditional 3D recon-
+struction methods are likely to produce less faithful results
+due to imperfect capture and noisy camera estimation. 3D
+modeling methods yield realistic 3D content but require
+professional user training and interaction, which is time-
+consuming.
+To create realistic 3D content automatically, Neural radi-
+ance fields (NeRF) [1] propose to model a 3D scene’s ge-
+ometry and appearance with a density field and a color field,
+respectively. NeRF greatly improved the quality of novel view
+synthesis results but still suffered from its low training and
+rendering speed. While significant efforts [2–4] have been
+made to accelerate it to facilitate its applications on common
+devices, it is still hard to find a robust method that can both
+train a NeRF quickly enough (⩽1 hour) on a consumer-level
+GPU and render a 3D scene at an interactive frame rate (∼
+30 FPS) on common devices like cellphones and laptops. To
+resolve the speed issues, 3D Gaussian Splatting (3DGS) [5]
+proposes to rasterize a set of Gaussian ellipsoids to approxi-
+mate the appearance of a 3D scene, which not only achieves
+comparable novel view synthesis quality but also allows fast
+converge (∼30 minutes) and real-time rendering (⩾30 FPS)
+at 1080p resolution, making low-cost 3D content creation and
+real-time applications possible.
+Based on the 3D Gaussian Splatting representation, a num-
+ber of research works have come out and more are on the
+way. To help readers get familiar with 3D Gaussian Splatting
+quickly, we present a survey on 3D Gaussian Splatting, which
+covers both traditional splatting methods and recent neural-
+based 3DGS methods. There are two literature reviews [6, 7]
+that summarize recent works on 3DGS, which also serve as
+a good reference tool for this field. As shown in Fig. 1, we
+divide these works into three parts by functionality. We first
+introduce how 3D Gaussian Splatting allows realistic scene
+reconstruction under various sceneries (Sec. 2) and further
+present scene editing techniques with 3D Gaussian Splatting
+
+2
+T. Wu, Y.-J Yuan, L.-X Zhang, J. Yang, Y.-P Cao, L.-Q Yan, L. Gao
+Fig. 1
+Structure of the literature review and taxonomy of current 3D Gaussian Splatting methods.
+(Sec. 3) and how 3D Gaussian Splatting makes downstream
+applications like digital human possible (Sec. 4). Finally, we
+summarize recent research works on 3D Gaussian Splatting
+at a higher level and present future works remaining to be
+done in this field (Sec. 5). A timeline of representative works
+can be found in Fig. 2.
+2
+Gaussian Splatting for 3D Reconstruction
+2.1
+Point-based Rendering
+Point-based rendering technique aims to generate realistic
+images by rendering a set of discrete geometry primitives.
+Grossman and Dally [8] propose the point-based rendering
+technique based on the purely point-based representation,
+where each point only influences one pixel on the screen. In-
+stead of rendering points, Zwicker et al. [9] propose to render
+splats (ellipsoids) so that each splat can occupy multiple pix-
+els and the mutual overlap between them can generate hole-
+free images more easily than purely point-based representa-
+tion. Later, a series of splatting methods aim to enhance it by
+introducing a texture filter for anti-aliasing rendering [10],
+improving rendering efficiency [11, 12], and resolving dis-
+continuous shading [13]. For more details about traditional
+point-based rendering techniques, please refer to [14].
+Traditional point-based rendering methods focus more on
+how to produce high-quality rendered results with a given ge-
+ometry. With the development of recent implicit representa-
+tion [15–17], researchers have started to explore point-based
+rendering with the neural implicit representation without any
+given geometry for the 3D reconstruction task. One repre-
+sentative work is NeRF [1] which models geometry with
+an implicit density field and predicts view-dependent color
+ci with another appearance field. The point-based rendering
+combines all sample points’ color on a camera ray to produce
+a pixel color C by:
+C =
+N
+X
+i=1
+ciαiTi
+(1)
+where N is the number of sample points on a ray and
+αi = exp(−Pi−1
+j=1 σjδj) are the view-dependent color and
+the opacity value for ith point on the ray. σj is the jth point’s
+density value. Ti = Qi−1
+j=1(1 −αj) is accumulated transmit-
+tance. To ensure high-quality rendering, NeRF [1] typically
+requires sampling 128 points on a single ray, which unavoid-
+ably takes longer time to train and render.
+To speed up both training and rendering, instead of pre-
+dicting density values and colors for all sample points with
+neural networks, 3D Gaussian Splatting [5] abandons the
+neural network and directly optimizes Gaussian ellipsoids to
+which attributes like position P, rotation R, scale S, opac-
+ity α and Spherical Harmonic coefficients (SH) representing
+view-dependent color are attached. The pixel color is deter-
+mined by Gaussian ellipsoids projected onto it from a given
+viewpoint. The projection of 3D Gaussian ellipsoids can be
+formulated as:
+Σ′ = JWΣW T JT
+(2)
+where Σ′ and Σ = RSST RT are the covariance matrices
+for 3D Gaussian ellipsoids and projected Gaussian ellipsoids
+on 2D image from a viewpoint with viewing transformation
+matrix W. J is the Jacobian matrix for the projective trans-
+formation. 3DGS shares a similar rendering process with
+NeRF but there are two major differences between them:
+(1) 3DGS models opacity values directly while NeRF trans-
+forms density values to the opacity values.
+(2) 3DGS uses rasterization-based rendering which does
+not require sampling points while NeRF requires dense
+sampling in the 3D space.
+Without sampling points and querying the neural network,
+3DGS becomes extremely fast and achieves ∼30 FPS on
+a common device with comparable rendering quality with
+NeRF.
+
+Recent Advances in 3D Gaussian Splatting
+3
+Jun 2023
+Aug 2023
+Oct 2023
+Dec 2023
+Mar 2024
+3D Reconstruction
+3D Editing
+Applications
+Gaussian Splatting [5]
+Dynamic 3D Gaussians [18]
+Deformable 3D Gaussians [19]
+DreamGaussian [20]
+PhysGaussian [21]
+SuGaR [22]
+Relightable 3D Gaussian [23]
+GaussianShader [24]
+GPS-Gaussian [25]
+Zou et al. [26]
+DreamGaussian4D [27]
+SC-GS [28]
+VR-GS [29]
+GaMes [30]
+Gao et al. [31]
+GaussianPro [32]
+Fig. 2
+A brief timeline of representative works with the 3D Gaussian Splatting representation.
+2.2
+Quality Enhancement
+Though producing high-quality reconstruction results, there
+are still improvement spaces for 3DGS’s rendering. Mip-
+Splatting [33] observed that changing the sampling rate, for
+example, the focal length, can greatly influence the qual-
+ity of rendered images by introducing high-frequency Gaus-
+sian shape-like artifacts or strong dilation effects. To elimi-
+nate the high-frequency Gaussian shape-like artifacts, Mip-
+Splatting [33] constrains the frequency of the 3D represen-
+tation to be below half the maximum sampling frequency
+determined by the training images. In addition, to avoid
+the dilation effects, it introduces another 2D Mip filter to
+projected Gaussian ellipsoids to approximate the box filter
+similar to EWA-Splatting [10]. MS3DGS [34] also aims at
+solving the aliasing problem in the original 3DGS and in-
+troduces a multi-scale Gaussian splatting representation and
+when rendering a scene at a novel resolution level, it selects
+Gaussians from different scale levels to produce alias-free
+images. Analytic-Splatting [35] approximates the cumulative
+distribution function of Gaussians with a logistic function to
+better model each pixel’s intensity response for anti-alias.
+SA-GS [36] utilizes an adaptive 2D low-pass filter at the
+test time according to the rendering resolution and camera
+distance.
+Apart from the aliasing problem, the capability of render-
+ing view-dependent effects also needs to be improved. To
+produce more faithful view-dependent effects, VDGS [37]
+proposes to model the 3DGS to represent 3D shapes and
+predict attributes like view-dependent color and opacity with
+NeRF-like neural network instead of Spherical Harmonic
+(SH) coefficients in the original 3DGS. Scaffold-GS [38]
+proposes to initialize a voxel grid and attach learnable fea-
+tures onto each voxel point and all attributes of Gaussians
+are determined by interpolated features and lightweight neu-
+ral networks. Based on Scaffold-GS, Octree-GS [39] intro-
+duces a level-of-detail strategy to better capture details. In-
+stead of changing the view-dependent appearance modeling
+approach, StopThePop [40] points out that 3DGS tends to
+cheat view-dependent effects by popping 3D Gaussians due
+to the per-ray depth sorting, which leads to less faithful re-
+sults when the viewpoint is rotated. To mitigate the potential
+of popping 3D Gaussians, StopThePop [40] replaces the per-
+ray depth sorting with tile-based sorting to ensure consistent
+sorting order at a local region. To better guide the growth of
+3D Gaussian Splatting, GaussianPro [32] introduces a pro-
+gressive propagation strategy to updating Gaussians by con-
+sidering the normal consistency between neighboring views
+and adding plane constraints as shown in Fig. 3. GeoGaus-
+sian [41] proposes to densify Gaussians on the tangent plane
+of Gaussians and encourage the smoothness of geometric
+properties between neighboring Gaussians. RadSplat [42]
+initializes 3DGS with point cloud derived from a trained
+neural radiance field and prunes Gaussians with a multi-view
+importance score. To deal with more complex shadings like
+specular and anisotropic components, Spec-Gaussian [43]
+proposes to utilize Anisotropic Spherical Gaussian to ap-
+proximate 3D scenes’ appearance. TRIPS [44] attaches a
+neural feature onto Gaussians and renders pyramid-like im-
+age feature planes according to the projected Gaussians size
+similar to ADOP [45] to resolve the blur issue in the orig-
+inal 3DGS. Handling the same issue, FreGS [46] applies
+frequency-domain regularization to the rendered 2D image
+to encourage high-frequency details recovery. GES [47] uti-
+lizes the Generalized Normal Distribution(NFD) to sharpen
+scene edges. To resolve the problem that 3DGS is sensitive to
+initialization, RAIN-GS [48] proposes to initialize Gaussians
+
+4
+T. Wu, Y.-J Yuan, L.-X Zhang, J. Yang, Y.-P Cao, L.-Q Yan, L. Gao
+Table 1
+Quantitative comparison of novel view synthesis results
+on the MipNeRF 360 dataset [51] using PSNR, SSIM and LPIPS
+metrics.
+Methods
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+MipNeRF [52]
+24.04
+0.616
+0.441
+MipNeRF 360 [51]
+27.57
+0.793
+0.234
+ZipNeRF [53]
+28.54
+0.828
+0.189
+3DGS [5]
+27.21
+0.815
+0.214
+Mip-Splatting [33]
+27.79
+0.827
+0.203
+Scaffold-GS [38]
+28.84
+0.848
+0.220
+VDGS [37]
+27.66
+0.809
+0.223
+GaussianPro [32]
+27.92
+0.825
+0.208
+sparsely with large variance from the SfM point cloud and
+progressively applies low-pass filtering to avoid 2D Gaus-
+sian projections smaller than a pixel. Pixel-GS [49] takes the
+number of pixels that a Gaussian covers from all the input
+viewpoints into account in the splitting process and scales
+the gradient according to the distance to the camera to sup-
+press floaters. Bul`o et al. [50] also leverage pixel-level error
+as a densification criteria and revise the opacity setting in the
+cloning process for more stable training process. Quantita-
+tive results of different reconstruction methods can be found
+in Table 1. 3DGS-based methods and NeRF-based methods
+are comparable but 3DGS-based methods have faster render-
+ing speed.
+2.3
+Compression and Regularization
+Although the 3D Gaussian Splatting achieves real-time ren-
+dering, there is improvement space in terms of lower com-
+putational requirements and better point distribution. Some
+methods focus on changing the original representation to
+reduce computational resources.
+Vector Quantization, a traditional compression method
+in signal processing, which involves clustering multi-
+dimensional data into a finite set of representations, is mainly
+utilized in Gaussians [54–58]. C3DGS [54] adopts residual
+vector quantization (R-VQ) [59] to represent geometric at-
+tributes, including scaling and rotation. SASCGS [56] uti-
+lizes vector clustering to encode color and geometric at-
+tributes into two codebooks, with a sensitivity-aware K-
+Means method. As shown in Fig. 4, EAGLES [57] quantizes
+all attributes including color, position, opacity, rotation, and
+scaling, they show that the quantization of opacity leads
+to fewer floaters or visual artifacts in the novel view syn-
+thesis task. Compact3D [55] does not quantize opacity and
+position, because sharing them results in overlapping Gaus-
+sians. LightGaussian [58] prunes Gaussians with a smaller
+importance score and adopts octree-based lossless compres-
+sion in G-PCC [60] for the position attribute due to the
+Table 2
+Comparison of different compression methods on the
+MipNeRF360 [51] dataset. Size is measured in MB.
+Methods
+SSIM↑
+PSNR↑
+LPIPS↓Size↓
+3DGS[5]
+0.815
+27.21
+0.214
+750
+C3DGS[54]
+0.798
+27.08
+0.247
+48.8
+Compact3D [55]
+0.808
+27.16
+0.228
+/
+EAGLES [57]
+0.81
+27.15
+0.24
+68
+SOGS[62]
+0.763
+25.83
+0.273
+18.2
+SASCGS[56]
+0.801
+26.98
+0.238
+28.80
+LightGaussian [58]
+0.857
+28.45
+0.210
+42.48
+sensitivity to the subsequent rasterization accuracy for the
+position. Based on the same importance score calculation,
+Mini-Splatting [61] samples Gaussians instead of pruning
+points to avoid artifacts caused by pruning. SOGS [62] adopt
+a different method from Vector Quantization. They arrange
+Gaussian attributes into multiple 2D grids. These grids are
+sorted and a smoothness regularization is applied to penalize
+all pixels that have very different values compared to their
+local neighborhood on the 2D grid. HAC [63] adopts the
+idea of Scaffold-GS [38] to model the scene with a set of
+anchor points and learnable features on these anchor points.
+It future introduces an adaptive quantization module to com-
+press the features of anchor points with the multi-resolution
+hash grid [2]. Jo et al. [64] propose to identify unnecessary
+Gaussians to compress 3DGS and accelerate the computa-
+tion. Apart from 3D compression, the 3D Gaussian Splatting
+has also been applied to 2D image compression [65], where
+the 3D Gaussians degenerates to 2D Gaussians.
+In terms of disk data storage, SASCGS [56] utilizes the
+entropy encoding method DEFLATE, which utilizes a com-
+bination of the LZ77 algorithm and Huffman coding, to com-
+press the data. SOGS [62] compress the RGB grid with JPEG
+XL and store all other attributes as 32-bit OpenEXR images
+with zip compression. Quantitative reconstruction results and
+sizes of 3D scenes after compression are shown in Table 2.
+2.4
+Dynamic 3D Reconstruction
+The same as the NeRF representation, 3DGS can also be ex-
+tended to reconstruct dynamic scenes. The core of dynamic
+3DGS lies in how to model the variations of Gaussian at-
+tribute values over time. The most straightforward way is
+to assign different attribute values to 3D Gaussian at differ-
+ent timesteps. Luiten et al. [18] regard the center and rota-
+tion (quaternion) of 3D Gaussian as variables that change
+over time, while other attributes remain constant over all
+timesteps, thus achieving 6-DOF tracking by reconstruct-
+ing dynamic scenes. However, the frame-by-frame discrete
+definition lacks continuity, which can cause poor results in
+long-term tracking. Therefore, physical-based constraints are
+
+Recent Advances in 3D Gaussian Splatting
+5
+Fig. 3
+Overview of GaussianPro [32]. Neighboring views’ normal direction consistency is considered to produce better reconstruction
+results.
+Fig. 4
+Pipeline from EAGLES [57]. Vector Quantization (VQ) is utilized to compress Gaussian attributes.
+introduced, which are three regularization losses, including
+short-term local-rigidity and local-rotation similarity losses
+and a long-term local-isometry loss. However, this method
+still lacks inter-frame correlation and requires high storage
+overhead for long-term sequences. Therefore, decomposing
+spatial and temporal information and modeling them with
+a canonical space and a deformation field, respectively, has
+become another exploration direction. The canonical space
+is the static 3DGS, then the problem becomes how to model
+the deformation field. One way is to use an MLP network
+to implicitly fit it, similar to the dynamic NeRF [66]. Yang
+et al. [19] follow this idea and propose to input the positional-
+encoded Gaussian position and timestep t to the MLP which
+outputs the offsets of the position, rotation, and scaling of
+3D Gaussian. However, inaccurate poses may affect render-
+ing quality. This is not significant in continuous modeling of
+NeRF, but discrete 3DGS can amplify this problem, espe-
+cially in the time interpolation task. So, they add a linearly
+decaying Gaussian noise to the encoded time vector to im-
+prove temporal smoothing without additional computational
+overhead. Some results are shown in Fig. 5. 4D-GS [67]
+adopts the multi-resolution HexPlane voxels [68] to encode
+the temporal and spatial information of each 3D Gaussian
+rather than positional encoding and utilizes different com-
+pact MLPs for different attributes. For stable training, it first
+optimizes static 3DGS and then optimizes the deformation
+field represented by an MLP. GauFRe [69] applies the expo-
+nential and normalization operation to the scaling and rota-
+tion respectively after adding the delta values predicted by
+an MLP, ensuring convenient and reasonable optimization.
+As dynamic scenes contain large static parts, it randomly
+initializes the point cloud into dynamic point clouds and
+static point clouds, optimizes them accordingly, and renders
+them together to achieve decoupling of the dynamic part and
+the static part. 3DGStream [70] allows online training of
+3DGS into the dynamic scene reconstruction by modeling
+the transformation between frames as a neural transforma-
+tion cache and adaptively adding 3D Gaussians to handle
+emerging objects. 4DGaussianSplatting [71] turns 3D Gaus-
+sians into 4D Gaussians and slice the 4D Gaussians into 3D
+Gaussians for each time step. The sliced 3D Gaussians are
+projected onto image plane to reconstruct the correspond-
+ing frame. Guo et al. [72] and GaussianFlow [73] introduce
+2D flow estimation results into the training of dynamic 3D
+Gaussians, which supports deformation modeling between
+neighboring frames and enables superior 4D reconstruction
+and 4D generation results. TOGS [74] constructs an opacity
+offset table to model the changes in digital subtraction an-
+
+6
+T. Wu, Y.-J Yuan, L.-X Zhang, J. Yang, Y.-P Cao, L.-Q Yan, L. Gao
+giography. Zhang et al. [75] leverage the diffusion prior to
+enhance dynamic scene reconstruction and propose a neural
+bone transformation module for animatable objects recon-
+struction from monocular videos.
+Compared to NeRF, 3DGS is an explicit representation and
+the implicit deformation modeling requires lots of parame-
+ters which may bring overfit, so some explicit deformation
+modeling methods are also proposed, which ensure fast train-
+ing. Katsumata et al. [76] propose to use the Fourier series to
+fit the changes of the Gaussian position, inspired by the fact
+that the motion of human and articulated objects is sometimes
+periodic. The rotation is approximated by a linear function.
+Other attributes remain unchanged over time. So dynamic
+optimization is to optimize the parameters of the Fourier se-
+ries and the linear function, and the number of parameters is
+independent of time. These parametric functions are contin-
+uous functions about time, ensuring temporal continuity and
+thus ensuring the robustness of novel view synthesis. In ad-
+dition to the image losses, a bidirectional optical flow loss is
+also introduced. The polynomial fitting and Fourier approxi-
+mation have advantages in modeling smooth motion and vi-
+olent motion, respectively. So Gaussian-Flow [77] combines
+these two methods in the time and frequency domains to
+capture the time-dependent residuals of the attribute, named
+as Dual-Domain Deformation Model (DDDM). The position,
+rotation, and color are considered to change over time. To pre-
+vent optimization problems caused by uniform time division,
+this work adopts adaptive timestep scaling. Finally, the op-
+timization iterates between static optimization and dynamic
+optimization, and introduces temporal smoothness loss and
+KNN rigid loss. Li et al. [78] introduce a temporal radial basis
+function to represent temporal opacity, which can effectively
+model the scene content that emerges or vanishes. Then, the
+polynomial function is exploited to model the motion and
+rotation of 3D Gaussians. They also replace the spherical
+harmonics with features to represent view- and time-related
+color. These features consist of three parts: base color, view-
+related feature, and time-related feature. The latter two are
+translated into a residual color through an MLP added to
+the base color to obtain the final color. During optimization,
+new 3D Gaussians will be sampled at the under-optimized
+positions based on training error and coarse depth. The ex-
+plicit modeling methods used in the above methods are all
+based on commonly used functions. DynMF [79] assumes
+that each dynamic scene is composed of a finite and fixed
+number of motion trajectories and argues that a learned basis
+of the trajectories will be smoother and more expressive. All
+motion trajectories in the scene can be linearly represented
+Table 3
+Quantitative comparison of novel view synthesis results
+on the D-NeRF [66] dataset using PSNR, SSIM and LPIPS metrics.
+Methods
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+D-NeRF [66]
+31.69
+0.975
+0.057
+TiNeuVox [81]
+33.76
+0.984
+0.044
+Tensor4D [82]
+27.72
+0.945
+0.051
+K-Planes [83]
+32.32
+0.973
+0.038
+CoGS [84]
+37.90
+0.983
+0.027
+GauFRe [69]
+34.80
+0.985
+0.028
+4D-GS [67]
+34.01
+0.989
+0.025
+Yang et al. [19]
+39.51
+0.990
+0.012
+SC-GS [28]
+43.30
+0.997
+0.0078
+by this learned basis and a small temporal MLP is used to
+generate the basis. The position and rotation change over time
+and both share the motion coefficients with different motion
+bases. The regularization, sparsity, and local rigidity terms of
+the motion coefficients are introduced during optimization.
+There are also some other ways to explore. 4DGS [85] re-
+gards the spacetime of the scene as an entirety and transforms
+3D Gaussian into 4D Gaussian, that is, transforming the at-
+tribute values defined on Gaussian to 4D space. For example,
+the scaling matrix is diagonal, so adding a scaling factor of
+time dimension on the diagonal forms the scaling matrix
+in 4D space. The 4D extension of the spherical harmonics
+(SH) can be expressed as the combination of SH with 1D-
+basis functions. SWAGS [86] divides the dynamic sequence
+into different windows based on the amount of motion and
+trains separate dynamic 3DGS model in different windows,
+with different canonical spaces and deformation fields. The
+deformation field uses a tunable MLP [87], which focuses
+more on modeling the dynamic part of the scene. Finally,
+fine-tuning ensures temporal consistency between windows
+using the overlapping frame to add constraints. The MLP
+is fixed and only the canonical representation is optimized
+during fine-tuning.
+These dynamic modeling methods can be further applied
+in the medical field, such as the markless motion recon-
+struction for motion analysis of infants and neonates [88]
+which introduces additional mask and depth supervisions,
+and monocular endoscopic reconstruction [89–92]. Quanti-
+tative reconstruction results by representative NeRF-based
+and 3DGS-based methods are reported in Table 3. 3DGS-
+based methods have clear advantages compared to NeRF-
+based methods due to their explicit geometry representation
+that can model the dynamics more easily. The efficient render-
+ing of 3DGS also avoids densely sampling and querying the
+neural fields in NeRF-based methods and makes downstream
+applications of dynamic reconstruction like free-viewpoint
+video more feasible.
+
+Recent Advances in 3D Gaussian Splatting
+7
+Fig. 5
+The results of Deformable3DGS [19]. Given a set of monocular multi-view images (a), this method can achieve novel view
+synthesis (b) and time synthesis (c), and has better rendering quality compared to HyperNeRF [80] (d).
+2.5
+3D Reconstruction from Challenging Inputs
+While most methods experiment on regular input data with
+dense viewpoints in relatively small scenes, there are also
+works targeting reconstructing 3D scenes with challenging
+inputs like sparse-view input, data without camera param-
+eters, and larger scenes like urban streets. FSGS [93] is
+the first to explore reconstructing 3D scenes from sparse
+view input. It initializes sparse Gaussians from structure-
+from-motion (SfM) methods and identifies them by unpool-
+ing existing Gaussians. To allow faithful geometry recon-
+struction, an extra pre-trained 2D depth estimation network
+helps to supervise the rendered depth images. SparseGS [94],
+CoherentGS [95], and DNGaussian [96] also target 3D re-
+construction from sparse-view inputs by introducing depth
+inputs estimated by pre-trained a 2D network. It further re-
+moves Gaussians with incorrect depth values and utilizes the
+Score Distillation Sampling (SDS) loss [97] to encourage
+rendered results from novel viewpoints to be more faithful.
+GaussainObject [98] instead initializes Gaussians with visual
+hull and fine-tunes a pre-trained ControlNet [99] repair de-
+graded rendered images generated by adding noises to Gaus-
+sians’ attributes, which outperforms previous NeRF-based
+sparse-view reconstruction methods as shown in Fig. 6. Mov-
+ing a step forward, pixelSplat [100] reconstructs 3D scenes
+from single-view input without any data priors. It extracts
+pixel-aligned image features similar to PixelNeRF [101]
+and predicts attributes for each Gaussian with neural net-
+works. MVSplat [102] brings the cost volume representation
+into sparse view reconstruction, which is taken as input for
+the attributes prediction network for Gaussians. SplatterIm-
+age [103] also works on single-view data but instead utilizes
+a U-Net [104] network to translate the input image into at-
+tributes on Gaussians. It can extend to multi-view inputs by
+aggregating predicted Gaussians from different viewpoints
+via warping operation.
+For urban scene data, PVG [107] makes Gaussian’s mean
+and opacity value time-dependent functions centered at cor-
+responding Gaussian’s life peak (maximum prominence over
+time). DrivingGaussian [108] and HUGS [109] reconstruct
+dynamic driving data by first incrementally optimizing static
+3D Gaussians and then composing them with dynamic ob-
+jects’ 3D Gaussians. This process is also assisted by the Seg-
+mentation Anything Model [110] and input LiDAR depth
+data. StreetGaussians [111] models the static background
+with a static 3DGS and dynamic objects by a dynamic
+3DGS where Gaussians are transformed by tracked vehi-
+cle poses and their appearance is approximated with time-
+related Spherical Harmonics (SH) coefficients. SGD [112]
+incorporate diffusion priors with street scene reconstruction
+to improve the novel view synthesis results similar to Re-
+conFusion [113]. HGS-Mapping [114] separately models
+textureless sky, ground plane, and other objects for more
+faithful reconstruction. VastGaussian [115] divides a large
+scene into multiple regions based on the camera distribution
+projected on the ground and learns to reconstruct a scene by
+iteratively adding more viewpoints into training based on vis-
+ibility criteria. In addition, it models the appearance changes
+with an optimizable appearance embedding for each view.
+CityGaussian [116] also models the large-scale scene with a
+divide-and-conquer strategy and further introduces level-of-
+detail rendering based on the distance between the camera
+to a Gaussian. To facilitate comparisons on the urban scenes
+for 3DGS methods, GauU-Scene [117] provides a large-scale
+dataset covering over 1.5km2.
+Apart from the works mentioned above, other meth-
+ods focus on special input data including images with-
+out camera [118–121], blurry inputs [122–125], uncon-
+
+8
+T. Wu, Y.-J Yuan, L.-X Zhang, J. Yang, Y.-P Cao, L.-Q Yan, L. Gao
+Fig. 6
+Results by GaussianObject [98]. Compared to previous NeRF-based sparse-view reconstruction methods [105, 106] and recent
+3DGS [5], GaussianObject achieves high-quality 3D reconstruction from only 4 views.
+strained images [126, 127], mirror-like inputs [128, 129],
+CT scans [130, 131], panoramic images [132], and satellite
+images [133].
+3
+Gaussian Splatting for 3D Editing
+3DGS allows for efficient training and high-quality real-time
+rendering using rasterization-based point-based rendering
+techniques. Editing in 3DGS has been investigated in a num-
+ber of fields. We have summarized the editing on 3DGS into
+three categories: geometry editing, appearance editing, and
+physical simulation.
+3.1
+Geometry Editing
+On the geometry side, GaussianEditor [134] controls the
+3DGS using the text prompts and semantic information from
+proposed Gaussian semantic tracing, which enables 3D in-
+painting, object removal, and object composition. Gaussian
+Grouping [135] simultaneously rebuilds and segments open-
+world 3D objects under the supervision of 2D mask pre-
+dictions from SAM and 3D spatial consistency constraints,
+which further enables diverse editing applications includ-
+ing 3D object removal, inpainting, and composition with
+high-quality visual effects and time efficiency. Furthermore,
+Point’n Move [136] combines interactive scene object ma-
+nipulation with exposed region inpainting. Thanks to the ex-
+plicit representation of 3DGS, the dual-stage self-prompting
+mask propagation process is proposed to transfer the given
+2D prompt points to 3D mask segmentation, resulting in
+a user-friendly editing experience with high-quality effects.
+Feng et al. [137] propose a new Gaussian splitting algo-
+rithm to avoid inhomogeneous 3D Gaussian reconstruction
+and makes the boundary of 3D scenes after removal opera-
+tion sharper. Although the above methods realize the editing
+on 3DGS, they are still limited to some simple editing op-
+erations (removal, rotation, and translation) for 3D objects.
+SuGaR [22] extracts explicit meshes from the 3DGS repre-
+sentation by regularizing Gaussians over surfaces. Further, it
+relies on manual adjustment of Gaussian parameters based
+on deformed meshes to realize desired geometry editing but
+struggles with large-scale deformation. SC-GS [28] learns
+a set of sparse control points for 3D scene dynamics but
+faces challenges with intense movements and detailed sur-
+face deformation. GaMeS [30] introduces a new GS-based
+model that combines conventional mesh and vanilla GS. The
+explicit mesh is utilized as input and parameterizes Gaus-
+sian components using the vertices, which can modify Gaus-
+sians in real time by altering mesh components during infer-
+ence. However, it cannot handle significant deformations or
+changes, especially the deformation on large faces, since it
+cannot change the mesh topology during training. Although
+the above methods can finish some simple rigid transforma-
+tions and non-rigid deformation, they still face challenges in
+their editing effectiveness and large-scale deformation. As
+shown in Fig. 7, Gao et al. [31] also adapt the mesh-based
+deformation to 3DGS by harnessing the priors of explicit rep-
+resentation (the surface properties like normals of the mesh,
+and the gradients generated by explicit deformation meth-
+ods) and learning the face split to optimize the parameters
+and number of Gaussians, which provides adequate topo-
+logical information to 3DGS and improves the quality for
+both the reconstruction and geometry editing results. Gaus-
+sianFrosting [138] shares a similar idea as Gao et al. [31] by
+constructing a base mesh but further develops a forsting layer
+to allow Gaussians to move in a small range near the mesh
+
+Recent Advances in 3D Gaussian Splatting
+9
+surface.
+3.2
+Appearance Editing
+On the appearance side, GaussianEditor [139] proposes to
+first modify 2D images with language input with diffusion
+model [140] in the masked region generated by the recent
+2D segmentation model [110] and updating attributes of
+Gaussians again similar to the previous NeRF editing work
+Instruct-NeRF2NeRF [141]. Another independent research
+work also named GaussianEditor [134] operates similarly but
+it further introduces a Hierarchical Gaussian Splatting (HGS)
+to allow 3D editing like object inpainting. GSEdit [142] takes
+a texture mesh or pre-trained 3DGS as input and utilizes the
+Instruct-Pix2Pix [143] and the SDS loss to updated the input
+mesh or 3DGS. To alleviate the inconsistency issue, Gauss-
+Ctrl [144] introduces the depth map as the conditional input
+of the ControlNet [99] to encourage geometry consistency.
+Wang et al. [145] also aims to solve this inconsistent is-
+sue by introducing multi-view cross-attention maps. Texture-
+GS [146] proposes to disentangle the geometry and appear-
+ance of 3DGS and learns a UV mapping network for points
+near the underlying surface, thus enabling manipulations in-
+cluding texture painting and texture swapping. 3DGM [147]
+also represents a 3D scene with a proxy mesh with fixed
+UV mapping where Gaussians are stored on the texture map.
+This disentangled representation also allows animation and
+texture editing. Apart from local texture editing, there are
+works [148–150] focusing on stylizing 3DGS with a refer-
+ence style image.
+To allow more tractable control over texture and lighting,
+researchers have started to disentangle texture and lighting to
+enable independent editing. As shown in Fig. 8, GS-IR [151]
+and RelightableGaussian [23] separately model texture and
+lighting. Additional materials parameters are defined on each
+Gaussian to represent texture and lighting is approximated
+by a learnable environment map. GIR [152] and Gaussian-
+Shader [24] share the same disentanglement paradigm by
+binding material parameters onto 3D Gaussians, but to deal
+with more challenging reflective scenes, they add normal ori-
+entation constraints to Gaussians similar to Ref-NeRF [153].
+After texture and lighting disentanglement, these methods
+can independently modify texture or lighting without influ-
+encing the other.
+3.3
+Physical Simulation
+On the physical-based 3DGS editing, as shown in Fig. 9,
+PhysGaussian [21] employs discrete particle clouds from
+3D GS for physically-based dynamics and photo-realistic
+rendering through continuum deformation [154] of Gaus-
+sian kernels. Gaussian Splashing [155] combines 3DGS and
+position-based dynamics (PBD) [156] to manage rendering,
+view synthesis, and solid/fluid dynamics cohesively. Similar
+to Gaussian shaders [24], the normal is applied to each Gaus-
+sian kernel to align its orientation with the surface normal
+and improve PBD simulation, also allowing the physically-
+based rendering to enhance dynamic surface reflections on
+fluids. VR-GS [29] is a physical dynamics-aware interactive
+Gaussian Splatting system for VR, tackling the difficulty of
+editing high-fidelity virtual content in real time. VR-GS uti-
+lizes 3DGS to close the quality gap between generated and
+manually crafted 3D content. By utilizing physically-based
+dynamics, which enhance immersion and offer precise inter-
+action and manipulation controllability. Spring-Gaus [157]
+applies the Spring-Mass model into the modeling of dynamic
+3DGS and learns the physical properties like mass and ve-
+locity from input video, which are editable for real-world
+simulation. Feature Splatting [158] further incorporates se-
+mantic priors from pre-trained networks and makes object-
+level simulation possible.
+4
+Applications of Gaussian Splatting
+4.1
+Segmentation and Understanding
+Open-world 3D scene understanding is an essential chal-
+lenge for robotics, autonomous driving, and VR/AR envi-
+ronments. With the remarkable progress in 2D scene under-
+standing brought by SAM [110] and its variants, existing
+methods have tried to integrate semantic features, such as
+CLIP [159]/DINO [160] into NeRF, to deal with 3D seg-
+mentation, understanding, and editing.
+NeRF-based methods are computationally intensive be-
+cause of the implicit and continuous representation. Recent
+methods try to integrate 2D scene understanding methods
+with 3D Gaussians to produce a real-time and easy-to-editing
+3D scene representation. Most methods utilize pre-trained 2D
+segmentation methods like SAM [110] to produce semantic
+masks of input multi-view images [135, 136, 161–166], or
+extract dense language features, CLIP [159]/DINO [160], of
+each pixel [167–169].
+LEGaussians [167] adds an uncertainty value attribute and
+semantic feature vector attribute for each Gaussian. It then
+renders a semantic map with uncertainties from a given view-
+point, to compare with the quantized CLIP and DINO dense
+features of the ground truth image. To achieve the 2D mask
+consistency across views, Gaussian Grouping [135] employs
+DEVA to propagate and associate masks from different view-
+points. It adds Identity Encoding attributes to 3D Gaussians
+
+10
+T. Wu, Y.-J Yuan, L.-X Zhang, J. Yang, Y.-P Cao, L.-Q Yan, L. Gao
+Fig. 7
+Pipeline of Gao et al. [31]. It allows large-scale geometry editing by binding 3D Gaussians onto the mesh.
+Fig. 8
+By decomposing material and lighting, GS-IR [151] en-
+ables appearance editing including relighting and material manip-
+ulation.
+and renders the identity feature map to compare with the
+extracted 2D masks.
+4.2
+Geometry Reconstruction and SLAM
+Geometry reconstruction and SLAM are important subtasks
+in 3D reconstruction.
+Geometry reconstruction
+In the context of NeRF, a series
+of works [170–173] have successfully reconstructed high-
+quality geometry from multi-view images. However, due to
+the discrete nature of 3DGS, only a few works stepped into
+this field. SuGaR [22] is the pioneering work that builds
+up 3D surfaces from multi-view images with the 3DGS
+representation. It introduces a simple but effective self-
+regularization loss to constrain that the distance between the
+camera and the closest Gaussian should be as close as possi-
+ble to the corresponding pixel’s depth value in the rendered
+depth map, which encourages the alignment between 3DGS
+and the authentic 3D surface. Another work NeuSG [174]
+chooses to incorporate the previous NeRF-based surface re-
+construction method NeuS [170] in the 3DGS representation
+to transfer the surface property to 3DGS. More specifically, it
+encourages Gaussians’ signed distance values to be zeros and
+the normal directions of 3DGS and the NeuS method to be as
+consistent as possible. 3DGSR [175] and GSDF [176] also
+encourage the consistency between SDF and 3DGS to en-
+hance the geometry reconstruction quality. DN-Splatter[177]
+utilizes depth and normal priors captured from common de-
+vices or predicted from general-purpose networks to enhance
+the reconstruction quality of 3DGS. Wolf et al. [178] first
+train a 3DGS to render stereo-calibrated novel views and
+apply stereo depth estimation on the rendered views. The
+estimated dense depth maps are fused together by the Trun-
+cated Signed Distance Function(TSDF) to form a triangular
+mesh. 2D-GS [179] replaces 3D Gaussians with 2D Gaus-
+sians for more accurate ray-splat intersection and employs a
+low-pass filter to avoid degenerated line projection. Though
+attempts have been made in the field of geometry reconstruc-
+tion, due to the discrete nature of 3DGS, current methods
+achieve comparable or worse results compared to implicit
+representation-based methods with continuous field assump-
+tion where the surface can be easily determined.
+SLAM
+There are also 3DGS methods targeting simulta-
+neously localizing the cameras and reconstructing the 3D
+scenes. GS-SLAM [180] proposes an adaptive 3D Gaussian
+expanding strategy to add new 3D Gaussians into the train-
+ing stage and delete unreliable ones with captured depths
+and rendered opacity values. To avoid duplicate densifica-
+tion, SplaTAM [181] uses view-independent colors for Gaus-
+sians and creates a densification mask to determine whether
+a pixel in a new frame needs densification by considering
+
+Recent Advances in 3D Gaussian Splatting
+11
+Fig. 9
+Pipeline of PhysGaussian [21]. Treating 3D Gaussians as continuum, PhysGaussian [21] produces realistic physical simulation
+results.
+Fig. 10
+Geometry reconstruction results by SuGaR [22].
+current Gaussians and the captured depth of the new frame.
+For stabilizing the localization and mapping, GaussianSplat-
+tingSLAM [182] and Gaussian-SLAM [183] put an extra
+scale regularization loss on the scale of Gaussians to en-
+courage isotropic Gaussians. For easier initialization, LIV-
+GaussMap [184] initializes Gaussians with LiDAR point
+cloud and builds up an optimizable size-adaptive voxel grid
+for the global map. SGS-SLAM [185], NEDS-SLAM [186],
+and SemGauss-SLAM [187] further consider Gaussian’s se-
+mantic information in the simultaneous localization and map-
+ping process by distilling 2D semantic information which can
+be obtained using 2D segmentation methods or provided by
+the dataset. Deng et al. [188] avoid redundant Gaussian split-
+ting based on sliding window mask and use vector quantiza-
+tion to further encourage compact 3DGS. CG-SLAM [189]
+introduces an uncertainty map into the training process based
+on the rendered depth and greatly improves the reconstruc-
+tion quality. Based on the reconstructed map by SLAM-based
+methods, tasks in robotics like relocalization [190], naviga-
+tion [191–193], 6D pose estimation [194], multi-sensor cal-
+ibration [195, 196] and manipulation [197, 198] can be per-
+formed efficiently. We report quantitative results by different
+Table 4
+Quantitative comparison of novel view synthesis results
+by different SLAM methods on the Replica [199] dataset using
+PSNR, SSIM and LPIPS metrics.
+Methods
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+NICE-SLAM [200]
+24.42
+0.81
+0.23
+Vox-Fusion [201]
+24.41
+0.80
+0.24
+Co-SLAM [202]
+30.24
+0.94
+0.25
+GS-SLAM [180]
+31.56
+0.97
+0.094
+SplaTAM [181]
+34.11
+0.97
+0.10
+GaussianSplattingSLAM [182]
+37.50
+0.96
+0.07
+Gaussian-SLAM [183]
+38.90
+0.99
+0.07
+SGS-SLAM [185]
+34.15
+0.97
+0.096
+SLAM methods on the reconstruction task in Table. 4. The
+explicit geometry representation provided by 3DGS enables
+flexible reprojection to alleviate the misalignment between
+different viewpoints, thus leading to better reconstruction
+compared to NeRF-based methods. The real-time render-
+ing feature of 3DGS also makes neural-based SLAM meth-
+ods more applicable as the training in previous NeRF-based
+methods require more hardware and time.
+4.3
+Digital Human
+Learning virtual humans with implicit representation has
+been explored in various ways, especially for the NeRF
+and SDF representations, which exhibit high-quality results
+from multi-view images but suffer from heavy computational
+costs. Thanks to the high efficiency of 3DGS, research works
+have flourished and pushed 3DGS into digital human cre-
+ation.
+Human body
+In full-body modeling, works aim to recon-
+struct dynamic humans from multi-view videos. D3GA [203]
+first creates animatable human avatars using drivable 3D
+Gaussians and tetrahedral cages, which achieves promis-
+ing geometry and appearance modeling. To capture more

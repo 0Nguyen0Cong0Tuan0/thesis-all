@@ -1,0 +1,3129 @@
+
+
+==========================================================================================
+### 2112.03907_RefNeRF  (pages=14, img=2112.03907_RefNeRF_fig.png)
+==========================================================================================
+Ref-NeRF: Structured View-Dependent Appearance for Neural Radiance Fields
+Dor Verbin1,2
+Peter Hedman2
+Ben Mildenhall2
+Todd Zickler1
+Jonathan T. Barron2
+Pratul P. Srinivasan2
+1Harvard University
+2Google Research
+Abstract
+Neural Radiance Fields (NeRF) is a popular view syn-
+thesis technique that represents a scene as a continuous
+volumetric function, parameterized by multilayer percep-
+trons that provide the volume density and view-dependent
+emitted radiance at each location. While NeRF-based tech-
+niques excel at representing ﬁne geometric structures with
+smoothly varying view-dependent appearance, they often
+fail to accurately capture and reproduce the appearance
+of glossy surfaces. We address this limitation by introduc-
+ing Ref-NeRF, which replaces NeRF’s parameterization of
+view-dependent outgoing radiance with a representation of
+reﬂected radiance and structures this function using a col-
+lection of spatially-varying scene properties. We show that
+together with a regularizer on normal vectors, our model
+signiﬁcantly improves the realism and accuracy of specular
+reﬂections. Furthermore, we show that our model’s inter-
+nal representation of outgoing radiance is interpretable and
+useful for scene editing.
+1. Introduction
+Neural Radiance Fields (NeRF) [24] renders compelling
+photorealistic images of 3D scenes from novel viewpoints
+using a neural volumetric scene representation. Given any
+input 3D coordinate in the scene, a “spatial” multilayer per-
+ceptron (MLP) outputs the corresponding volume density
+at that point, and a “directional” MLP outputs the outgo-
+ing radiance at that point along any input viewing direc-
+tion. Although NeRF’s renderings of view-dependent ap-
+pearance may appear reasonable at ﬁrst glance, a close in-
+spection of specular highlights reveals spurious glossy ar-
+tifacts that fade in and out between rendered views (Fig-
+ure 1), rather than smoothly moving across surfaces in a
+physically-plausible manner.
+These artifacts are caused by two fundamental issues
+with NeRF (and top-performing extensions such as mip-
+NeRF [2]). First, NeRF’s parameterization of the outgoing
+radiance at each point as a function of the viewing direction
+Ground Truth
+Ours
+Mip-NeRF [2]
+Rendering/Normals
+PSNR↑/MAE↓:
+35.6dB/11.5◦
+30.3dB/59.5◦
+ Rendering Insets
+Epipolar Images
+Figure 1. Ref-NeRF signiﬁcantly improves normal vectors (top
+row) and visual realism (remaining rows) compared to mip-NeRF,
+the previous top-performing neural view synthesis model. Ref-
+NeRF’s improvements are apparent in rendered frames (Rows 2 &
+3), and even more in rendered videos (bottom row epipolar plane
+images and supplementary video), where its glossy highlights shift
+realistically across views instead of blurring and fading like mip-
+NeRF’s. Image PSNR (higher is better) and surface normal mean
+angular error (lower is better) shown as insets.
+is poorly-suited for interpolation. Figure 2 illustrates that,
+even for a simple toy setup, the scene’s true radiance func-
+tion varies quickly with view direction, especially around
+specular highlights. As a consequence, NeRF is only able
+to accurately render the appearance of scene points from
+1
+arXiv:2112.03907v1 [cs.CV] 7 Dec 2021
+
+the speciﬁc viewing directions observed in the training im-
+ages, and its interpolation of glossy appearance from novel
+viewpoints is poor. Second, NeRF tends to “fake” specular
+reﬂections using isotropic emitters inside the object instead
+of view-dependent radiance emitted by points at the surface,
+resulting in objects with semitransparent or “foggy” shells.
+Our key insight is that structuring NeRF’s representa-
+tion of view-dependent appearance can make the underly-
+ing function simpler and easier to interpolate. We present
+a model, which we call Ref-NeRF, that reparameterizes
+NeRF’s directional MLP by providing the reﬂection of the
+viewing vector about the local normal vector as input in-
+stead of the viewing vector itself. Figure 2 (left column)
+illustrates that, for a toy scene comprised of a glossy object
+under distant illumination, this reﬂected radiance function
+is constant across the scene (ignoring lighting occlusions
+and interreﬂections) because it is unaffected by changes
+in surface orientation. Consequently, since the directional
+MLP acts as an interpolation kernel, our model is better
+able to “share” observations of appearance between nearby
+points to render more realistic view-dependent effects in in-
+terpolated views. We additionally introduce an Integrated
+Directional Encoding technique, and we structure outgoing
+radiance into explicit diffuse and specular components to
+allow the reﬂected radiance function to remain smooth de-
+spite variation in material and texture over the scene.
+While these improvements crucially enable Ref-NeRF
+to accurately interpolate view-dependent appearance, they
+rely on the ability to reﬂect viewing vectors about normal
+vectors estimated from NeRF’s volumetric geometry. This
+presents a problem, as NeRF’s geometry is foggy and not
+tightly concentrated at surfaces, and its normal vectors are
+too noisy to be useful for computing reﬂection directions (as
+shown in the right column of Figure 1). We ameliorate this
+issue with a novel regularizer for volume density that signif-
+icantly improves the quality of NeRF’s normal vectors and
+encourages volume density to concentrate around surfaces,
+enabling our model to compute accurate reﬂection vectors
+and render realistic specular reﬂections, shown in Figure 1.
+To summarize, we make the following contributions:
+1. A reparameterization of NeRF’s outgoing radiance,
+based on the reﬂection of the viewing vector about the
+local normal vector (Section 3.1).
+2. An Integrated Directional Encoding (Section 3.2) that,
+when coupled with a separation of diffuse and specu-
+lar colors (Section 3.3), enables the reﬂected radiance
+function to be smoothly interpolated across scenes
+with varying materials and textures.
+3. A regularization that concentrates volume density
+around surfaces and improves the orientation of
+NeRF’s normal vectors (Section 4).
+We apply these changes on top of mip-NeRF [2], cur-
+rently the top-performing neural representation for view
+φo
+vqks3wSK4GjJ1dHRXdOygn1AO5RMmljM8mQZIQy9B/cuFDErf/jzr8xfQgqeuDC4Zx7ufeKOVMG4Q+nMLS8srqWnG9tLG5tb1T3t1rapkpQhtEcqnaEdaUM0EbhlO26miOIk4bUWjq6nfuqdKM
+yluzTilYIHgsWMYGOlZjcdsp7qlSvIDXz/BFUhctFptRp4lvgo8C8Q9Fw0QwUsUO+V37t9SbKECkM41rjodSEOVaGEU4npW6maYrJCA9ox1KBE6rDfHbtB5ZpQ9jqWwJA2fq94kcJ1qPk8h2Jtg
+M9W9vKv7ldTITn4c5E2lmqCDzRXHGoZFw+jrsM0WJ4WNLMFHM3grJECtMjA2oZEP4+hT+T5pV1ztz/Ru/UrtcxFEB+AQHAMPBKAGrkEdNABd+ABPIFnRzqPzovzOm8tOIuZfADztsn+OiPag=
+</latexit>φr
+vqks3wSK4GjJ1dHRXdOygn1AO5RMmljM8mQZIQy9B/cuFDErf/jzr8xfQgqeuDC4Zx7ufeKOVMG4Q+nMLS8srqWnG9tLG5tb1T3t1rapkpQhtEcqnaEdaUM0EbhlO26miOIk4bUWjq6nfuqdKM
+yluzTilYIHgsWMYGOlZjcdsp7qlSvIDXz/BFUhctFptRp4lvgo8C8Q9Fw0QwUsUO+V37t9SbKECkM41rjodSEOVaGEU4npW6maYrJCA9ox1KBE6rDfHbtB5ZpQ9jqWwJA2fq94kcJ1qPk8h2Jtg
+M9W9vKv7ldTITn4c5E2lmqCDzRXHGoZFw+jrsM0WJ4WNLMFHM3grJECtMjA2oZEP4+hT+T5pV1ztz/Ru/UrtcxFEB+AQHAMPBKAGrkEdNABd+ABPIFnRzqPzovzOm8tOIuZfADztsn+OiPag=
+</latexit>φr
+φo
+O
+6KblxWsA9oh5JM21sJhmSjFBK/8GNC0Xc+j/u/BszbQUVPXDhcM693HtPmHCmDUIfzsrq2vrGZm4rv72zu7dfODhsaZkqQptEcqk6IdaUM0GbhlO4miOA45bYfjq8xv31OlmRS3ZpLQIMZDwSJGsLFSq5eMWF/2C0XkXlR93/Mhcqs1
+v1LKCpVSqgCPRfNUQRLNPqF95AkjSmwhCOte56KDHBFCvDCKezfC/VNMFkjIe0a6nAMdXBdH7tDJ5aZQAjqWwJA+fq94kpjrWexKHtjLEZ6d9eJv7ldVMT1YIpE0lqCLRVHKoZEwex0OmKLE8IklmChmb4VkhBUmxgaUtyF8fQr/Jy3
+f9apu+aZcrF8u48iBY3ACzoAHzkEdXIMGaAIC7sADeALPjnQenRfndG64ixnjsAPOG+f+SPag=</latexit>φo
+ˆ!o
+g
+asjU0equ6MZlBfuAzlAyadqGZiZDkhHKMBs3/obF4q49R/c+Tdm2goqeiDkcM693HtPEHOmNEIfVmFhcWl5pbhaWlvf2Nwqb+0lEgkoU0iuJCdACvKWUSbmlO7GkOAw4bQfjy9xv31KpmIhu9CSmfoiHERswgrWReu
+V9b4R16gWC9UkNF/qiZAOcZb1ZKlXriC75rHqAqRjU6q1ZpjiItq7jmCjo2mqIA5Gr3yu9cXJAlpAnHSnUdFGs/xVIzwmlW8hJFY0zGeEi7hkY4pMpPp1dk8NAofTgQ0rxIw6n6vSPFocp3NJUh1iP128vFv7xuogdnf
+sqiONE0IrNBg4RDLWAeCewzSYnmE0MwkczsCskIS0y0CS4P4etS+D9pVW3n1Hav3Ur9Yh5HEeyBA3AEHFADdXAFGqAJCLgD+AJPFv31qP1Yr3OSgvWvGcX/ID19gnBGZl</latexit>ˆ!r
+φr
+tb1T3t1rapkpQhtEcqnaEdaUM0EbhlO26miOIk4bUWjq6nfuqdKMyluzTilYIHgsWMYGOlZjcdsp7qlSvIDXz/BFUhctFptRp4lvgo8C8Q9Fw0QwUsUO+V37t9SbKECkM41rjodSEOVaGEU4npW6maYrJCA9ox1KBE6rDfHbtB5ZpQ9jqWwJA2fq94kcJ1qPk8h2JtgM9W9vKv7ldTITn4c5E2lmqCDzRXHGoZFw+jrsM0WJ4WNLMFHM3grJECtMjA2oZEP4+hT+T5pV1ztz/Ru/UrtcxFEB+AQHAMPBKAGrkEdNABd+ABPIFnRzqPzovzOm8tOIuZfADztsn
++OiPag=</latexit>φr
+l
+5pbhaWlvf2Nwqb+0lEgkoU0iuJCdACvKWUSbmlO7GkOAw4bQfjy9xv31KpmIhu9CSmfoiHERswgrWReuV9b4R16gWC9UkNF/qiZAOcZb1ZKlXriC75rHqAqRjU6q1ZpjiItq7jmCjo2mqIA5Gr3yu9cXJAlpAnHSnUdFGs/xVIzwmlW8hJFY0zGeEi7hkY4pMpPp1dk8NAofTgQ0rxIw6n6vSPFocp3NJUh1iP128vFv7xuogdnfsqiONE0IrNBg4RDLWAeCewzSYnmE0MwkczsCskIS0y0CS4P4etS+D9pVW3n1Hav3Ur9Yh5HEeyBA3AEHFAD
+dXAFGqAJCLgD+AJPFv31qP1Yr3OSgvWvGcX/ID19gnBGZl</latexit>ˆ!r
+B
+VUjSh3VXdOygm2FJoTJdNoOnWTCzEQoRs3/obF4q49R/c+TdO2goqemCYwzn3cu89YcKoVLb9YRSWldW14rpY3Nre0dc3evI3kqMGljzri4CZEkjMakrahi5CYRBEUhI91wfJH73VsiJOXxtZokxI/QMKYDipHSUm
+AeiOkMi/krC8nkf4yj0dkiKbTgJcCs2xbZ3XdVxoW/WGW6vkxK7UKnYNOpY9Qxks0ArMd6/PcRqRWGpOw5dqL8DAlFMSPTkpdKkiA8RkPS0zRGEZF+NrtiCo+10ocDLvSLFZyp3zsyFMl8R10ZITWSv71c/MvrpWrQ8
+DMaJ6kiMZ4PGqQMKg7zSGCfCoIVm2iCsKB6V4hHSCsdHB5CF+Xwv9Jx7WculW9qpab54s4iuAHIET4IBT0ASXoAXaAIM78ACewLNxbzwaL8brvLRgLHr2wQ8Yb5/BUpl</latexit>ˆ!o
+O
+6KblxWsA9oh5JM21sJhmSjFBK/8GNC0Xc+j/u/BszbQUVPXDhcM693HtPmHCmDUIfzsrq2vrGZm4rv72zu7dfODhsaZkqQptEcqk6IdaUM0GbhlO4miOA45bYfjq8xv31OlmRS3ZpLQIMZDwSJGsLFSq5eMWF/2C0XkXlR93/Mhcqs1
+v1LKCpVSqgCPRfNUQRLNPqF95AkjSmwhCOte56KDHBFCvDCKezfC/VNMFkjIe0a6nAMdXBdH7tDJ5aZQAjqWwJA+fq94kpjrWexKHtjLEZ6d9eJv7ldVMT1YIpE0lqCLRVHKoZEwex0OmKLE8IklmChmb4VkhBUmxgaUtyF8fQr/Jy3
+f9apu+aZcrF8u48iBY3ACzoAHzkEdXIMGaAIC7sADeALPjnQenRfndG64ixnjsAPOG+f+SPag=</latexit>φo
+x
+x
+x
+x
+x
+View Direction (NeRF)
+Reflection Direction (Ours)
+ˆn
+x
+cd
+ˆn
+ˆn
+R
+HYNUY9ELx4hkUcCGzI79MLI7OxmZtZICF/gxYPGePWTvPk3DrAHBSvpFLVne6uIBFcG9f9dnJr6xubW/ntws7u3v5B8fCoqeNUMWywWMSqHVCNgktsG4EthOFNAoEtoLR7cxvPaLSPJb3ZpygH9GB5CFn1Fip/tQrltyO
+wdZJV5GSpCh1it+dfsxSyOUhgmqdcdzE+NPqDKcCZwWuqnGhLIRHWDHUkj1P5kfuiUnFmlT8JY2ZKGzNXfExMaT2OAtsZUTPUy95M/M/rpCa89idcJqlByRaLwlQE5PZ16TPFTIjxpZQpri9lbAhVZQZm03BhuAtv7xKmh
+dl7JcqVdK1ZsjycwCmcgwdXUIU7qEDGCA8wyu8OQ/Oi/PufCxac042cwx/4Hz+AOknjQU=</latexit>x
+cd
+ˆn
+x
+x
+⇢
+⇢
+Figure 2. Visualizations of outgoing radiance in NeRF and Ref-
+NeRF, using 2D position-angle slices of radiance along an x-
+parameterized surface curve on a glossy object under colored
+lights. Because NeRF (middle row) uses view angle φo as input,
+when presented with glossy reﬂectances (left) or spatially-varying
+materials (right) it must interpolate between highly complicated
+functions like the irregularly curved colored lines shown here. In
+contrast, Ref-NeRF (bottom row) parameterizes radiance using a
+normal vector ˆn and a reﬂection angle φr, and adds diffuse color
+cd and roughness ρ to its spatial MLP, which collectively makes
+radiance functions simple to model even for shiny or spatially-
+varying materials. The gray checkerboard indicates directions be-
+low the surface at position x.
+synthesis.
+Our experiments demonstrate that Ref-NeRF
+produces state-of-the-art renderings of novel viewpoints,
+and substantially improves upon the quality of previous top-
+performing view synthesis methods for highly specular or
+glossy objects. Furthermore, our structuring of outgoing ra-
+diance produces interpretable components (normal vectors,
+material roughness, diffuse texture, and specular tint) that
+enable convincing scene editing capabilities.
+2
+
+2. Related Work
+We review NeRF and related methods for photorealistic
+view synthesis, as well as techniques from computer graph-
+ics for capturing and rendering specular appearance.
+3D scene representations for view synthesis
+View syn-
+thesis, the task of using observed images of a scene to ren-
+der images from novel unobserved camera viewpoints, is
+a longstanding research problem within the ﬁelds of com-
+puter vision and graphics. In situations where it is possible
+to densely capture images of the scene, simple light ﬁeld
+interpolation techniques [12, 18] can render novel views
+with high ﬁdelity.
+However, exhaustive sampling of the
+light ﬁeld is impractical in most scenarios, so methods for
+view synthesis from sparsely-captured images reconstruct
+3D scene geometry in order to reproject observed images
+into novel viewpoints [8].
+For scenes with glossy sur-
+faces, some methods explicitly build virtual geometry to
+explain the motion of reﬂections [17, 33, 35].
+Early ap-
+proaches used triangle meshes as the geometry representa-
+tion, and rendered novel views by reprojecting and blending
+multiple captured images with either heuristic [7, 9, 42] or
+learned [13, 32] blending algorithms. Recent works have
+used volumetric representations such as voxel grids [20] or
+multiplane images [10,23,37,41,48], which are better suited
+for gradient-based optimization than meshes. While these
+discrete volumetric representations can be effective for view
+synthesis, their cubic scaling limits their ability to represent
+large or high resolution scenes.
+The recent paradigm of coordinate-based neural repre-
+sentations replaces traditional discrete representations with
+an MLP that maps from any continuous input 3D coordi-
+nate to the geometry and appearance of the scene at that
+location. NeRF [24] is an effective coordinate-based neu-
+ral representation for photorealistic view synthesis that rep-
+resents a scene as a ﬁeld of particles that block and emit
+view-dependent light. NeRF has inspired many subsequent
+works, which extend its neural volumetric scene represen-
+tation to application domains including dynamic and de-
+formable scenes [26], avatar animation [11, 27], and even
+phototourism [21]. Our work focuses on improving a core
+component of NeRF: the representation of view-dependent
+appearance. We believe that the improvements presented
+here can be used to improve rendering quality in many of
+the applications of NeRF described above.
+A key component of our approach considers the reﬂec-
+tion of camera rays off NeRF’s geometry.
+This idea is
+shared by recent works that extend NeRF to enable relight-
+ing by decomposing appearance into scene lighting and ma-
+terials [3–5,36, 45, 47]. Crucially, our model structures the
+scene into components that are not required to have pre-
+cise physical meanings, and is thus able to avoid the strong
+simplifying assumptions (such as known lighting [3, 36],
+no self-occlusions [4, 5, 45], single-material scenes [45])
+that these works need to make to recover explicit paramet-
+ric representations of lighting and material. Our work also
+focuses on improving the smoothness and quality of nor-
+mal vectors extracted from NeRF’s geometry. This goal is
+shared by recent works that combine NeRF’s neural volu-
+metric representation with neural implicit surface represen-
+tations [25,39,43]. However, these methods primarily focus
+on the quality of isosurfaces extracted from their representa-
+tion as opposed to the quality of rendered novel views, and
+as such their view synthesis performance is signiﬁcantly
+worse than top-performing NeRF-like models.
+Efﬁcient rendering of glossy appearance
+Our work
+takes inspiration from seminal approaches in computer
+graphics for representing and rendering view-dependent
+specular and reﬂective appearance, particularly techniques
+based on precomputation [29]. The reﬂected radiance func-
+tion encoded in our directional MLP is similar to preﬁltered
+environment maps [15,31], which were introduced for real-
+time rendering of specular appearance. Preﬁltered environ-
+ment maps leverage the insight that the outgoing light from
+a surface can be seen as a spherical convolution of the in-
+coming light and the (radially-symmetric) bidirectional re-
+ﬂectance distribution function (BRDF) that describes the
+material properties of the surface [30]. After storing this
+convolution result, rays intersecting the object can
+
+
+==========================================================================================
+### 2311.16043_Relightable3DGaussians  (pages=17, img=2311.16043_Relightable3DGaussians_fig.png)
+==========================================================================================
+Relightable 3D Gaussians: Realistic Point Cloud
+Relighting with BRDF Decomposition and Ray
+Tracing
+Jian Gao1∗, Chun Gu2∗, Youtian Lin1, Zhihao Li3, Hao Zhu1, Xun Cao1,
+Li Zhang2B, and Yao Yao1B
+1 Nanjing University
+2 Fudan University
+3 Huawei Noah’s Ark Lab
+Abstract. In this paper, we present a novel differentiable point-based
+rendering framework to achieve photo-realistic relighting. To make the
+reconstructed scene relightable, we enhance vanilla 3D Gaussians by as-
+sociating extra properties, including normal vectors, BRDF parameters,
+and incident lighting from various directions. From a collection of multi-
+view images, the 3D scene is optimized through 3D Gaussian Splatting
+while BRDF and lighting are decomposed by physically based differen-
+tiable rendering. To produce plausible shadow effects in photo-realistic
+relighting, we introduce an innovative point-based ray tracing with the
+bounding volume hierarchies for efficient visibility pre-computation. Ex-
+tensive experiments demonstrate our improved BRDF estimation, novel
+view synthesis and relighting results compared to state-of-the-art ap-
+proaches. The proposed framework showcases the potential to revolution-
+ize the mesh-based graphics pipeline with a point-based pipeline enabling
+editing, tracing, and relighting.
+Keywords: 3D Gaussian Splatting, Relighting, Point based rendering
+1
+Introduction
+Reconstructing 3D scenes from multi-view images for photo-realistic rendering
+is a fundamental problem at the intersection of computer vision and graphics.
+Recently, 3D Gaussian Splatting (3DGS) [26] has been proposed and has gained
+significant attention from the community. The method employs a set of 3D Gaus-
+sian points to represent a 3D scene and projects these points onto a designated
+view through a tile-based rasterization. Attributes of each 3D Gaussian point are
+then optimized through the point-based differentiable rendering. Notably, 3DGS
+achieves real-time rendering with quality comparable to or even surpassing pre-
+vious state-of-the-art methods (e.g., Mip-NeRF [3]), with a training speed on par
+with the most efficient Instant-NGP [32]. However, the current 3DGS is unable
+to reconstruct a scene that can be relighted under different lighting conditions,
+∗Equally contributed.
+arXiv:2311.16043v2 [cs.CV] 8 Aug 2024
+
+2
+J. Gao et al.
+(a) Point Cloud
+(b) Normal
+(c) Ambient Occlusion
+(d) Physically Based Rendering
+Fig. 1: Visual results of our pipeline on a multi-object composition scene. In
+our pipeline, we represent a scene as Relightable 3D Gaussians. From multi-view images,
+we recover the geometry and materials of individual objects with inverse rendering
+techniques (see Sec. 3). Then, objects are easily composited into a new scene, thanks
+to our explicit representation. After that, we solve the complex occlusions though point
+based ray tracing (see Sec. 4) and re-light the new scene. Ultimately, we achieve high-
+fidelity relighting with remarkably realistic shadow.
+making the method only applicable to the task of novel view synthesis. In addi-
+tion, ray tracing, a crucial component in achieving realistic rendering, remains
+an unresolved challenge in point-based representation, limiting 3DGS to more
+dedicated rendering effects such as shadowing and light reflectance.
+In this paper, we aim to reconstruct a relightable 3D Gaussian point cloud
+from multi-view images with a differentiable rendering framework and achieve
+realistic relighting. We make 3D Gaussian relightable by assigning it with addi-
+tional normal, BRDF properties, and incident light information to model per-
+point light reflectance. In contrast to the plain alpha blending in the original
+3DGS [26], we apply physically based rendering (PBR) to get a PBR color
+for each 3D Gaussian point, which is then alpha-composited to obtain a ren-
+dered color for the corresponding image pixel. For robust material and lighting
+estimation, we split the incident light into a global environment map and an
+indirect incident light field. To capture accurate visibility for each 3D Gaussian,
+we propose a novel ray tracing method based on the bounding volume hierarchy
+(BVH), which enables efficient visibility pre-computing for real-time rendering.
+Additionally, the proposed ray tracing method can handle complex occlusion
+relationships in a novel multi-object composition scene, thus realizing realistic
+shadow effects. Moreover, proper regularizations are introduced to enhance the
+geometry and mitigate the material-lighting ambiguity during the optimization,
+including constraints on depth distribution, smoothness priors, and a lighting
+regularization.
+
+Relightable 3D Gaussians
+3
+Extensive experiments conducted across diverse datasets demonstrate the im-
+proved material and lighting estimation results and novel view rendering quality.
+Additionally, we illustrate the relightable and editable capabilities of our system
+through multi-object composition in a novel lighting environment. To summa-
+rize, major contributions of the paper include:
+– We propose a material and lighting decomposition scheme for 3D Gaussian
+Splatting, where a normal vector, BRDF values, and incident lights are as-
+signed and optimized for each 3D Gaussian point.
+– We introduce a novel point-based ray tracing approach based on bound-
+ing volume hierarchy, enabling efficient visibility pre-computing for each 3D
+Gaussian point and rendering of a 3D scene with realistic shadow effect.
+– We demonstrate a comprehensive graphics pipeline solely based on a dis-
+cretized point representation, supporting relighting, editing, and ray tracing
+of a reconstructed 3D point cloud.
+2
+Related Works
+Neural Radiance Field. Differentiable rendering techniques, exemplified by
+Neural Radiance Field (NeRF) [31], have garnered significant attention [3,12,32].
+NeRF utilizes an implicit Multi-Layer Perceptron (MLP) that takes 3D positions
+and viewing directions as inputs to generate density and view-dependent colors
+for differentiable volume rendering. Despite its powerful neural implicit represen-
+tation, both speed and quality can be improved. Efficiency improvements mainly
+focus on optimizing queries on neural fields and minimizing queries [12, 13, 15,
+16, 21, 22, 32, 39]. Quality enhancements involve anti-aliasing [3–5] or utilizing
+exterior supervision [14,48], etc.
+Differentiable Point Based Rendering. Using points as rendering primi-
+tives was first proposed in [29]. To address the issue of resulting holey images
+when rasterizing discrete points directly, solutions fall into two categories. One
+approach directly employs points as rendering primitives and encodes the geo-
+metric and photometric features near the point using SIFT descriptors [37] or
+neural descriptors [1,38]. This leads to a feature image with gaps, which is then
+decoded to recover a hole-free RGB image. The other category models a point as
+a primitive occupying a specific space, like a surfel [36,47] or a 3D Gaussian [26].
+The rendered image is then generated using a splatting technique. This tech-
+nique saw significant development in the 2000s [36, 57, 58], and in the era of
+differentiable rendering, PointRF [52], DSS [47] and 3DGS [26] serve as notable
+examples. We assert that the point serves as a promising rendering primitive
+owing to its inherent ease of editing, as also corroborated in [54].
+Material and Lighting Estimation. Decomposing the materials and illumi-
+nation of a scene from multi-view images presents a formidable challenge owing
+to its intrinsic high-dimensional complexity. Some methods simplified the prob-
+lem under the assumption of a controllable light [2,6–8,18,34,35,40]. Subsequent
+research explores more complex lighting models to cope with realistic scenarios.
+NeRV [41] and PhySG [51] leverage an environmental map to manage arbitrary
+
+4
+J. Gao et al.
+lighting conditions. NeRD [9] addresses the challenge posed by images captured
+under varying illumination by attributing Spherical Gaussians to each image.
+IRON [50] introduces an innovative edge sampling algorithm tailored for neu-
+ral SDFs. NeRFactor [53] exploits light visibility to achieve superior material
+and lighting decomposition. Further studies [19,52] address the consideration of
+indirect lighting, leading to enhanced BRDF estimation quality. [20, 33] utilize
+differentiable marching tetrahedrons for direct optimization on mesh surfaces.
+[10,28] deal with varying cameras, illumination, and backgrounds. Ref-NeRF [42]
+suggests the employment of integrated direction encoding to ameliorate the re-
+construction fidelity of reflective objects. [30, 33] use split-sum approximation
+to approximate the shading effects. NeMF [55] represents the scene as a mi-
+croflake volume. NeFII [44] integrates lights through path tracing with Monte
+Carlo sampling. InvRender [56] computes indirect illumination by directly lever-
+aging the neural radiance field, rather than concurrently estimating it alongside
+the decomposition of direct lighting and materials. TensoIR [23] performs in-
+verse rendering based on tensor factorization and neural fields. NeILF [45] and
+NeILF++ [49] expresses the incident lights as a neural incident light field, while
+NeILF++ integrates VolSDF [46] with NeILF through inter-reflection. However,
+existing schemes rarely delve into BRDF estimation for point clouds, and the
+estimation and rendering quality remain to be improved.
+3
+Relightable 3D Gaussians
+In this section, we introduce a novel pipeline to decompose materials and light-
+ing from multi-view images based on 3D Gaussian Splatting (3DGS) [26]. An
+overview of our pipeline is shown in Fig. 2.
+3.1
+Preliminary
+Distinct from the widely adopted Neural Radiance Field, 3DGS [26] employs
+explicit 3D Gaussian points as its rendering primitives. A 3D Gaussian point is
+mathematically defined as:
+ G( \ boldsy
+mbo l {x}) = e xp(-\frac {1}{2}(\boldsymbol {x}-\boldsymbol {\mu })^\top \Sigma ^{-1}(\boldsymbol {x}-\boldsymbol {\mu })) , \label {eq:3d_gaussian} 
+(1)
+where µ and Σ denote the 3D spatial mean and covariance matrix, respectively.
+Each Gaussian is also equipped with an opacity o and a view-dependent color c.
+The rendering process in 3DGS is divided into two main steps. Firstly, 3D
+Gaussians are projected to 2D Gaussians on the image plane. The 2D means
+are determined by accurate projection of 3D means, while the 2D covariance
+matrices are approximated by: Σ′ = JW ΣW ⊤J⊤, where W and J denote the
+viewing transformation and the Jacobian of the affine approximation of perspec-
+tive projection transformation [57]. Subsequently, the pixel color is derived by
+alpha blending N ordered 2D Gaussians from front to back:
+ 
+\
+mat
+hcal {C }= \
+sum
+ 
+_{i
+\i n {N}}T_{i}\alpha _{i}\boldsymbol {c}_{i}, \hspace {0.5em} T_i = \prod _{j=1}^{i-1}(1-\alpha _{j}) . \label {eq:alpha_blending} 
+(2)
+
+Relightable 3D Gaussians
+5
+Fig. 2: The proposed differentiable rendering pipeline. Starting with a collection
+of 3D Gaussians that embody geometry, materials, and lighting attributes, we first
+execute the physically based rendering equation for each 3D Gaussian to determine its
+outgoing radiance, denoted as c′. Following this, we perform rasterization and alpha
+blending to obtain vanilla color map C, PBR color map C′, depth map D, normal map
+N, etc. To optimize relightable 3D Gaussians, we utilize the ground truth image Cgt
+and the pseudo normal map derived from D for supervision.
+Here, α is obtained by multiplying the opacity o with the
+
+
+==========================================================================================
+### 2311.16473_GS-IR  (pages=14, img=2311.16473_GS-IR_fig.png)
+==========================================================================================
+GS-IR: 3D Gaussian Splatting for Inverse Rendering
+Zhihao Liang1,*, Qi Zhang2,*, Ying Feng2, Ying Shan2, Kui Jia3,†
+1South China University of Technology,
+2 Tencent AI Lab,
+3 School of Data Science, The Chinese University of Hong Kong, Shenzhen
+eezhihaoliang@mail.scut.edu.cn,
+nwpuqzhang@gmail.com,
+vonyfeng@gmail.com,
+yingsshan@tencent.com,
+kuijia@cuhk.edu.cn
+Abstract
+We propose GS-IR, a novel inverse rendering approach
+based on 3D Gaussian Splatting (3DGS) that leverages for-
+ward mapping volume rendering to achieve photorealistic
+novel view synthesis and relighting results. Unlike previ-
+ous works that use implicit neural representations and vol-
+ume rendering (e.g. NeRF), which suffer from low expres-
+sive power and high computational complexity, we extend
+3DGS, a top-performance representation for novel view
+synthesis, to estimate scene geometry, surface material, and
+environment illumination from multi-view images captured
+under unknown lighting conditions. There are two main
+problems when introducing 3DGS to inverse rendering: 1)
+3DGS does not support producing plausible normal na-
+tively; 2) forward mapping (e.g. rasterization and splatting)
+cannot trace the occlusion like backward mapping (e.g. ray
+tracing). To address these challenges, our GS-IR proposes
+an efficient optimization scheme incorporating a depth-
+derivation-based regularization for normal estimation and
+a baking-based occlusion to model indirect lighting. The
+flexible and expressive 3DGS representation allows us to
+achieve fast and compact geometry reconstruction, photore-
+alistic novel view synthesis, and effective physically-based
+rendering. We demonstrate the superiority of our method
+over baseline methods through qualitative and quantitative
+evaluations of various challenging scenes. The source code
+is available at https://github.com/lzhnb/GS-
+IR.
+1. Introduction
+Inverse rendering is a long-standing task, seeking to answer
+the question: “How can we deduce physical attributes (e.g.
+geometry, material, and lighting) of a 3D scene from multi-
+view images?”. This problem is inherently challenging and
+* indicates equal contribution.
+†Correspondence to Kui Jia <kuijia@cuhk.edu.cn>.
+Normal
+Albedo Metallic
+Roughness
+Normal
+Albedo
+Roughness
+Relighting
+Material Editing
+AO
+AO
+GS-IR
+3D gaussians
+Figure 1. Given multi-view captured images of a complex scene,
+we propose GS-IR (3D Gaussian Splatting for Inverse Rendering),
+which utilizes 3D Gaussian and forward mapping splatting to re-
+cover high-quality physical properties (e.g., normal, material, il-
+lumination). This enables us to perform relighting and material
+editing, resulting in outstanding inverse rendering results. Better
+viewed on screen with zoom in, especially the remarkable mate-
+rial decomposition and normal reconstruction of bicycle axle.
+ill-posed, particularly when input images are captured in
+uncontrolled environments with unknown illumination. Re-
+cent research [9, 10, 37, 48] has sought to address this issue
+by employing implicit neural representations akin to NeRF
+[31] that utilizes multi-layer perceptrons (MLPs).
+How-
+ever, current methods incorporating MLP face challenges
+in terms of their low expressive capacity and high computa-
+tional demands, which significantly limits the effectiveness
+and efficiency of inverse rendering, especially when it can-
+not be rendered at interactive rates.
+3D Gaussian Splatting (3DGS) [24] has recently
+emerged as a promising technique to model 3D static scenes
+and significantly boost the rendering speed to a real-time
+level. It makes the scene representation more compact and
+achieves fast and top performance for novel view synthesis.
+Introducing it to the inverse rendering pipeline is natural and
+essential, including geometry reconstruction, materials de-
+composition, and illumination estimation. Unlike ray trac-
+1
+arXiv:2311.16473v3 [cs.CV] 28 Mar 2024
+
+ing in NeRF, 3DGS produces a set of 3D Gaussians around
+sparse points. During the 3DGS optimization, the adaptive
+control of the Gaussian density may lead to loose geome-
+try, making it difficult to estimate accurate scene’s normal.
+Consequently, it is necessary to introduce a well-designed
+strategy to regularize 3DGS’s normal estimation.
+Our goal is to use 3D Gaussians as the scene representa-
+tion for inverse rendering from multi-view images captured
+under unknown lighting conditions. However, capturing ob-
+servations under natural illumination often shows complex
+effects such as soft shadows and interreflections. TensoIR
+[22] leverages the ray tracing of NeRF to directly model
+occlusion and indirect illumination. In contrast, 3DGS re-
+places the ray tracing in the NeRF with differentiable for-
+ward mapping volume rendering, which directly projects
+3D Gaussians onto the 2D plane. This strategy improves
+the rendering efficiency but makes it difficult to calculate
+occlusion. Inspired by the “Indirect Lighting Cache” used
+in real-time rendering [4], we attempt to bake the occlusion
+into volumes for caching.
+In this paper, we present a novel 3D Gaussian-based
+inverse rendering framework called GS-IR (3D Gaussian
+Splatting for Inverse Rendering) that leverages forward
+mapping splatting to deduce the physical attributes of a
+complex scene. To the best of our knowledge, our method is
+the first work to introduce the 3DGS technique for inverse
+rendering, which can simultaneously estimate scene geom-
+etry, materials, and illumination from multi-view images.
+Our GS-IR addresses two main issues when using 3DGS
+for inverse rendering. Firstly, we develop an intuitive and
+well-designed regularization to estimate the scene’s nor-
+mal. Secondly, we use a baking-based method embedded
+in GS-IR to cache occlusions, obtaining an efficient indi-
+rect illumination model. As shown in Fig. 1, our approach
+can reconstruct high-fidelity geometry and materials of a
+complex real scene under unknown natural illumination, en-
+abling state-of-the-art rendering of novel view synthesis and
+additional applications like relighting. Our technical contri-
+butions are summarized as follows:
+• We present GS-IR that models a scene as a set of 3D Gaus-
+sians to achieve physically-based rendering and state-of-
+the-art decomposition results for both objects and scenes;
+• We propose an efficient optimization scheme with regu-
+larization to concentrate depth gradient around 3DGS and
+produce reliable normals for GS-IR;
+• We develop a baking-based method embedded in GS-IR
+to handle the occlusion in modeling indirect lighting;
+We demonstrate the superiority of our method to baseline
+methods qualitatively and quantitatively on various chal-
+lenging scenes, including the TensoIR synthesis dataset [22]
+and Mip-NeRF 360 real dataset [5].
+2. Related Works
+Neural Representation Recently, neural rendering tech-
+niques, exemplified by Neural Radiance Field (NeRF) [31],
+have achieved impressive success in addressing visual com-
+puting problems, giving rise to numerous neural represen-
+tations [14, 21, 32, 38, 41, 42] tailored for different tasks
+[11–13, 18, 28, 29, 35, 45]. The vanilla NeRF models a con-
+tinuous radiance field implicitly in MLPs, which requires
+massive repeated queries during training and inference. To
+address the computational inefficiencies, many neural scene
+representations are proposed with more discretized geome-
+try proxies such as voxel grids [17, 20, 38], hash grids [32],
+tri-planes [14] or points [41]. Neural features are stored in
+a structured manner, allowing for efficient storage and re-
+trieval. The computational cost can thus be significantly
+reduced by introducing interpolation techniques, however,
+with an inevitable loss in image quality. 3D Guassians are
+introduced as an unstructured scene representation to strike
+a balance between efficiency and quality [24]. With the spe-
+cially designed tile-based rasterizer for Guassian splats, this
+method achieves real-time rendering with high quality for
+novel-view synthesis. In this work, 3D Gaussian represen-
+tation is combined with the physical-based rendering (PBR)
+model for inverse rendering.
+Inverse Rendering Inverse rendering aims to decompose
+the image’s appearance into the geometry, material, and
+lighting conditions. Considering the inherent ambiguity be-
+tween observed images and underlying properties, many
+methods are proposed with different constrained settings,
+such as capturing images with fixed lighting and rotating
+object [16, 40], capturing with moving camera and co-
+located lighting [7, 8, 30, 34]. Combined with neural rep-
+resentations, inverse rendering models the scene simulating
+how the light interacts with the neural volume with various
+material properties, and estimates the lighting and material
+parameters during optimization [6, 9, 10, 19, 22, 37, 44, 46,
+48, 49]. Neural Reflectance Fields [6] assumes a known
+point light source and represents the scene as a field of vol-
+ume density, surface normals, and bi-directional reflectance
+distribution functions(BRDFs) with one bounce direct illu-
+mination. NeRV [37] and InvRender [49] extend to arbi-
+trary known lighting conditions and train an additional MLP
+to model the light visibility. PhySG [44] assumes full light
+source visibility without shadow simulation, and represents
+the lighting and scene BRDFs with spherical Guassians for
+acceleration.
+TensoIR [22] adopts the efficient TensoRF
+[14] representation which enables the computation of vis-
+ibility and indirect lighting by raytracing, while limited to
+object-level. For modeling surface geometry using point
+clouds, Fuzzy Metaballs (FMs) [25, 26] offers a great way
+to render depth from 3D Gaussian using Order Independent
+Transparency (OIT) and approximate intersection. How-
+ever, it requires silhouettes as input and struggles to handle
+2
+
+intricate geometry (e.g. Lego and Ficus) let alone complex
+scenes. In this work, we propose a 3DGS-based pipeline to
+recover the geometry, material, and lighting that is available
+for both objects and unbounded scenes.
+3. Preliminary
+In this section, we give the technical backgrounds and math
+symbols that are necessary for the presentation of our pro-
+posed method in subsequent sections.
+3D Gaussian Splatting (3DGS) [24] is an explicit 3D scene
+representation in the form of point clouds. Each point is
+represented as a Gaussian function g that approximates the
+shape of a bell curve, which is defined as,
+g(x|µ, Σ) = e−1
+2 (x−µ)T Σ−1(x−µ),
+(1)
+where µ ∈R3 is its mean vector, and Σ ∈R3×3 is an
+anisotropic covariance matrix. The mean vector µ of a 3D
+Gaussian is parameterized as µ = (µx, µy, µz), and the co-
+variance matrix Σ is factorized into a scaling matrix S and
+a rotation matrix R as Σ = RSS⊤R⊤. S and R refer to a
+diagonal matrix diag(sx, sy, sz) and a rotation matrix con-
+structed from a unit quaternion q. Given a viewing transfor-
+mation with extrinsic matrix T and intrinsic matrix K, the
+mean vector µ and covariance matrix Σ′ from the 3D point
+x to 2D pixel u is defined as,
+µ′ = KT [µ, 1]⊤, Σ′ = JT ΣT ⊤J ⊤,
+(2)
+where J is the Jacobian matrix of the affine approximation
+of the perspective projection. Besides, each Gaussian rep-
+resents the view-dependent color ci via a set of coefficients
+of spherical harmonics (SH), which is then multiplied by
+opacity α for volume rendering. We finally obtain the color
+ˆC at pixel u based on Eq. (1) and Eq. (2),
+ˆ
+C =
+X
+i∈N
+Tigi(u|µ′, Σ′)αici, Ti =
+i−1
+Y
+j=1
+(1 −gj(u|µ′, Σ′)αj),
+(3)
+where accumulated transmittance Ti quantifies the proba-
+bility density of i-th Gaussian at pixel u.
+The Rendering Equation In GS-IR, we leverage the clas-
+sic rendering equation to formulate the outgoing radiance of
+a surface point x with normal n:
+Lo(x, v) =
+Z
+Ω
+Li(x, l)fr(l, v)(l · n)dl,
+(4)
+Ωdenotes
+
+
+==========================================================================================
+### 2311.17977_GaussianShader  (pages=13, img=2311.17977_GaussianShader_fig.png)
+==========================================================================================
+GaussianShader: 3D Gaussian Splatting with Shading Functions
+for Reflective Surfaces
+Yingwenqi Jiang1
+Jiadong Tu1
+Yuan Liu2
+Xifeng Gao3
+Xiaoxiao Long2,∗
+Wenping Wang4
+Yuexin Ma1,∗
+1ShanghaiTech University
+2The University of Hong Kong
+3Tencent America
+4Texas A&M University
+PSNR: 26.34
+ENVIDR
+PSNR: 23.74
+Ref-NeRF
+PSNR: 19.89
+Gaussian Splatting
+PSNR: 24.59
+Ours
+Ground Truth
+(a) Qualitative comparison 
+(b) Comparisons between FPS, 
+training time and accuracy 
+PSNR: 21.69
+PSNR: 28.87
+PSNR: 32.67
+PSNR: 32.46
+FPS
+PSNR
+Circle size: training time
+Figure 1. GaussianShader maintains real-time rendering speed and renders high-fidelity images for both general and reflective surfaces.
+Ref-NeRF[45] and ENVIDR[27] attempt to handle reflective surfaces, but they suffer from quite time-consuming optimization and slow
+rendering speed. 3D Gaussian splatting [21] keeps high efficiency but cannot handle such reflective surfaces.
+Abstract
+The advent of neural 3D Gaussians [21] has recently
+brought about a revolution in the field of neural render-
+ing, facilitating the generation of high-quality renderings at
+real-time speeds. However, the explicit and discrete repre-
+sentation encounters challenges when applied to scenes fea-
+turing reflective surfaces. In this paper, we present Gaus-
+sianShader, a novel method that applies a simplified shad-
+ing function on 3D Gaussians to enhance the neural ren-
+dering in scenes with reflective surfaces while preserving
+the training and rendering efficiency. The main challenge
+in applying the shading function lies in the accurate nor-
+mal estimation on discrete 3D Gaussians. Specifically, we
+proposed a novel normal estimation framework based on
+the shortest axis directions of 3D Gaussians with a deli-
+cately designed loss to make the consistency between the
+normals and the geometries of Gaussian spheres. Exper-
+iments show that GaussianShader strikes a commendable
+balance between efficiency and visual quality. Our method
+surpasses Gaussian Splatting [21] in PSNR on specular ob-
+ject datasets, exhibiting an improvement of 1.57dB. When
+compared to prior works handling reflective surfaces, such
+as Ref-NeRF [45], our optimization time is significantly ac-
+celerated (23h vs. 0.58h). Please click on our project web-
+site to see more results.
+1. Introduction
+In recent years, the field of 3D computer vision has wit-
+nessed remarkable advancements in the 3D reconstruction
+and visualization of 3D scenes. Innovations such as Neu-
+ral Radiance Fields (NeRF) [32] have achieved substantial
+breakthroughs in generating novel views of 3D objects and
+scenes, presenting the potential for high-quality and photo-
+realistic renderings. Despite these advancements, NeRF-
+related methodologies [6, 27, 45], still contend with chal-
+lenges such as computationally expensive optimization and
+slow rendering speed. These limitations restrict their appli-
+cation in real-time interactive scenarios.
+More recently, 3D Gaussian Splatting [21] combines 3D
+Gaussian representation and tile-based splatting techniques
+to achieve high-quality 3D scene modeling and real-time
+rendering, making it possible to employ neural rendering
+techniques in real applications. However, it suffers from a
+performance drop on scenes featuring specular and reflec-
+tive surfaces. This is because 3D Gaussian Splatting [21]
+does not explicitly model appearance properties, so that
+fails to capture significant view-dependent changes, partic-
+arXiv:2311.17977v1 [cs.CV] 29 Nov 2023
+
+ularly specular highlights. This constraint presents a sub-
+stantial obstacle in the pursuit of achieving photorealistic
+rendering across a diverse array of materials, particularly
+those characterized by prominent reflective attributes.
+Accurately modeling reflective surfaces is a challeng-
+ing task. Ref-NeRF [45] and ENVIDR [27] combine the
+shading functions in implicit representations and present
+promising quality on reflective surfaces.
+However, they
+suffer from time-consuming optimization (hours) and slow
+rendering speed. Due to the limited flexibility of SDF, EN-
+VIDR [27] even fails to model complex scenes and presents
+a significant performance drop on general objects. It is still
+an unexplored problem how to combine the shading func-
+tions in a 3D Gaussian Splatting framework to improve its
+ability to handle reflections while preserving the efficiency
+in training and rendering.
+In this paper, we present GaussianShader, a novel
+method that enhances the neural rendering of 3D Gaussians
+within scenes that contain reflective surfaces by incorpo-
+rating a shading function on 3D Gaussians. To ensure the
+efficiency of GaussianShader, evaluating the shading func-
+tion cannot be too expensive while still retaining the ability
+to model the reflections. In light of this, we propose a novel
+simplified shading function that considers the diffuse colors
+and the direct reflections while putting all advanced com-
+plex reflections into a residual color term. In comparison
+with the shading function of Ref-NeRF which can only con-
+sider direct reflections, the utilization of this residual color
+enables GaussianShader to render more complex reflective
+appearances with efficiency.
+Another challenge in computing a shading function is
+how to predict accurate normals on the discrete 3D Gaus-
+sian spheres. First, it is hard to get a locally-continuous
+surface from the 3D Gaussians to compute the surface nor-
+mals. Second, associating multiple 3D Gaussians for nor-
+mal computation would be very expensive using neighbor-
+hood searching. In GaussianShader, we address this prob-
+lem by introducing a new normal representation, which is
+based on the shortest axis direction of a Gaussian sphere
+and learns a normal residual on this axis direction. Then, to
+enforce consistency between the estimated normals and the
+geometry formulated by Gaussian spheres, we introduce an
+efficient normal-geometry constraint between the predicted
+normals and the normals derived from the rendered depths.
+Both the normal representation and the constraint lead to
+an accurate normal estimation of Gaussian spheres, which
+helps us compute the shading function.
+Built upon 3D Gaussian Splatting, GaussianShader
+maintains real-time rendering speed while still accommo-
+dating various materials like reflective surfaces.
+Experi-
+ments show that, compared to prior works, our method
+keeps a good balance between efficiency and robust perfor-
+mance on both general scenes and reflective surfaces.
+In summary, our proposed method offers several signifi-
+cant advantages:
+1. Our method explicitly approximates the rendering equa-
+tion by a simplified shading function, significantly en-
+hancing the realism of rendered scenes, particularly for
+highly specular and reflective surfaces.
+2. We propose a new normal estimation framework on 3D
+Gaussians with a new regularization loss that allows pre-
+cise normal estimation.
+3. Leveraging the efficiency of Gaussian Splatting, our ap-
+proach provides real-time rendering capabilities, making
+it suitable for interactive applications and scenarios that
+demand efficient rendering.
+2. Related Work
+2.1. Neural Radiance Fields
+Neural Radiance Fields (NeRF) [32] gains remarkable
+progress in photo-realistic novel view synthesis using im-
+plicit representation and volume rendering. Recently, NeRF
+has inspired many follow-up works in various directions.
+[5, 6] improves NeRF in rendering quality by introducing
+3D conical frustum, achieving state-of-art performance in
+NVS. [17, 36, 47, 52, 53] combine implicit surface repre-
+sentations with NeRF for more accurate geometric recon-
+struction. [43, 44] propose solutions for city-scale scene
+rendering using NeRF. [41, 45, 51, 57] targets a special kind
+of scenes with high specularities and reflections. Another
+important line of works [10, 14, 15, 28, 33, 42] focuses on
+acceleration due to the low training and rendering speed
+of NeRF using voxel grid or hash table. Although great
+progress has been made, NeRF-based methods still suffer
+from low rendering speed and high training-time memory
+usage due to their implicit nature [11]. Based on works on
+point-based neural rendering [2, 39, 50, 55], a recent mile-
+stone work [21] introduces anisotropic 3D Gaussian as an
+effective representation of the scene, and renders the im-
+age using a fast tile-based differentiable rasterizer, surpass-
+ing existing implicit neural representation methods in both
+quality and efficiency.
+2.2. Reflective Object Rendering
+Rendering views of reflective objects from multi-view
+images has been a challenging task due to the complex light
+interactions. Previous approaches rely on simple light field
+interpolations to achieve high-fidelity rendering of novel
+perspectives [16, 25, 49], yet were constrained by the ne-
+cessity for dense discrete captures. The accurate render-
+ing of reflective surfaces hinges upon the precise estima-
+tion of scene illumination (e.g.
+environment light) and
+material properties (e.g. BRDF), which is the task of in-
+verse rendering [4, 35]. Previous studies have demonstrated
+methodologies for predicting BRDF under known lighting
+
+3D Gaussian Spheres
+Shape Attributes
+Covariance Opacity Position p
+
+
+Rendering
+GT
+Shading Attributes
+Normal
+Tint
+Diffuse
+Roughness
+Residual
+Differentialble Envlight
+Project and Rasterize
+Cameras
+Figure 2. GaussianShader initiates with the neural 3D Gaussian spheres that integrate both conventional attributes and the newly introduced
+shading attributes to accurately capture view-dependent appearances. We incorporate a differentiable environment lighting map to simulate
+realistic lighting. The end-to-end training leads to a model that reconstructs both reflective and diffuse surfaces, achieving high material
+and lighting fidelity.
+conditions [1, 13, 31], as well as techniques for estimating
+lighting given known geometry [24, 37, 38]. Furthermore,
+[12, 19, 51, 58] incorporate indirect illumination, thereby
+enhancing the fidelity of the estimated BRDF.
+Some NeRF related works attempt to model reflectance
+by disentangling the visual appearance into lighting and
+material properties, such as [7–9, 41, 54, 57], which can
+jointly predict environmental illumination and surface re-
+flectance properties under unknown or varying lighting
+conditions.
+Ref-NeRF [45] introduces a new parameter-
+ization and structuring of view-dependent outgoing radi-
+ance, as well as a regularizer on normal vectors. Recent
+works [26, 27, 29] utilize SDF-based representation to learn
+geometry from high specular surfaces, obtaining more ac-
+curate normals for physically based rendering. However,
+these method suffer from extremely time-consuming opti-
+mization and slow rendering speed, which hinders their em-
+ployments in real applications.
+2.3. Preliminaries
+2.3.1
+3D Gaussian Splatting Rasterization
+Our method builds upon Gaussian Splatting [21],
+which begins with a collection of images capturing a
+static scene, their corresponding camera parameters, and
+a sparse point cloud generated through Structure-from-
+Motion (SfM) [40]. These points construct a set of Gaus-
+sians, each defined by position (mean) p and a 3D covari-
+ance matrix Σ. While a direct optimization of the covari-
+ance matrix Σ might seem intuitive, it presents challenges
+due to the requirement of positive semi-definiteness. As
+an alternative, in Gaussian Splatting, a more intuitive yet
+equally expressive representation is adopted as an ellipsoid
+for optimization. The ellipsoid is separated into scaling and
+rotation components, represented by a scaling matrix S and
+a rotation matrix R, i.e., Σ = RSST RT .
+2.3.2
+Rendering with 3D Gaussians
+By projecting to 2D frame space according to the cam-
+era parameters, 3D Gaussian spheres are both differentiable
+and amenable to rapid rendering through 2D splatting with
+α-blending. For radiance field modeling, the directional ap-
+pearance aspect (color) c is conveyed through spherical har-
+monics (SH). By tile-based rasterization, we could sum up
+the pixel color C after sorting ci by depth:
+C =
+X
+i∈N
+ciαi
+i−1
+Y
+j=1
+(1 −αj)
+(1)
+where αi is obtained by multiplying
+
+
+==========================================================================================
+### 2312.13102_SpecNeRF  (pages=18, img=2312.13102_SpecNeRF_fig.png)
+==========================================================================================
+SpecNeRF: Gaussian Directional Encoding for Specular Reflections
+Li Ma1,2
+Vasu Agrawal2
+Haithem Turki2,3
+Changil Kim2
+Chen Gao2
+Pedro Sander1
+Michael Zollh¨ofer2
+Christian Richardt2
+1The Hong Kong University of Science and Technology
+2Meta Reality Labs
+3Carnegie Mellon University
+Abstract
+Neural radiance fields have achieved remarkable perfor-
+mance in modeling the appearance of 3D scenes. However,
+existing approaches still struggle with the view-dependent
+appearance of glossy surfaces, especially under complex
+lighting of indoor environments. Unlike existing methods,
+which typically assume distant lighting like an environment
+map, we propose a learnable Gaussian directional encoding
+to better model the view-dependent effects under near-field
+lighting conditions. Importantly, our new directional en-
+coding captures the spatially-varying nature of near-field
+lighting and emulates the behavior of prefiltered environ-
+ment maps. As a result, it enables the efficient evaluation of
+preconvolved specular color at any 3D location with varying
+roughness coefficients. We further introduce a data-driven
+geometry prior that helps alleviate the shape radiance am-
+biguity in reflection modeling. We show that our Gaussian
+directional encoding and geometry prior significantly im-
+prove the modeling of challenging specular reflections in
+neural radiance fields, which helps decompose appearance
+into more physically meaningful components.
+1. Introduction
+Neural radiance fields (NeRFs) have emerged as a popular
+scene representation for novel-view synthesis [34, 45, 51].
+By training a neural network based on sparse observations
+of a 3D scene, NeRF-like representations are able to syn-
+thesize novel views with photorealistic visual quality. In
+particular, with a scalable model design, such as InstantNGP
+[36], NeRFs are able to model room-scale 3D scenes with
+extraordinary detail [53]. However, existing approaches typ-
+ically only manage to model mild view-dependent effects
+like those seen on nearly diffuse surfaces. When encounter-
+ing highly view-dependent glossy surfaces, NeRFs struggle
+to model the high-frequency changes when the viewpoint
+changes. Instead, they tend to “fake” specular reflections by
+placing them behind surfaces, which may result in poor view
+interpolation and “foggy” geometry [47]. Moreover, fake
+Ground Truth
+Normal
+View 
+direction
+Reflection 
+direction
+NeRF
+Fourier dir. 
+encoding
+Ref-NeRF
+Integrated dir. 
+encoding
+Ours
+Gaussian dir. 
+encoding
+Figure 1. We propose a Gaussian directional encoding that leads
+to better modeling of specular reflections under near-field lighting
+conditions. In contrast, the integrated directional encoding utilized
+in Ref-NeRF [47] and Fourier directional encoding in NeRF [34]
+exhibit suboptimal performance under similar conditions.
+reflections are not viable if one can look behind the surface,
+as NeRF can no longer hide the reflections there.
+Accurately modeling and reconstructing specular reflec-
+tions presents notable challenges, especially for room-scale
+scenes. Physically correct reflection modeling involves path-
+tracing many rays for every single pixel, which is impractical
+for NeRF-like volumetric scene representations, primarily
+due to the large computational requirements to shade a single
+pixel. Consequently, an efficient approximation of the reflec-
+tion shading is needed for a feasible modeling of reflections.
+Existing works [14, 47] address this challenge by incorpo-
+rating heuristic modules inspired by real-time image-based
+lighting (IBL) [35] techniques, such as explicit ray bounce
+computations to enhance NeRF’s capability to simulate re-
+flections, and integrated directional encoding to simulate
+appearance change under varying surface roughness.
+While these improvements have shown to be effective in
+modeling specular reflections for NeRFs, they are limited
+to object-level reconstruction under distant lighting, which
+assumes the object is lit by a 2D environment map. They
+work poorly for modeling near-field lighting, where the cor-
+responding environment map varies spatially. The issue is
+that existing methods rely on directional encodings to em-
+bed ray directions for generating view-dependent reflections.
+1
+arXiv:2312.13102v3 [cs.CV] 16 May 2024
+
+These encodings, such as Fourier encoding or spherical har-
+monics, are spatially invariant. Figure 1 demonstrates one
+example of NeRF [34] and Ref-NeRF [47] reconstructions
+of an indoor scene with spatially-varying lighting. NeRF pro-
+duces extremely noisy geometry, resulting in artifacts in the
+rendering result. Ref-NeRF offers a slight improvement, but
+still struggles with noisy geometry and view interpolation.
+This illustrates that the spatial invariance in the directional
+encodings of existing methods presents challenges under
+spatially-varying lighting conditions.
+In this work, we propose a novel Gaussian directional
+encoding that is tailored for spatially varying lighting condi-
+tions. Instead of only encoding a 2D ray direction, we use a
+set of learnable 3D Gaussians as the basis to embed a 5D ray
+space including both ray origin and ray direction. We show
+that, with appropriately optimized Gaussian parameters, this
+encoding introduces an important inductive bias towards
+near-field lighting, which enhances the model’s ability to
+capture the characteristics of specular surfaces, leading to
+photorealistic reconstructions of shiny reflections. We further
+demonstrate that by changing the scale of the 3D Gaussians,
+we can edit the apparent roughness of a surface.
+While our proposed Gaussian directional encoding im-
+proves the reflection modeling of NeRF, high-quality reflec-
+tion reconstruction also requires an accurate surface geome-
+try and normal in order to compute accurate reflection rays.
+However, the geometry within NeRFs is often noisy in the
+early phases of training, which presents challenges in si-
+multaneously optimizing for good geometry and reflections.
+To better address this challenge, we introduce a data-driven
+prior to direct the NeRF model towards the desired solu-
+tion. We deploy a monocular normal estimation network to
+supervise the normal of the geometry at the beginning of
+the training stage, and show that this bootstrapping strategy
+improves the reconstruction of normals, and further leads
+to successful modeling of specular reflections. We conduct
+experiments on several public datasets and show that the
+proposed method outperforms existing methods, achieving
+higher-quality photorealistic rendering of reflective scenes
+while also providing more meaningful and accurate color
+component decomposition. Our contributions can be sum-
+marized as follows:
+• We propose a novel Gaussian directional encoding that is
+more effective in modeling view-dependent effects under
+near-field lighting conditions.
+• We propose to use monocular normal estimation to resolve
+shape-radiance ambiguity in the early training stages.
+• Our full NeRF pipeline achieves state-of-the-art novel-
+view synthesis performance for specular reflections.
+2. Related Work
+Reflection-aware NeRFs.
+Successfully modeling view-
+dependent effects, such as specular reflections, can greatly
+enhance the photorealism of the reconstructed NeRF. NeRF
+models view-dependency by conditioning the radiance on
+the positional encoding [43] of the input ray direction, which
+is only capable of mild view-dependent effects. Ref-NeRF
+[47] improves NeRF’s capability for modeling reflections by
+conditioning the view-dependent appearance on the reflec-
+tion ray direction instead of incident ray direction, and by
+modulating the directional encoding based on surface rough-
+ness. This reparameterization of outgoing radiance makes
+the underlying scene function simpler, leading to a better
+geometry and view interpolation quality for glossy objects.
+Ref-NeuS [14] further extends these concepts to a surface-
+based representation. However, these are primarily designed
+for object-level reconstruction under environment map light-
+ing conditions. Modeling large-scale scenes with near-field
+lighting remains a problem. Clean-NeRF [30] decomposes
+the radiance into diffuse and specular colors, and supervises
+the two components by least-square estimations of multiple
+input rays. This alleviates the ambiguity of highly specular
+regions; yet, it does not change the view-dependent struc-
+ture of the NeRF model, thus limiting its ability to model
+reflections. NeRF-DS [54] models specularities in dynamic
+scenes and considers the variations in reflections caused by
+dynamic geometry through the use of a dynamic normal field,
+but requires additional object masks for accurate specular
+reconstruction.
+NeRF-based Inverse Rendering.
+Inverse rendering goes
+beyond simple reflection modeling and aims to jointly re-
+cover one or more of scene geometry, material appearance
+and the lighting condition. In practice, the material appear-
+ance is typically modeled using physically-based rendering
+assets such as albedo, roughness and glossiness. Mesh-based
+inverse rendering methods [2, 38, 49, 68] try to recover ma-
+terials using differentiable path tracing [25]. However, they
+typically assume a given geometry, since optimizing mesh
+geometry is challenging. On the contrary, NeRF-based in-
+verse rendering approaches [5, 42, 65, 66] make it easier
+to optimize geometry jointly by modeling material proper-
+ties and density continuously in a volumetric 3D space. The
+lighting is usually represented as point or directional lights
+[5, 23, 60], an environment texture map [31–33, 42, 65],
+or an implicit texture map modeled by spherical Gaussians
+[6, 11, 18, 63, 66, 66, 67] or MLPs [7, 29]. Most methods
+are limited to object-level reconstruction and assume the
+lighting is spatially invariant (i.e. distant). Several light es-
+timation techniques [13, 26, 27, 41] explore using 3D light
+primitives or spatially-varying spherical Gaussians to model
+spatially varying lighting. However, these methods focus on
+data-driven approaches to estimate lighting for image editing.
+NeILF [56] and NeILF++ [62] model lighting as a 5D light
+field using another MLP, but still focus mainly on small-scale
+reconstruction. Several works apply inverse rendering for
+relighting outdoor scenes [24, 40, 48, 58]. However, they fo-
+2
+
+Input ray
+3D Gaussian
+Directional
+Encoding
+Tint
+s’
+Reflection
+(Eq. 3)
+3D position
+x
+view dir
+d
+view dir
+d
+Hash 
+Encoding
+SH 
+Encoding
+Diffuse
+cd’
+Density
+τ’
+Roughness
+ρ’
+Normal
+n’
+Tint
+s
+Diffuse
+cd
+Depth
+t0
+Roughness
+ρ
+Normal
+n
+Reflection 
+direction
+dr
+Specular
+cs
+Output
+color
+c
+Screen space
+γ(cd + cs ⊙s) (Eq. 1)
+MLP2
+MLP1
+MLP3
+or = o + t0d
+o + td
+Volumetric 
+Rendering
+Normal from 
+monocular 
+estimation
+nmono
+supervision
+Figure 2. An overview of our model. The key enabler for specular reflections is our novel 3D Gaussian directional encoding module that
+converts the reflected ray into a spatially-varying embedding, which is further decoded into specular color.
+cus more on diffuse materials with correct shadow modeling
+instead of reflections. In this work, we have a different goal
+compared to inverse rendering, focusing only on correctly
+modeling reflections for better novel-view synthesis, rather
+than trying to discern material properties for standalone use.
+NeRF with mirror reflections.
+One special case of re-
+flection is mirror reflection. One approach represents the
+reflected scene as a separate NeRF [15], and composites
+the two NeRF results in image space. This is also deployed
+in image-based rendering [52] and large-scale NeRF recon-
+struction [50]. Given a multi-mirror scene, the idea can be
+further extended to multi-space NeRFs [57]. An alternate
+approach is to explicitly model the mirror geometry, and
+to render the mirrored scene by path tracing [16, 61]. How-
+ever, since estimating the mirror geometry is highly ill-posed,
+manual annotation is usually needed. Curved reflectors need
+even more careful handling [22, 46].
+3. Preliminaries
+We first review Ref-NeRF [47] for decomposing view-
+dependent appearance. Similar to NeRF, Ref-NeRF models
+the scene as a function that maps the position x and view di-
+rection d to the final color c and density τ. The difference is
+that Ref-NeRF predicts the color as a combination of diffuse
+color cd and specular color cs:
+
+
+
+==========================================================================================
+### 2402.15870v2_SpecGaussian  (pages=24, img=2402.15870v2_SpecGaussian_fig.png)
+==========================================================================================
+Spec-Gaussian: Anisotropic View-Dependent
+Appearance for 3D Gaussian Splatting
+Ziyi Yang1
+Xinyu Gao1
+Yang-Tian Sun2
+Yi-Hua Huang2
+Xiaoyang Lyu2
+Wen Zhou3
+Shaohui Jiao3
+Xiaojuan Qi2†
+Xiaogang Jin1†
+1Zhejiang University
+2The University of Hong Kong
+3 ByteDance Inc.
+Abstract
+The recent advancements in 3D Gaussian splatting (3D-GS) have not only facil-
+itated real-time rendering through modern GPU rasterization pipelines but have
+also attained state-of-the-art rendering quality. Nevertheless, despite its excep-
+tional rendering quality and performance on standard datasets, 3D-GS frequently
+encounters difficulties in accurately modeling specular and anisotropic compo-
+nents. This issue stems from the limited ability of spherical harmonics (SH) to
+represent high-frequency information. To overcome this challenge, we introduce
+Spec-Gaussian, an approach that utilizes an anisotropic spherical Gaussian (ASG)
+appearance field instead of SH for modeling the view-dependent appearance of
+each 3D Gaussian. Additionally, we have developed a coarse-to-fine training
+strategy to improve learning efficiency and eliminate floaters caused by overfit-
+ting in real-world scenes. Our experimental results demonstrate that our method
+surpasses existing approaches in terms of rendering quality. Thanks to ASG, we
+have significantly improved the ability of 3D-GS to model scenes with specular
+and anisotropic components without increasing the number of 3D Gaussians. This
+improvement extends the applicability of 3D GS to handle intricate scenarios
+with specular and anisotropic surfaces. Our codes and datasets are available at
+https://ingra14m.github.io/Spec-Gaussian-website.
+1
+Introduction
+High-quality reconstruction and photorealistic rendering from a collection of images are crucial for a
+variety of applications, such as augmented reality/virtual reality (AR/VR), 3D content production,
+and art creation. Classic methods employ primitive representations, like meshes [36] and points
+[4, 62], and take advantage of the rasterization pipeline optimized for contemporary GPUs to achieve
+real-time rendering. In contrast, neural radiance fields (NeRF) [34, 5, 35] utilize neural implicit
+representation to offer a continuous scene representation and employ volumetric rendering to produce
+rendering results. This approach allows for enhanced preservation of scene details and more effective
+reconstruction of scene geometries.
+Recently, 3D Gaussian Splatting (3D-GS) [20] has emerged as a leading technique, delivering state-
+of-the-art quality and real-time speed. This method optimizes a set of 3D Gaussians that capture the
+appearance and geometry of a 3D scene simultaneously, offering a continuous representation that
+preserves details and produces high-quality results. Besides, the CUDA-customized differentiable
+rasterization pipeline for 3D Gaussians enables real-time rendering even at high resolution.
+Despite its exceptional performance, 3D-GS struggles to model specular components within scenes
+(see Fig. 1). This issue primarily stems from the limited ability of low-order spherical harmonics (SH)
+† Corresponding Authors.
+38th Conference on Neural Information Processing Systems (NeurIPS 2024).
+
+Ours (31.60dB)
+3D-GS (25.48dB) 
+3D-GS (27.04dB)
+Scaffold (32.46dB)
+Ours (37.50dB)
+Ground Truth
+Figure 1: Our method not only achieves real-time rendering but also significantly enhances the
+capability of 3D-GS to model scenes with specular and anisotropic components. Key to this enhanced
+performance is our use of ASG appearance field to model the appearance of each 3D Gaussian, which
+results in substantial improvements in rendering quality for both complex and general scenes.
+to capture the high-frequency information in these scenarios. Consequently, this poses a challenge
+for 3D-GS to model scenes with reflections and specular components, as illustrated in Fig. 1.
+To address the issue, we introduce a novel approach called Spec-Gaussian, which combines
+anisotropic spherical Gaussian (ASG) [55] for modeling anisotropic and specular components,
+an effective training mechanism to eliminate floaters and improve learning efficiencies, and anchor-
+based 3D Gaussians for acceleration and storage reduction. Specifically, the method incorporates
+two key designs: 1) A new 3D Gaussian representation that utilizes an ASG appearance field instead
+of SH to model the appearance of each 3D Gaussian. ASG with a few orders can effectively model
+high-frequency information that low-order SH cannot. This new design enables 3D-GS to more
+effectively model anisotropic and specular components in static scenes. 2) A coarse-to-fine training
+scheme specifically tailored for 3D-GS is designed to eliminate floaters and boost learning efficiency.
+This strategy effectively shortens learning time by optimizing low-resolution rendering in the initial
+stage, preventing the need to increase the number of 3D Gaussians and regularizing the learning
+process to avoid the generation of unnecessary geometric structures that lead to floaters.
+By combining these advances, our approach can render high-quality results for specular highlights
+and anisotropy as shown in Fig. 4 while preserving the efficiency of Gaussians. Furthermore,
+comprehensive experiments reveal that our method not only endows 3D-GS with the ability to model
+specular highlights but also achieves state-of-the-art results in general benchmarks.
+In summary, the major contributions of our work are as follows:
+• A novel ASG appearance field to model the view-dependent appearance of each 3D Gaussian,
+which enables 3D-GS to effectively represent scenes with specular and anisotropic components.
+• A coarse-to-fine training scheme that effectively regularizes training to eliminate floaters and
+improve the learning efficiency of 3D-GS in real-world scenes.
+• An anisotropic dataset has also been made to assess the capability of our model in representing
+anisotropy.
+2
+Related Work
+2.1
+Implicit Neural Radiance Fields
+Neural rendering has attracted significant interest in the academic community for its unparalleled
+ability to generate photorealistic images. Methods like NeRF [34] utilize Multi-Layer Perceptrons
+(MLPs) to model the geometry and radiance fields of a scene. Leveraging the volumetric rendering
+equation and the inherent continuity and smoothness of MLPs, NeRF achieves high-quality scene
+reconstruction from a set of posed images, establishing itself as the state-of-the-art (SOTA) method for
+novel view synthesis. Subsequent research has extended the utility of NeRF to various applications,
+including mesh reconstruction [48, 24, 53, 31], inverse rendering [44, 66, 28, 57], optimization of
+camera parameters [26, 50, 49, 38], few-shot learning [11, 56, 52], and anti-aliasing [2, 1, 3].
+However, this stream of methods relies on ray casting rather than rasterization to determine the color
+of each pixel. Consequently, every sampling point along the ray necessitates querying the MLPs,
+leading to significantly slow rendering speed and prolonged training convergence. This limitation
+substantially impedes their application in large-scene modeling and real-time rendering.
+2
+
+SfM Points
+3D Gaussian Densification
+View-dependent Appearance Modeling
+…
+∑
+SH
+…
+Ψ
+ASG
+Figure 2: Pipeline of Spec-Gaussian. The optimization process begins with SfM points derived from
+COLMAP or generated randomly, serving as the initial state for the 3D Gaussians. To address the
+limitations of low-order SH and pure MLP in modeling high-frequency information, we additionally
+employ ASG in conjunction with a feature decoupling MLP to model the view-dependent appearance
+of each 3D Gaussian. Then, 3D Gaussians with opacity σ > 0 are rendered through a differentiable
+Gaussian rasterization pipeline, effectively capturing specular highlights and anisotropy in the scene.
+To reduce the training time of MLP-based NeRF methods and improve rendering speed, subsequent
+work has enhanced NeRF’s efficiency in various ways. Structure-based techniques [63, 12, 40, 15, 7]
+have sought to improve inference or training efficiency by caching or distilling the implicit neural
+representation into more efficient data structures. Hybrid methods [27, 45] increase efficiency by
+incorporating explicit voxel-based data structures. Factorization methods [5, 16, 8, 14] apply a low-
+rank tensor assumption to decompose the scene into low-dimensional planes or vectors, achieving
+better geometric consistency. Compared to continuous implicit representations, the convergence
+of individual voxels in the grid is independent, significantly reducing training time. Additionally,
+Instant-NGP [35] utilizes a hash grid with a corresponding CUDA implementation for faster feature
+querying, enabling rapid training and interactive rendering of neural radiance fields. Spec-NeRF [32]
+achieves high-quality specular reflection modeling by introducing Gaussian directional encoding.
+Despite achieving higher quality and faster rendering, these methods have not fundamentally over-
+come the substantial query overhead associated with ray casting. As a result, a notable gap remains
+before achieving real-time rendering. In this work, we build upon the recent 3D-GS [20], a point-
+based rendering method that leverages rasterization. Compared to ray casting-based methods, it
+significantly enhances both training and rendering speed.
+2.2
+Point-based Neural Radiance Fields
+Point-based representations, similar to triangle mesh-based methods, can exploit the highly efficient
+rasterization pipeline of modern GPUs to achieve real-time rendering. Although these methods offer
+breakneck rendering speeds and are well-suited for editing tasks, they often suffer from holes and
+outliers, leading to artifacts in the rendered images. This issue arises from the discrete nature of point
+clouds, which can create gaps in the primitives and, consequently, in the rendered image.
+To address these discontinuity issues, differentiable point-based rendering [62, 13, 21, 22] has been
+extensively explored for fitting complex geometric shapes. Notably, Zhang et al. [65] employ
+differentiable surface splatting and utilize a radial basis function (RBF) kernel to compute the
+contribution of each point to each pixel.
+Recently, 3D-GS [20] has employed anisotropic 3D Gaussians, initialized from Structure from Motion
+(SfM), to represent 3D scenes. The innovative densification mechanism and CUDA-customized
+differentiable Gaussian rasterization pipeline of 3D-GS have not only achieved state-of-the-art
+(SOTA) rendering quality but also significantly surpassed the threshold of real-time rendering.
+Many concurrent works have rapidly extended 3D-GS to a variety of downstream applications,
+including dynamic scenes [30, 58, 59, 17, 23], text-to-3D generation [25, 46, 9, 61, 10], avatars
+[68, 67, 18, 41, 37], scene editing [54, 6], and quality enhancement [33].
+Despite achieving SOTA results on commonly used benchmark datasets, 3D-GS still struggles to
+model scenes with specular and reflective components, which limits its practical application in
+real-time rendering at the photorealistic level. In this work, by replacing spherical harmonics (SH)
+3
+
+with an anisotropic spherical Gaussian (ASG) appearance field, we have enabled 3D-GS to model
+complex specular scenes more effectively.
+3
+Method
+The overview of our method is illustrated in Fig. 2. The input to our model is a set of posed images
+of a static scene, together with a sparse point cloud obtained from SfM [42]. The core of our method
+is to use the ASG appearance field to replace SH in modeling the appearance of 3D Gaussians (Sec.
+3.2). Moreover, we introduce a simple yet effective coarse-to-fine training strategy to reduce floaters
+in real-world scenes (Sec. 3.3). To further reduce the storage overhead and rendering speed pressure
+introduced
+
+
+==========================================================================================
+### 2404.18454_3DGS_DeferredReflection  (pages=10, img=2404.18454_3DGS_DeferredReflection_fig.png)
+==========================================================================================
+3D Gaussian Splatting with Deferred Reflection
+Keyang Ye
+State Key Lab of CAD&CG
+Zhejiang University
+Hangzhou, China
+yekeyang@zju.edu.cn
+Qiming Hou
+State Key Lab of CAD&CG
+Zhejiang University
+Hangzhou, China
+hqm03ster@gmail.com
+Kun Zhou∗
+State Key Lab of CAD&CG
+Zhejiang University
+Hangzhou, China
+kunzhou@acm.org
+Ref-NeRF (0.02 fps)
+Train: 27h, PSNR: 25.03
+NPC (1 fps)
+Train: 23h, PSNR: 24.78
+3DGS (84 fps)
+Train: 17min, PSNR: 26.02
+GShader (31 fps)
+Train: 1.2h, PSNR: 24.97
+Ours (80 fps)
+Train: 47min, PSNR: 26.91
+Ground-truth
+Figure 1: Novel view synthesis with specular reflection. From left to right: Ref-NeRF [Verbin et al. 2022], Neural Point
+Catacaustics [Kopanas et al. 2022], 3D Gaussian Splatting [Kerbl et al. 2023], GaussianShader [Jiang et al. 2023], our method,
+ground-truth. We render high quality reflection at a speed comparable with the original reflection-oblivious 3D Gaussian
+Splatting. The key contribution is a deferred shading pipeline, which offers high-precision shading in real-time and enables
+gradual propagation of correct normal estimation.
+ABSTRACT
+The advent of neural and Gaussian-based radiance field methods
+have achieved great success in the field of novel view synthesis.
+However, specular reflection remains non-trivial, as the high fre-
+quency radiance field is notoriously difficult to fit stably and ac-
+curately. We present a deferred shading method to effectively ren-
+der specular reflection with Gaussian splatting. The key challenge
+comes from the environment map reflection model, which requires
+accurate surface normal while simultaneously bottlenecks normal
+estimation with discontinuous gradients. We leverage the per-pixel
+reflection gradients generated by deferred shading to bridge the
+optimization process of neighboring Gaussians, allowing nearly
+correct normal estimations to gradually propagate and eventually
+spread over all reflective objects. Our method significantly out-
+performs state-of-the-art techniques and concurrent work in syn-
+thesizing high-quality specular reflection effects, demonstrating a
+consistent improvement of peak signal-to-noise ratio (PSNR) for
+both synthetic and real-world scenes, while running at a frame rate
+almost identical to vanilla Gaussian splatting.
+∗Corresponding author
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for components of this work owned by others than the
+author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+republish, to post on servers or to redistribute to lists, requires prior specific permission
+and/or a fee. Request permissions from permissions@acm.org.
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA
+© 2024 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+ACM ISBN 979-8-4007-0525-0/24/07
+https://doi.org/10.1145/3641519.3657456
+CCS CONCEPTS
+• Computing methodologies →Rasterization; Point-based
+models; Machine learning approaches; Rendering.
+KEYWORDS
+Novel view synthesis, deferred shading, real-time rendering
+ACM Reference Format:
+Keyang Ye, Qiming Hou, and Kun Zhou. 2024. 3D Gaussian Splatting with
+Deferred Reflection. In Special Interest Group on Computer Graphics and
+Interactive Techniques Conference Conference Papers ’24 (SIGGRAPH Confer-
+ence Papers ’24), July 27-August 1, 2024, Denver, CO, USA. ACM, New York,
+NY, USA, 10 pages. https://doi.org/10.1145/3641519.3657456
+1
+INTRODUCTION
+Novel view synthesis of 3D scenes captured with multiple images
+has been a long-standing research topic in computer graphics and
+vision. Recently, Neural Radiance Field (NeRF) methods first intro-
+duced by Mildenhall et al. [2020] have gained popularity by using
+volume rendering with implicit fields via Multi Layer Perceptrons
+(MLPs), achieving state-of-the-art visual quality. More recently, 3D
+Gaussian Splatting [Kerbl et al. 2023] (3DGS) offers a more com-
+pelling solution by modeling radiance fields as sparsely distributed
+3D Gaussians, synthesizing novel views at high resolution and real-
+time frame rates, while maintaining state-of-the-art visual quality
+and competitive training.
+However, specular reflection remains challenging for Gaussian
+splatting to model. Although 3DGS provides view-dependent col-
+oring via per-Gaussian SH (Spherical Harmonics) functions, its
+directional frequency is too limited to model specular reflection.
+The training process instead hallucinates Gaussians to explicitly
+arXiv:2404.18454v2 [cs.CV] 4 Jun 2024
+
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA
+Keyang Ye, Qiming Hou, and Kun Zhou
+model the reflected image, which lacks a well-defined spatial po-
+sition for non-planar reflectors. As such, specular effects end up
+poorly emulated, with a side effect of compromising geometry
+quality.
+In this paper, we introduce a deferred shading method to ef-
+fectively render specular reflection with Gaussian splatting. Our
+method associates each Gaussian with a scalar parameter of re-
+flection strength and regards the shortest axis of each Gaussian
+ellipsoid as its normal vector. The rendering is performed in two
+passes. First, a Gaussian splatting pass generates several screen-
+space maps of base color, normal, and reflection strength. Second, a
+pixel shading pass queries an environment map with the reflection
+direction to acquire the specular reflection color, and renders the
+final color as the sum of the basic and reflection colors weighted
+by the reflection strength. The environment map, per-Gaussian
+reflection strength, as well as other Gaussian parameters are all
+learned during training.
+The seemingly mundane environment map query presents sig-
+nificant challenge to the training procedure. As a high frequency
+lookup table, the environment map places a high precision demand
+on the normal vectors required to compute reflection directions,
+while scarcely providing any useful gradient to refine them. On
+top of that, we only have a semi-transparent Gaussian soup with
+loosely-defined surface. To this end, we present a training algorithm
+featuring normal propagation. Specifically, based on the observa-
+tion that Gaussians with relative large reflective strength values
+have near-correct normal vectors, we expand these reflective Gaus-
+sians to propagate their normal vectors to nearby Gaussians. In
+this way, after one Gaussian with near-correct normal overlaps a
+different Gaussian without one, some shared pixels can also have
+near-correct normal, which will get meaningful normal gradients,
+helping to optimize the normal of the later Gaussian.
+Our deferred shading model is critical to the efficacy of training.
+The Gaussian splatting pass blends Gaussian properties like base
+color and normal into viewport-aligned textures. The blended input
+values on each pixel are used to evaluate reflection and compose
+the base and reflection colors into the final color, which feeds gra-
+dient back to input values of the same pixel through image color
+loss. This creates a gradient channel from color to blended nor-
+mal to individual Gaussian normal, facilitating information flow
+between the normal of different Gaussians overlapping the same
+pixel, which enables normal propagation. This is not possible with
+per-Gaussian shading, where gradients propagate from color to
+individual Gaussian normal directly and different Gaussians get
+independent normal gradients that cannot influence each other.
+Experimental results on several previously published datasets
+show that our method significantly outperforms state-of-the-art
+methods and concurrent work in synthesizing high-quality specular
+reflection effects (see Fig. 1), demonstrating a consistent improve-
+ment of peak signal-to-noise ratio (PSNR) for both synthetic and
+real-world scenes, while running at real-time frame rates almost
+identical to vanilla Gaussian splatting. Our method also produces
+more accurate normal and environment map estimation (see Fig. 11
+and Fig. 12). On the other hand, it does not provide a full geometry-
+lighting-material decomposition for inverse rendering or relighting.
+Our shading model separately handles mirror reflection and leaves
+rough reflection, anisotropic / layered materials, and global illumina-
+tion effects to the base SH colors, achieving high-quality rendering
+superior to full-decomposition methods in novel view synthesis.
+2
+RELATED WORK
+Research on novel view synthesis has a long history in computer
+graphics and vision, and is still developing rapidly. In this section
+we only review the most relevant references. Please refer to [Tewari
+et al. 2022; Xie et al. 2022] for comprehensive reviews of the field.
+Novel View Synthesis. A variety of methods have been proposed
+to synthesize novel views from multiple images of a static scene [Davis
+et al. 2012; Gortler et al. 1996; Levoy and Hanrahan 1996]. Recently,
+Neural Radiance Field (NeRF) [Mildenhall et al. 2020] has gained
+popularity. NeRF represents the scene as implicit fields of view-
+dependent color and density, typically evaluated as a deep MLP, and
+synthesizes high-quality images through volumetric ray marching.
+Many follow-up research on NeRF try to improve the image qual-
+ity (e.g., [Barron et al. 2022; Verbin et al. 2022]), training/rendering
+performance (e.g., [Garbin et al. 2021; Müller et al. 2022; Yu et al.
+2021]), sparse-view generalization ability (e.g., [Chen et al. 2021;
+Deng et al. 2022; Jain et al. 2021]). One notable work [Müller et al.
+2022] replaces the deep MLP of classical NeRF with a shallow MLP
+featuring multi-resolution hash encoding as input, which enables
+rapid training and real-time rendering. As a generic neural net-
+work design with applications beyond novel view synthesis, it is
+orthogonal to our approach, which does not use neural networks.
+Rendering novel views of reflective objects is challenging as the
+radiance field becomes high frequency in the view dimension, mak-
+ing it difficult to reconstruct from the spatial images typically used
+as input. Classical NeRFs assume low frequency view-dependency.
+Ref-NeRF [Verbin et al. 2022] extends NeRFs with a novel parame-
+terization for view-dependent outgoing radiance and normal vector
+regularization. The added dimensions are challenging to optimize,
+though, which makes its training time-consuming and leads to
+noisy synthesis results.
+The radiance field can also be represented by a point cloud [Xu
+et al. 2022; Zhang et al. 2022a], which enables unique algorithm de-
+signs. Kopanas et al. [2022] formalize hallucinated mirror images as
+catacaustics consisting of virtual points inside the reflector. Curved
+surfaces are handled using MLPs to adjust the point positions based
+on camera movement. However, the training of this MLP is typically
+under-constrained due to static input cameras, resulting in unstable
+behavior on novel views.
+The more recent 3D Gaussian splatting [Kerbl et al. 2023] de-
+parts from the volumetric NeRF formulation in favor of a differ-
+entiable rasterizer for spatial Gaussians, achieving a distinctive
+hard-realtime frame rate at 1080p resolutions. Our approach ex-
+tends its Gaussian representation, significantly enhancing specular
+reflection effects while maintaining the original training and ren-
+dering efficiency.
+Inverse Rendering. It is tempting to generalize novel view synthe-
+sis to inverse rendering [Boss et al. 2021; Jiang et al. 2023; Srinivasan
+et al. 2021; Zhang et al. 2021a,b, 2022b], which aims to completely
+decompose geometry, lighting and material, typically employing
+a physically-based shading model. While
+
+
+==========================================================================================
+### 2405.14871_NeRF-Casting  (pages=16, img=2405.14871_NeRF-Casting_fig.png)
+==========================================================================================
+NeRF-Casting: Improved View-Dependent Appearance with Consistent
+Reflections
+DOR VERBIN, Google, USA
+PRATUL P. SRINIVASAN, Google, USA
+PETER HEDMAN, Google, UK
+BEN MILDENHALL, Google, USA
+BENJAMIN ATTAL, Carnegie Mellon University, USA
+RICHARD SZELISKI, Google, USA
+JONATHAN T. BARRON, Google, USA
+Interactive webpage at https://nerf-casting.github.io
+(a) Zip-NeRF [Barron et al. 2023]
+(b) UniSDF [Wang et al. 2023]
+(c) Ours
+(d) Ground truth
+Fig. 1. Our method, NeRF-Casting, recovers and renders scenes with higher-quality reflections than prior work. Here we show cropped renderings and a
+ground-truth image for a scene in our dataset (top), as well as a slice from a video rendering along a smooth camera path (one horizontal row of pixels stacked
+vertically across multiple video frames) to emphasize the continuity of high-frequency reflected content in our result (bottom). Please see the videos provided
+in the supplemental webpage to observe the accurate motion of our rendered reflections.
+Neural Radiance Fields (NeRFs) typically struggle to reconstruct and render
+highly specular objects, whose appearance varies quickly with changes in
+viewpoint. Recent works have improved NeRF’s ability to render detailed
+specular appearance of distant environment illumination, but are unable
+to synthesize consistent reflections of closer content. Moreover, these tech-
+niques rely on large computationally-expensive neural networks to model
+outgoing radiance, which severely limits optimization and rendering speed.
+We address these issues with an approach based on ray tracing: instead of
+querying an expensive neural network for the outgoing view-dependent
+radiance at points along each camera ray, our model casts reflection rays
+from these points and traces them through the NeRF representation to render
+feature vectors which are decoded into color using a small inexpensive net-
+work. We demonstrate that our model outperforms prior methods for view
+synthesis of scenes containing shiny objects, and that it is the only existing
+NeRF method that can synthesize photorealistic specular appearance and
+reflections in real-world scenes, while requiring comparable optimization
+time to current state-of-the-art view synthesis models.
+CCS Concepts: • Computing methodologies →Reflectance modeling; Ray
+tracing; 3D imaging.
+Additional Key Words and Phrases: View synthesis, neural radiance fields,
+reflections
+1
+INTRODUCTION
+Neural Radiance Fields (NeRFs) represent a 3D scene’s underlying
+geometry and color using neural networks, for the goal of render-
+ing novel unobserved views of the scene. Early variants of NeRF
+used multi-layer perceptrons (MLPs) to map from 3D coordinates
+to volume densities and view-dependent colors. However, the large
+MLPs needed to represent detailed 3D geometry and color are ex-
+tremely slow to train and evaluate. Recent work has focused on
+making NeRF more efficient by replacing large MLPs with voxel-
+grid-like data structures or combinations of grids and small MLPs.
+These methods have enabled scaling NeRF to representing detailed
+large-scale scenes, but their benefits are limited to 3D geometry and
+mostly diffuse color.
+Scaling NeRF’s ability to model realistic view-dependent appear-
+ance is still a challenge. State-of-the-art models for view synthesis
+of shiny objects with high-frequency view-dependent appearance
+are limited in two ways. First, they are only able to synthesize accu-
+rate reflections of distant environment illumination and struggle to
+render convincing reflections of nearby scene content. Second, they
+arXiv:2405.14871v1 [cs.CV] 23 May 2024
+
+2
+•
+Verbin et al.
+rely on large MLPs to represent the view-dependent outgoing radi-
+ance at any point and struggle to scale to larger real-world scenes
+with detailed reflections.
+We present an approach that solves both of these issues by intro-
+ducing ray tracing into NeRF’s rendering model. Instead of querying
+an expensive MLP for the view-dependent appearance at each point
+along a camera ray, our method casts reflection rays from these
+points into the NeRF geometry, samples properly anti-aliased fea-
+tures from the reflected scene content, and uses a small MLP to
+decode these features into reflected color. Casting rays into the re-
+covered NeRF naturally synthesizes consistent reflections of nearby
+and distant content. Moreover, computing appearance by ray tracing
+reduces the burden of representing highly-detailed view-dependent
+functions at each point in the scene with a large MLP.
+Our approach is both more efficient than prior work for improv-
+ing NeRF’s view-dependent appearance and renders higher quality
+specular reflections, particularly of nearby content.
+2
+RELATED WORK
+A Neural Radiance Field [Mildenhall et al. 2020] consists of an MLP
+that maps from a 3D coordinate within the scene to the correspond-
+ing volume density and view-dependent color at that position. NeRF
+renders rays passing through a scene by querying the MLP at sam-
+pled points along each ray and integrating the returned volume
+densities and colors into a single color. Evaluating an MLP hundreds
+of millions of times to render a single image can be prohibitively
+slow, so recent research has focused on making NeRF more efficient
+and scalable. In particular, many effective methods trade compute
+for storage and leverage data structures based on voxel grids to ac-
+celerate NeRF’s optimization and rendering. These include standard
+voxel grids [Fridovich-Keil et al. 2022; Karnewar et al. 2022; Sun et al.
+2022], low-rank tensor factorizations [Chen et al. 2022], and voxel
+pyramids with hash maps [Müller et al. 2022]. These methods are
+primarily focused on scaling NeRF’s representation of 3D volume
+density to represent larger and more detailed scenes. However, they
+do not usually modify NeRF’s representation of view-dependent
+color, which is a 5D function of both position and viewing direction.
+A separate line of work has focused on improving NeRF’s ability
+to reconstruct and render highly specular (or shiny) content. Ref-
+NeRF [Verbin et al. 2022] demonstrated that reparameterizing outgo-
+ing radiance as a function of the reflected view direction is effective
+in cases where geometry is estimated accurately. However, Ref-
+NeRF’s parameterization of outgoing radiance is most effective for
+objects that are mainly illuminated by distant light sources, which is
+often the case for synthetically-generated scenes. Furthermore, the
+outgoing radiance at every point must be encoded in the weights of
+an MLP. In the case of highly glossy objects, this MLP must have a
+large enough capacity to represent the entire environment viewed
+from any point in the scene, and is therefore costly to evaluate.
+Other works that focus on recovering specular appearance with
+NeRF also adopt Ref-NeRF’s reparameterization of view-dependent
+appearance. ENVIDR [Liang et al. 2023] pre-trains the MLP that
+maps from reflection direction to color to effectively encode a prior
+on view-dependent appearance. UniSDF [Wang et al. 2023] improves
+Ref-NeRF’s geometry representation to obtain smoother normals
+that are better for rendering surface reflection. SpecNeRF [Ma et al.
+2023] modifies Ref-NeRF’s encoding of view directions to vary spa-
+tially according to a set of optimized 3D Gaussians, which helps
+the view-dependent color network model reflections of nearby con-
+tent. However, this encoding does not ensure accurate reflections
+when light sources are occluded. NeAI [Zhuang et al. 2024] traces
+reflection cones within an MLP-based NeRF to compute specular
+appearance, but requires ground-truth geometry and masks that sep-
+arate the object from the environment in order to supervise the MLP
+that represents reflected lighting. Work concurrent to ours by Wu
+et al. [2024] proposes a Neural Directional Encoding that also traces
+cones through the NeRF model to simulate near-field reflections.
+However, they rely on a large MLP to represent geometry, which
+is slow to train and render compared to more modern grid-based
+representations. Furthermore, they primarily focus on synthetic
+scenes with clearly separated near-field and distant content.
+The methods discussed above address the same problem as our
+work: improving view-dependent appearance in view synthesis. An
+alternative approach to synthesizing specular appearance is inverse
+rendering: estimating representations of scene materials and light-
+ing, alongside geometry. Many existing works combine NeRF with
+inverse rendering and explicitly model light transport through the
+3D scene to recover representations that can render specular ap-
+pearance [Bi et al. 2020; Jin et al. 2023; Mai et al. 2023; Srinivasan
+et al. 2021]. However, these techniques must perform expensive
+Monte Carlo integration over the entire hemisphere of incoming
+lighting (using hundreds to thousands of sampled reflection rays) to
+estimate outgoing radiance at any point in the scene, and they are
+typically orders of magnitude slower than standard NeRF models.
+Our proposed method specifically focuses on rendering specular
+appearance for view synthesis and is able to render accurate reflec-
+tions with low computational overhead compared to existing view
+synthesis models.
+3
+PRELIMINARIES AND NOTATION
+Neural Radiance Fields [Mildenhall et al. 2020] uses volume render-
+ing to combine the densities and emitted view-dependent radiance
+values at samples along rays:
+¯c =
+∑︁
+𝑖
+𝑤(𝑖)c(𝑖) ,
+(1)
+𝑤(𝑖) =
+
+1 −exp
+
+−𝜏(𝑖) 
+𝑡(𝑖+1) −𝑡(𝑖)
+exp©­
+«
+−
+∑︁
+𝑗<𝑖
+𝜏(𝑗) 
+𝑡(𝑗+1) −𝑡(𝑗)ª®
+¬
+where 𝑡(𝑖) is the 𝑖th sample along the ray, and 𝜏(𝑖) and c(𝑖) are the
+volume density and color (respectively) at the𝑖th sample location, o+
+𝑡(𝑖)d, where o is the ray’s origin and d its direction. Throughout this
+paper we denote the volume-rendered values with a “bar”, similar
+to ¯c on the left of Equation 1.
+Mip-NeRF [Barron et al. 2021] replaces infinitesimal rays with
+pixel cones with origin o, direction d and radius ¤𝑟(determined by
+the pixel footprint on the image plane). Casting cones instead of
+rays prevents aliasing in the scene representation and as a result,
+prevents aliasing in the rendered images. To represent large-scale
+unbounded scenes, mip-NeRF 360 [Barron et al. 2022] allocates
+
+NeRF-Casting: Improved View-Dependent Appearance with Consistent Reflections
+•
+3
+higher representational capacity to points near the cameras using a
+spatial contraction function that maps all points in R3 to a sphere
+of radius 2:
+C(x) =
+(
+x
+if ∥x∥≤1,
+
+2 −
+1
+∥x∥
+
+x
+∥x∥
+if ∥x∥> 1 .
+(2)
+In order to represent density and color, Zip-NeRF accelerates
+mip-NeRF 360 by replacing its large MLP with a hash encoding,
+based on Instant Neural Graphics Primitives [Müller et al. 2022],
+followed by a smaller MLP. To prevent aliasing, Zip-NeRF replaces
+point samples of the hash encoding grid with their expectation over
+3D Gaussians. Since these expected values cannot be computed ex-
+actly, they are approximated using two components: multisampling
+and downweighting. Multisampling replaces each Gaussian with
+multiple smaller Gaussians, and downweighting multiplies each of
+the gathered features at these samples by a multiplier designed to
+prevent voxels much smaller than the Gaussian from affecting the
+features. The contraction function in Equation 2 must be taken into
+account when computing the appropriate amount of
+
+
+==========================================================================================
+### 2406.18544_GS-ROR  (pages=30, img=2406.18544_GS-ROR_fig.png)
+==========================================================================================
+GS-ROR2: Bidirectional-guided 3DGS and SDF for Reflective Object
+Relighting and Reconstruction
+ZUO-LIANG ZHU, VCIP, College of Computer Science, Nankai University, China
+BEIBEI WANG†, School of Intelligence Science and Technology, Nanjing University, China
+JIAN YANG†, VCIP, College of Computer Science, Nankai University, China
+Potion
+Tbell
+Helmet
+Toaster
+Qilin
+Bell
+Horse
+Teapot
+Car
+Toaster
+Relighting
+Extracted Mesh
+Fig. 1. We present bidirectional-guided 3DGS and SDF for Reflective Object Relighting and Reconstruction (GS-ROR2) from multi-view images. We show
+relighting results with reflective highlights (left) and their normal (right) in the 1𝑠𝑡row, including Potion, Tbell from NeRO [Liu et al. 2023], Helmet, Toaster
+from Ref-NeRF [Verbin et al. 2022], and Qilin from NeILF++ [Zhang et al. 2023], where Qilin is a real scene. Besides, we show extracted meshes in the 2𝑛𝑑
+row, including Bell, Horse, Teapot from NeRO and Car, Toaster from Ref-NeRF. Our method demonstrates a robust geometry reconstruction for reflective
+surfaces and faithful material decomposition, leading to photo-realistic reflective object relighting and high-fidelity geometry reconstruction.
+3D Gaussian Splatting (3DGS) has shown a powerful capability for novel
+view synthesis due to its detailed expressive ability and highly efficient
+rendering speed. Unfortunately, creating relightable 3D assets and recon-
+structing faithful geometry with 3DGS is still problematic, particularly for
+reflective objects, as its discontinuous representation raises difficulties in
+constraining geometries. In contrary, volumetric signed distance field (SDF)
+†Corresponding author.
+Authors’ addresses: Zuo-Liang Zhu, VCIP, College of Computer Science, Nankai Uni-
+versity, China, nkuzhuzl@gmail.com; Beibei Wang†, School of Intelligence Science and
+Technology, Nanjing University, China, beibei.wang@nju.edu.cn; Jian Yang†, VCIP,
+College of Computer Science, Nankai University, China, csjyang@nankai.edu.cn.
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for components of this work owned by others than the
+author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+republish, to post on servers or to redistribute to lists, requires prior specific permission
+and/or a fee. Request permissions from permissions@acm.org.
+© 2025 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+0730-0301/2025/1-ART1 $15.00
+https://doi.org/10.1145/3759248
+methods provide robust geometry reconstruction, while the expensive ray
+marching hinders its real-time application and slows the training. Besides,
+these methods struggle to capture sharp geometric details. To this end, we
+propose to guide 3DGS and SDF bidirectionally in a complementary manner,
+including an SDF-aided Gaussian splatting for efficient optimization of the re-
+lighting model and a GS-guided SDF enhancement for high-quality geometry
+reconstruction. At the core of our SDF-aided Gaussian splatting is the mutual
+supervision of the depth and normal between blended Gaussians and SDF,
+which avoids the expensive volume rendering of SDF. Thanks to this mutual
+supervision, the learned blended Gaussians are well-constrained with a mini-
+mal time cost. As the Gaussians are rendered in a deferred shading mode, the
+alpha-blended Gaussians are smooth, while individual Gaussians may still
+be outliers, yielding floater artifacts. Therefore, we introduce an SDF-aware
+pruning strategy to remove Gaussian outliers located distant from the sur-
+face defined by SDF, avoiding the floater issue. This way, our GS framework
+provides reasonable normal and achieves realistic relighting, while the mesh
+of truncated SDF (TSDF) fusion from depth is still problematic. Therefore, we
+design a GS-guided SDF refinement, which utilizes the blended normal from
+Gaussians to finetune SDF. Equipped with the efficient enhancement, our
+method can further provide high-quality meshes for reflective objects at the
+ACM Trans. Graph., Vol. 1, No. 1, Article 1. Publication date: January 2025.
+arXiv:2406.18544v4 [cs.CV] 2 Jun 2026
+
+1:2
+•
+Zuo-Liang Zhu, Beibei Wang†, and Jian Yang†
+cost of 17% extra training time. Consequently, our method outperforms the
+existing Gaussian-based inverse rendering methods in terms of relighting
+and mesh quality. Our method also exhibits competitive relighting/mesh
+quality compared to NeRF-based methods with at most 25%/33% of training
+time and allows rendering at 200+ frames per second on an RTX4090. Our
+code is available at https://github.com/NK-CS-ZZL/GS-ROR.
+CCS Concepts: • Computing methodologies →Rendering.
+Additional Key Words and Phrases: neural rendering, Gaussian splatting,
+relighting
+ACM Reference Format:
+Zuo-Liang Zhu, Beibei Wang†, and Jian Yang†. 2025. GS-ROR2: Bidirectional-
+guided 3DGS and SDF for Reflective Object Relighting and Reconstruction.
+ACM Trans. Graph. 1, 1, Article 1 (January 2025), 30 pages. https://doi.org/
+10.1145/3759248
+1
+INTRODUCTION
+Creating relightable 3D assets from multi-view images has been a
+long-standing and challenging task in computer graphics and vision,
+as the decomposition of lighting, materials, and geometries is highly
+ill-posed. Particularly, the decomposition becomes more difficult for
+reflective objects, as their appearances are highly view-dependent,
+and a minor error on the surface leads to a significant difference.
+Existing approaches [Li et al. 2024; Liu et al. 2023] have shown
+impressive relighting quality for reflective objects by leveraging
+the neural radiance field (NeRF) and the signed distance field (SDF).
+Unfortunately, these methods require a long training and rendering
+time. They also struggle to capture sharp geometry details. In this
+paper, we aim at reflective object relighting and reconstruction given
+multi-view images, achieving high-quality relighting and detailed
+reconstruction with short training/rendering time costs. In Figure 1,
+we present some representative results from our method, including
+the relighting results and mesh visualizations.
+Most recently, Kerbl et al. [2023] proposed 3D Gaussian Splatting
+(3DGS), boosting the rendering speed significantly and achieving
+more detailed appearance modeling. A concurrent work [Ye et al.
+2024] has introduced deferred Gaussian splatting for reflective ob-
+jects, improving the novel view synthesis (NVS) quality. Despite
+the impressive NVS quality, relighting and geometry reconstruction
+with 3DGS become problematic due to the Gaussians’ discontinuity
+and high flexibility, especially for reflective objects. Extensive efforts
+have been made to improve the relighting quality by regularizing
+the geometry in terms of the normal and depth [Gao et al. 2024;
+Jiang et al. 2024; Liang et al. 2024]. However, they still suffer from
+erroneous surfaces and floater artifacts for reflective objects.
+Some prior works (e.g., NeuSG [Chen et al. 2023], GSDF [Yu et al.
+2024a]) couple SDF with GS for surface reconstruction. While their
+work has shown impressive reconstructed quality for diffuse objects,
+they require extensive training time, due to the rendering of SDF
+and the existence of two representations. Our method focuses on
+both relighting and reconstruction, thus raising more difficulties.
+Specifically, evaluating the rendering equation increases the training
+time. These issues become more severe when modeling reflective ob-
+jects, as the specular highlight is sensitive to the reflective direction,
+which needs more Gaussians to provide detailed normal. Therefore,
+introducing SDF into GS for our task is not straightforward, which
+raises the demand for a more efficient framework.
+In this paper, we propose a bidirectional guidance of GS and
+SDF in a complementary manner, including an SDF-aided Gaussian
+splatting for efficient optimization of the relighting model and a
+GS-guided SDF enhancement for high-quality geometry reconstruc-
+tion. Specifically, the SDF-aided Gaussian splatting utilizes the SDF
+to constrain the Gaussians with minimal computational increase.
+For this, we propose to supervise the deferred Gaussians and a
+low-resolution SDF mutually in our framework, so-called mutual su-
+pervision, which allows constraining deferred Gaussians with SDFs
+while avoiding SDF rendering. This way, the learned deferred Gaus-
+sians are better constrained. However, we still notice that Gaussians
+have floater artifacts occasionally, as the deferred Gaussians (with
+alpha blending) rather than individual Gaussians are constrained
+by SDF. Therefore, we introduce an SDF-aware pruning strategy to
+remove Gaussian outliers to avoid this floater issue. Therefore, our
+method provides reasonable shading normal and enables realistic
+relighting for reflective objects in the GS framework. Due to the
+inconsistency between the normal and depth from blended Gaus-
+sians, the meshes of TSDF fusion from depth are still problematic.
+Meanwhile, SDF is underfitted and only learns the coarse structure
+of geometry. To solve this, we further design a GS-guided SDF en-
+hancement, which utilizes the learned normal from fixed Gaussians
+to finetune the upsampled SDF. This way, we avoid optimizing a
+full-resolution SDF and GS jointly, leading to an efficient refinement.
+SDF benefits from the detailed expressive ability of GS and learns
+more fine-grained geometry details. Equipped with this design, our
+method achieves high-quality geometry reconstruction for reflec-
+tive objects from SDF with only 17% extra overhead of training time.
+Consequently, our method outperforms the existing Gaussian-based
+inverse rendering methods in terms of relighting and mesh quality.
+Meanwhile, it exhibits competitive relighting/mesh quality com-
+pared to NeRF-based methods with at most 25%/33% of training
+time. It also allows real-time rendering with 200+ frames per second
+on an RTX4090. To summarize, our main contributions include
+• a GS-ROR2 framework for reflective objects, achieving high-
+quality relighting and geometry reconstruction while main-
+taining short training time and allowing real-time rendering,
+• an SDF-aided GS, including a mutual supervision between
+deferred Gaussians and the SDF with an SDF-aware Gaussian
+pruning strategy, producing robust geometry and avoiding
+local minima with minimal computational increase, and
+• a GS-guided SDF enhancement via blended normal from Gaus-
+sians, enabling high-quality geometry reconstruction.
+2
+RELATED WORK
+2.1
+Neural representations for multi-view stereo
+Since the presence of NeRF [Mildenhall et al. 2020], numerous neu-
+ral implicit representations [Barron et al. 2022; Chen et al. 2022;
+Fridovich-Keil et al. 2022; Müller et al. 2022] have been proposed and
+gained remarkable progress in the field of multi-view stereo. These
+NeRF-based models adopt Multi-Layer Perceptrons (MLPs) [Bar-
+ron et al. 2021, 2022; Verbin et al. 2022] or grid-like representa-
+tions [Chen et al. 2022; Fridovich-Keil et al. 2022; Müller et al. 2022]
+ACM Trans. Graph., Vol. 1, No. 1, Article 1. Publication date: January 2025.
+
+GS-ROR2: Bidirectional-guided 3DGS and SDF for Reflective Object Relighting and Reconstruction
+•
+1:3
+to represent geometry and view-dependent appearance, optimized
+via volume rendering. Subsequently, NeuS [Wang et al. 2021] links
+the SDF with the density in NeRF and enables the optimization of
+surfaces with volume rendering. With extra regularization, these
+SDF-based models [Li et al. 2023; Rosu and Behnke 2023; Wang et al.
+2023] achieve detailed surface reconstruction from RGB images.
+Owing to carefully designed architectures and specific optimization,
+some methods [Fridovich-Keil et al. 2022;
+
+
+==========================================================================================
+### 2412.15867_IRGS  (pages=15, img=2412.15867_IRGS_fig.png)
+==========================================================================================
+IRGS: Inter-Reflective Gaussian Splatting with 2D Gaussian Ray Tracing
+Chun Gu1,2
+Xiaofei Wei1,2
+Zixuan Zeng1
+Yuxuan Yao1
+Li Zhang1,2*
+1School of Data Science, Fudan University
+2Shanghai Innovation Institute
+https://fudan-zvg.github.io/IRGS
+Abstract
+In inverse rendering, accurately modeling visibility and
+indirect radiance for incident light is essential for cap-
+turing secondary effects.
+Due to the absence of a pow-
+erful Gaussian ray tracer, previous 3DGS-based methods
+have either adopted a simplified rendering equation or used
+learnable parameters to approximate incident light, result-
+ing in inaccurate material and lighting estimations.
+To
+this end, we introduce inter-reflective Gaussian splatting
+(IRGS) for inverse rendering. To capture inter-reflection,
+we apply the full rendering equation without simplification
+and compute incident radiance on the fly using the pro-
+posed differentiable 2D Gaussian ray tracing. Addition-
+ally, we present an efficient optimization scheme to handle
+the computational demands of Monte Carlo sampling for
+rendering equation evaluation. Furthermore, we introduce
+a novel strategy for querying the indirect radiance of inci-
+dent light when relighting the optimized scenes. Extensive
+experiments on multiple standard benchmarks validate the
+effectiveness of IRGS, demonstrating its capability to accu-
+rately model complex inter-reflection effects.
+1. Introduction
+Inverse rendering is a fundamental problem in computer vi-
+sion and graphics, aiming to reconstruct geometry and esti-
+mate material and lighting from a set of posed images. The
+introduction of neural radiance field (NeRF) [21], which
+uses a neural implicit field modeled by a multi-layer per-
+ceptron (MLP) to represent 3D scenes, has inspired many
+NeRF-based methods [5, 15, 20, 28, 40] to address inverse
+rendering tasks. Leveraging NeRF’s ray-based rendering
+technique, these methods can accurately compute the visi-
+bility and indirect radiance for incident light as required by
+the rendering equation. However, the exhaustive querying
+of a neural field during ray marching and its limited rep-
+resentational capacity constrain the efficiency and perfor-
+mance of neural implicit fields in inverse rendering.
+*Corresponding author (lizhangfd@fudan.edu.cn).
+Global illumination
+Indirect illumination
+Figure 1. Global and indirect illumination in a Gaussian-based
+scene using our IRGS, highlighting its inter-reflective capabilities.
+Recently,
+3D Gaussian splatting (3DGS) [16] has
+emerged as a promising technique for 3D scene represen-
+tation, offering both remarkable rendering quality and ef-
+ficiency. By modeling a static 3D scene as a collection of
+3D Gaussians, 3DGS achieves real-time, high-quality ren-
+dering with a tile-based rasterizer.
+However, despite its
+strengths, 3DGS has notable limitations due to its reliance
+on rasterization, which limits its ability to accurately sim-
+ulate ray-based effects that are essential for inverse render-
+ing. As a result, some 3DGS-based inverse rendering meth-
+ods [14, 19, 27] have adopted simplified versions of the ren-
+dering equation, such as the split-sum approximation [24].
+Other approaches, such as R3DG [10], use learnable pa-
+rameters to approximate indirect radiance, which fails to
+arXiv:2412.15867v2 [cs.CV] 24 Mar 2025
+
+capture actual inter-reflection. These methods struggle to
+accurately model the rendering equation, limiting their ef-
+fectiveness in realistic material and lighting estimation.
+Our goal is to integrate the full rendering equation into
+the efficient Gaussian splatting for accurate inverse render-
+ing, enabling the capture of complex interreflection effects.
+This requires efficient and precise computation of visibility
+and indirect radiance for incident light. Drawing inspira-
+tion from 3DGRT [22], which achieves efficient ray tracing
+on 3D Gaussian primitives via a k-buffer hits-based march-
+ing technique and hardware-accelerated NVIDIA OptiX in-
+terface [25], we explore adapting this technique to model
+inter-reflection within the Gaussian splatting framework.
+In this paper, we introduce inter-reflective Gaussian
+splatting (IRGS), a novel inverse rendering framework that
+leverages the proposed 2D Gaussian ray tracing technique
+to model inter-reflections within Gaussian splatting.
+To
+the best of our knowledge, this is the first method to in-
+tegrate the full rendering equation without simplification
+into Gaussian splatting, accurately capturing inter-reflection
+effects by querying incident lighting through ray tracing.
+First, we propose 2D Gaussian ray tracing to efficiently
+and accurately trace across 2D Gaussian primitives, com-
+puting the accumulated opacity and color of arbitrary rays.
+Unlike 3DGRT [22], our approach features well-defined
+ray-splat intersections, enabling direct ray tracing on pre-
+trained 2D Gaussian splatting [13] with minimal quality
+degradation. Next, we introduce the inter-reflective Gaus-
+sian splatting framework: starting from a pretrained 2D
+Gaussian splatting model, we apply the full rendering equa-
+tion without simplification at intersection points determined
+by the depth map, while visibility and indirect radiance are
+computed on the fly using our 2D Gaussian ray tracing tech-
+nique. Notably, our 2D Gaussian ray tracing is fully differ-
+entiable, enabling the optimization of indirect light through
+backpropagation. We further propose an efficient optimiza-
+tion scheme to manage the computational demands of the
+exhaustive Monte Carlo sampling for the rendering equa-
+tion. Additionally, we introduce a novel strategy to query
+indirect radiance during relighting, overcoming limitations
+in previous methods that often omit this component. Ex-
+tensive experiments on multiple standard benchmarks con-
+firm the effectiveness of IRGS. In Fig. 1, we visualize the
+global illumination (considering both direct and indirect ra-
+diance) and the indirect illumination (considering only in-
+direct radiance) of a Gaussian-based scene rendered using
+IRGS, demonstrating that IRGS is capable of modeling re-
+markable inter-reflection effects.
+The contributions of this paper are as follows: (i) 2D
+Gaussian ray tracing, a technique that enables direct ray
+tracing on pretrained 2D Gaussian splatting with minimal
+quality degradation; (ii) IRGS, an inverse rendering frame-
+work that incorporates the full rendering equation without
+simplification, using 2D Gaussian ray tracing to compute
+incident radiance on the fly; (iii) An optimization scheme
+that manages computational demands for rendering equa-
+tion evaluation; (iv) A novel strategy that enables querying
+of indirect radiance during relighting.
+2. Related work
+Novel view synthesis
+aims to leverage a limited collec-
+tion of observed images of a scene to generate new im-
+ages from an unseen viewpoint.
+Neural radiance field
+(NeRF) [21] produces photo-realistic quality images by rep-
+resenting the scenes in terms of a volumetric radiance field
+encoded in a coordinate-based neural network. Subsequent
+advancements have focused on accelerating rendering[23,
+26], enhancing image quality [2–4], and improving geom-
+etry reconstruction [18, 29, 38]. More recently, 3D Gaus-
+sian splatting (3DGS) [16] introduced the use of fuzzy,
+anisotropic 3D Gaussian point cloud for scene representa-
+tion along with an efficient tile-based rasterizer, achieving
+state-of-the-art results in both rendering quality and effi-
+ciency. 3DGS has inspired numerous approaches targeting
+various goals, including geometry reconstruction [13, 39],
+dynamic scene reconstruction [34, 35], inverse render-
+ing [10, 19], and street scene applications [8, 32]. How-
+ever, the dependence on rasterization limits Gaussian splat-
+ting’s ability to simulate ray-based effects accurately. To ad-
+dress this, 3DGRT [22] proposes a differentiable Gaussian
+ray tracer that efficiently performs ray tracing across 3D
+Gaussian primitives, allowing radiance computation along
+arbitrary rays. In this paper, we propose ray tracing on 2D
+Gaussian primitives. Unlike 3DGRT, 2D Gaussian prim-
+itives [13] have a well-defined ray-splat intersection, en-
+abling direct ray tracing on pre-trained 2D Gaussian splat-
+ting with minimal quality degradation.
+Inverse rendering
+focuses on recovering geometry, ma-
+terial, and lighting properties from captured images, pre-
+senting a complex challenge due to high-dimensional light-
+surface interactions. Inspired by the success of neural radi-
+ance fields, many methods [1, 5, 6, 15, 20, 28, 33, 36, 40,
+43] leverage flexible ray marching techniques and neural
+implicit fields for inverse rendering. Recent approaches [9–
+11, 14, 19, 27, 31, 37] have adapted 3D Gaussian splat-
+ting (3DGS) to inverse rendering by assigning material-
+related properties to each Gaussian primitive. Leveraging
+the rapid rendering capabilities of 3DGS, these methods
+achieve much higher efficiency compared to NeRF-based
+techniques. However, due to the lack of an efficient Gaus-
+sian ray tracer, existing 3DGS-based methods either apply
+a simplified version of the rendering equation [19] or use
+learnable parameters to model incident light [10], which
+limits the accuracy of material and lighting estimation. For
+example, GS-IR [19] employs split-sum approximation to
+
+Splatting
+2D Gaussians
+Properties
+��
+��
+n
+Roughness
+Albedo
+ Pretrained 2D Gaussians
+�, �
+�
+�� ��, � = � ��, �� �����+ ���� ��∙� ���
+Rendering equation
+2D Gaussian ray tracing
+���� , �
+��
+Stratified sampling
+Environment map
+��
+����
+ℒ1
+���
+Rendering
+GT
+Albedo Roughness
+Position
+Normal
+Material
+Geometry
+�, �
+Figure 2. Schematic illustration of the proposed IRGS. Starting from a set of 2D Gaussians equipped with material properties, we apply
+rasterization to generate albedo, roughness, position, and normal maps. We then evaluate the rendering equation using stratified sampling
+at the corresponding position, drawing geometry and material values from these feature maps. The radiance of incident light is decomposed
+into direct radiance Ldir from the environment map, and indirect radiance Lind with visibility V , obtained via 2D Gaussian ray tracing.
+simplify the rendering equation and uses baked volumes
+to store occlusion and indirect illumination. R3DG [10]
+shades each Gaussian individually, using point-based ray
+tracing to bake occlusion and spherical harmonics to param-
+eterize indirect radiance. To overcome these limitations, we
+propose the IRGS framework that utilizes 2D Gaussian ray
+tracing to accurately model inter-reflections.
+3. Method
+In this section, we introduce our inter-reflective Gaussian
+splatting with 2D Gaussian ray tracing, designed to recon-
+struct geometry and estimate material and lighting from a
+set of posed RGB images. We begin by providing the nec-
+essary background on 3D Gaussian splatting and the ren-
+dering equation (Section 3.1).
+We then present the 2D
+Gaussian ray tracing technique, which performs ray trac-
+ing on 2D Gaussian primitives (Section 3.2). Finally, we
+outline our IRGS framework, which leverages the proposed
+2D Gaussian ray tracing technique to query visibility and
+indirect radiance for incident light (Section 3.3).
+3.1. Preliminary
+3D Gaussian splatting
+3D Gaussian splatting (3DGS)
+represents a 3D scene using 3D Gaussian primitives, each
+defined as an ellipsoid characterized by a 3D mean µ and
+a covariance matrix Σ. The influence of a Gaussian at a
+spatial position x is expressed as:
+ G( \ bol
+d
+sy
+mbo l {x}) = \ ex
+p
+ \left (-\frac {1}{2} (\boldsymbol {x} - \boldsymbol {\mu })^\top \Sigma ^{-1} (\boldsymbol {x} - \boldsymbol {\mu })\right ). 
+(1)
+Each Gaussian is also assigned an opacity o and a view-
+dependent color c modeled by spherical harmonics (SH).
+The rendering process of 3DGS starts by projecting 3D
+Gaussian primitives onto the 2D image plane.
+This is
+achieved by first applying a viewing transformation W and
+then performing a perspective projection. The covariance
+matrix of the resulting 2D Gaussians can be approximated
+as Σ′ = JWΣW ⊤J⊤, where J represents the Jacobian
+matrix of the perspective projection.
+
+
+==========================================================================================
+### 2412.19282_ReflectiveGaussian_RefGaussian  (pages=17, img=2412.19282_ReflectiveGaussian_RefGaussian_fig.png)
+==========================================================================================
+REFLECTIVE GAUSSIAN SPLATTING
+Yuxuan Yao1∗, Zixuan Zeng1∗, Chun Gu1, Xiatian Zhu2†, Li Zhang1†B
+1School of Data Science, Fudan University
+2University of Surrey
+https://fudan-zvg.github.io/ref-gaussian
+ GShader
+ PSNR:28.21
+GT
+Ours
+PSNR:37.01
+3DGS-DR
+ PSNR:33.43
+ 3DGS
+ PSNR:27.65
+Relighting
+Editing
+Figure 1: Our Ref-Gaussian achieves superior rendering quality in novel view synthesis while en-
+joying fast optimization (training time) and real-time rendering (FPS), and supporting various down-
+stream applications such as relighting and editing. Please refer to the video in our supplementary
+material for a more comprehensive and intuitive comparison.
+ABSTRACT
+Novel view synthesis has experienced significant advancements owing to increas-
+ingly capable NeRF- and 3DGS-based methods. However, reflective object re-
+construction remains challenging, lacking a proper solution to achieve real-time,
+high-quality rendering while accommodating inter-reflection. To fill this gap, we
+introduce a Reflective Gaussian splatting (Ref-Gaussian) framework character-
+ized with two components: (I) Physically based deferred rendering that empowers
+the rendering equation with pixel-level material properties via formulating split-
+sum approximation; (II) Gaussian-grounded inter-reflection that realizes the de-
+sired inter-reflection function within a Gaussian splatting paradigm for the first
+time. To enhance geometry modeling, we further introduce material-aware nor-
+mal propagation and an initial per-Gaussian shading stage, along with 2D Gaus-
+sian primitives. Extensive experiments on standard datasets demonstrate that Ref-
+Gaussian surpasses existing approaches in terms of quantitative metrics, visual
+quality, and compute efficiency. Further, we show that our method serves as a
+unified solution for both reflective and non-reflective scenes, going beyond the
+previous alternatives focusing on only reflective scenes. Also, we illustrate that
+Ref-Gaussian supports more applications such as relighting and editing.
+1
+INTRODUCTION
+Tremendous progress has been recently made in 3D object reconstruction and novel view synthe-
+sis from multiview images. Neural radiance field (NeRF) (Mildenhall et al., 2021) represents 3D
+scenes with neural implicit fields, achieving high-quality, photo-realistic renderings through volume
+∗Equally contributed
+†Co-last authorship
+BLi Zhang (lizhangfd@fudan.edu.cn) is the corresponding author.
+1
+arXiv:2412.19282v2 [cs.CV] 3 Feb 2025
+
+rendering. However, NeRF is expensive computationally for optimization and rendering, limiting
+its use in real-time applications. To address this, 3D Gaussian splatting (3DGS) Kerbl et al. (2023)
+instead represents a scene using a set of 3D Gaussians. Combining rasterization and alpha-blending,
+it achieves both real-time and high-quality rendering.
+However, most NeRF and 3DGS struggle to model reflective surfaces due to the intrinsic inability
+of capturing high-frequency specular components. To mitigate this, Ref-NeRF (Verbin et al., 2022)
+leverages integrated directional encoding to smooth interpolation of reflected radiance. But this
+method fails to decompose the environment illumination, making it less useful for example unable
+to relight. A couple of NeRF methods (Verbin et al., 2022; Liang et al., 2023) are challenged by
+computational cost and limited flexibility. Using a simplified shading functions on each Gaussian
+can achieve rapid convergence, but suffering substantial noise in modeling of geometry, material, and
+lighting (Jiang et al., 2024). To avoid this issue, performing the shading function at the pixel level
+(i.e., deferred shading) following alpha-blending to smooth out the gradients is helpful (Ye et al.,
+2024). Nonetheless, limiting to a simplified shading function makes it ineffective to model complex
+reflective objects with complex structures and surfaces and the inter-reflection phenomenon. To
+address the latter, RelightableGaussian (Gao et al., 2023) traces rays across Gaussians for visibility
+inferring at the cost of heavy noises and added computational overhead from Monte Carlo sampling.
+To address the aforementioned issues all together, we propose a Reflective Gaussian splatting (Ref-
+Gaussian) framework, allowing for real-time high-quality rendering of reflective objects while tak-
+ing into account the complicated inter-reflection effect. This is made possible by two key compo-
+nents: (I) Physically based deferred rendering, where we empower the rendering equation with
+pixel-level material properties (e.g., Bidirectional reflectance distribution function, or BRDF in
+short), and adopt the split-sum approximation to avoid the heavy compute with Monte Carlo sam-
+pling. (II) Gaussian-grounded inter-reflection, where we realize the intricate inter-reflection func-
+tion with Gaussian splatting for the very first time, despite the challenge of extracting the mesh
+accurately. To enhance the modeling of geometry, we choose 2D Gaussian primitives as scene
+representation, while introducing an initial per-Gaussian shading stage (performing shading at the
+Gaussian level to provide good geometric initialization), as well as a material-aware normal propa-
+gation process (enlarging the scales of Gaussians with high metallic and low roughness).
+We make these contributions: (I) We strive to realize real-time high-quality rendering of reflective
+objects with inter-reflection in 3D space. (II) We innovate a generic 3D reconstruction framework,
+Reflective Gaussian splatting (Ref-Gaussian), characterized with physically based deferred render-
+ing and Gaussian-grounded inter-reflection. This approach is further enhanced by geometry-focused
+optimization including adopting 2D Gaussian primitives, material-aware normal propagation, and
+per-Gaussian shading initialization. (III) Extensive experiments demonstrate that Ref-Gaussian out-
+performs previous methods in terms of quantitative metrics, visual quality, and compute efficiency
+under both reflective and non-reflective scenes, whilst supporting downstream applications such as
+relighting and editing.
+2
+RELATED WORK
+Novel view synthesis
+aims to generate new images of a scene from unseen viewpoints with a
+limited set of observed images. Neural radiance fields (NeRF) (Mildenhall et al., 2020) employ vol-
+umetric rendering with implicit neural representations to produce highly detailed novel views from
+input images. Subsequent works have focused on two main directions: improving rendering qual-
+ity (Barron et al., 2021; 2022; 2023) and accelerating both training and rendering speeds (Sun et al.,
+2022; Fridovich-Keil et al., 2022; M¨uller et al., 2022; Chen et al., 2022). More recently, 3D Gaus-
+sian splatting (3DGS) (Kerbl et al., 2023) proposed using 3D Gaussian primitives and tile-based
+differentiable rasterizer, achieving superior rendering quality and efficiency over NeRF-based meth-
+ods. Building on 3DGS, methods like 2DGS (Huang et al., 2024) and GOF (Yu et al., 2024) have
+further explored surface reconstruction with Gaussian splatting. In this paper, we adopt 2D Gaussian
+primitives, as proposed in 2DGS, to represent scenes for more accurate geometry reconstruction.
+Inverse rendering
+seeks to decompose scenes into geometry, lighting, and materials, posing a
+significant challenge due to the high-dimensional complexity of light interaction. NeRF (Milden-
+hall et al., 2020) is commonly used as a 3D representation in inverse rendering due to its flexible
+raymarching technique. Several NeRF-based methods (Srinivasan et al., 2021; Boss et al., 2021a;
+Zhang et al., 2021; Boss et al., 2021b; Yao et al., 2022; Boss et al., 2022; Zhang et al., 2023;
+2
+
+Liu et al., 2023; Jin et al., 2023) model light interaction using the explicit rendering equation with
+BRDF. For instance, NeRO (Liu et al., 2023) divides the training process into two stages: the first
+stage employs split-sum approximation to obtain detailed geometry, while the second stage focuses
+on accurate sampling to recover lighting and materials. In contrast, Ref-NeRF (Verbin et al., 2022)
+does not decompose material and environment lighting but instead shades points using a simplified
+function, limiting its applicability in downstream tasks such as relighting and editing.
+With the advent of 3D Gaussian splatting (Kerbl et al., 2023), recent methods (Jiang et al., 2024; Gao
+et al., 2023; Liang et al., 2024; Shi et al., 2023) have begun to address inverse rendering tasks using
+Gaussian primitives for much faster rendering speed than NeRF methods. GShader (Jiang et al.,
+2024) applies a simplified shading functions from rendering equation on each Gaussian. While it
+achieves rapid convergence, this approach also brings substantial noise in geometry, material, and
+lighting. In contrast, 3DGS-DR (Ye et al., 2024) employs deferred shading by applying a sim-
+plified shading function at the pixel level, stabilizing the optimization process by smoothing out
+normal gradients. As both GShader and 3DGS-DR cannot model the inter-reflection effects, Re-
+lightableGaussian (Gao et al., 2023) introduces an innovative Gaussian-based ray tracing technique
+for visibility precomputation. However, it applies Monte Carlo sampling to evaluate the rendering
+equation, which slows down the rendering speed, and the inaccurate visibility also reduces the qual-
+ity of reconstruction. In this paper, inspired by 3DGS-DR, we adopt pixel-level deferred shading
+but perform the rendering function with BRDF properties to handle complex scenes. Furthermore,
+we propose performing ray tracing on the extracted mesh for visibility computation in the specular
+component of our rendering equation. Together with the split-sum approximation of the rendering
+equation, we model inter-reflection effects while maintaining fast rendering speeds.
+3
+METHOD
+Our Reflective Gaussian splatting (Ref-Gaussian) is formulated in the Gaussian splatting frame-
+work. The key components of Ref-Gaussian include (1) physically based deferred rendering and (2)
+Gaussian-focused inter-reflection. An overview of our pipeline is shown in Figure 2. We start with
+the preliminary of Gaussian splatting.
+In standard 3DGS (Kerbl et al., 2023), each Gaussian is modeled as an ellipsoid, characterized by a
+3D position pk and a covariance matrix Σ, defined as:
+G(p) = exp
+
+−1
+2(p −pk)TΣ−1(p −pk)
+
+.
+(1)
+During the rendering process, 3D Gaussians are projected into 2D Gaussians in camera space. The
+transformed 2D covariance matrix is approximated as: Σ′ = JWΣW TJT, where W is the view
+transformation matrix and J is the Jacobian of the perspective projection. Each Gaussian is also
+assigned an opacity o and a view-dependent color ci represented by spherical harmonics. The final
+pixel color C is computed by blending Gaussians in front-to-back order based on their depth:
+C =
+N
+X
+i=1
+ciTiαi,
+where
+Ti =
+i−1
+Y
+j=1
+(1 −αj),
+(2)
+where αi is calculated by multiplying the opacity oi with the Gaussian weight, which is determined
+using the 2D covariance matrix Σ′
+i.
+2D Gaussian primitive
+However, 3D Gaussians struggle to capture detailed geometry due to in-
+herent multi-view inconsistencies. We hence leverage 2D Gaussian splatting (Huang et al., 2024)
+where view-consistent 2D oriented planar Gaussian disks are used as rendering primitives.
+Each 2D Gaussian is defined by its position p, tangential vectors tu and tv, and scaling factors
+(su, sv) that control its shape and size. Its influence is given by:
+G(u, v) = exp
+
+−u2 + v2
+2
+
+,
+(3)
+where (u, v) are coordinates in the local tangent space. The ray-splat intersection (u, v) in this space
+is obtained via:
+x = (xz, yz, z, 1)T = WH(u, v,
+
+
+==========================================================================================
+### 2501.17978_VoD-3DGS  (pages=10, img=2501.17978_VoD-3DGS_fig.png)
+==========================================================================================
+VoD-3DGS: View-opacity-Dependent 3D Gaussian Splatting
+Mateusz Nowak
+Wojciech Jarosz
+Peter Chin
+Dartmouth College
+Hanover, New Hampshire, USA
+{mateusz.m.nowak.th,wojciech.k.jarosz,Peter.Chin}@dartmouth.edu
+Abstract
+Reconstructing a 3D scene from images is challenging due
+to the different ways light interacts with surfaces depend-
+ing on the viewer’s position and the surface’s material. In
+classical computer graphics, materials can be classified as
+diffuse or specular, interacting with light differently. The
+standard 3D Gaussian Splatting model struggles to repre-
+sent view-dependent content, since it cannot differentiate
+an object within the scene from the light interacting with
+its specular surfaces, which produce highlights or reflec-
+tions. In this paper, we propose to extend the 3D Gaus-
+sian Splatting model by introducing an additional symmet-
+ric matrix to enhance the opacity representation of each 3D
+Gaussian. This improvement allows certain Gaussians to be
+suppressed based on the viewer’s perspective, resulting in a
+more accurate representation of view-dependent reflections
+and specular highlights without compromising the scene’s
+integrity. By allowing the opacity to be view dependent,
+our enhanced model achieves state-of-the-art performance
+on Mip-Nerf, Tanks&Temples, Deep Blending, and Nerf-
+Synthetic datasets without a significant loss in rendering
+speed, achieving > 60FPS, and only incurring a minimal
+increase in memory used.
+1. Introduction
+3D reconstruction describes recovering the 3D structure
+from a set of images for a particular scene. It is an essential
+task in computer vision; given a reconstructed 3D scene,
+the user can generate novel, unseen views, which can fur-
+ther areas like robotics, autonomous driving, content gen-
+eration, and Augmented Reality. As an early advancement,
+Structure-from-Motion [16] enabled a seamless transition
+from 2D images to 3D worlds. Nevertheless, these methods
+struggled with novel view synthesis and achieving a bet-
+ter understanding of complex scenes. With the rise of deep
+learning, NeRFs [13] offered a direct mapping from 3D po-
+sitions to colors and density, allowing a compact and contin-
+uous representation that enables novel view synthesis with
+photorealism and detail. However, even with significant im-
+provements to the standard approach [1, 2], NeRFs still re-
+quire a substantial amount of computing power to learn and
+render this 3D representation.
+In recent years, 3D Gaussian Splatting [9] has offered a
+new approach to 3D reconstruction by providing a quick
+and efficient representation that allows for real-time ren-
+dering. As NeRF represents the scene through an implicit
+function, 3D Gaussian Splatting represents the scene explic-
+itly through a collection of 3D anisotropic Gaussians, where
+each Gaussian is parameterized by its color, scale, rotation,
+opacity, and position in space. However, since 3D Gaussian
+Splatting uses rasterization to visualize the scene, it strug-
+gles with the photorealistic representation of various light
+interactions.
+A plethora of solutions have appeared to extend the 3D
+Gaussian model through various improvements, from an
+improved shading function [8], novel shape representation
+[3, 7], and ray tracing [14] to the introduction of a machine
+learning model that enhances the capabilities of 3D Gaus-
+sians [18]. Nevertheless, these models either struggle with
+efficient rendering and fail to provide a simple and compact
+3D representation, or they do not enhance the photorealism
+of the scene regarding light interactions.
+In this paper, we present a straightforward yet effective
+enhancement to standard 3D Gaussian Splatting. Specifi-
+cally, we extend the traditional scalar opacity model to a
+view-dependent function, which allows for a more effective
+representation of specular highlights, dynamic lighting, and
+other light interactions without sacrificing rendering speed,
+extending the photorealism of the scene. We validate our
+method across multiple datasets and demonstrate state-of-
+the-art results that achieve > 60 FPS on complex real-life
+scenes.
+2. Related Work
+In recent years, novel view synthesis has seen notable
+advancement from implicit models like Neural Radiance
+arXiv:2501.17978v2 [cs.CV] 31 Jan 2025
+
+(a) Ground Truth
+(b) 3DGS
+(c) VoD-3DGS (Our method)
+Figure 1. [Top] The visualization of the effect of our method in comparison to the standard 3D Gaussian Splatting. We can suppress
+or boost the impact of Gaussians responsible for modeling specular highlights and reflections for certain views by extending the opacity
+component of each 3D Gaussian with a symmetric matrix, acting as a learnable view-dependent factor. [Bottom] Qualitative results of our
+proposed method in comparison to standard 3DGS. When multiplied with the view vector, the symmetric matrix allows us to represent
+reflections, specular highlights, and even changing lights.
+Fields (NeRF) [13], where the scene is parametrized by a
+multi-layer perceptron (MLP) to represent geometry and
+view-dependent appearance, to explicit 3D Gaussian Splat-
+ting (3DGS) [9], where geometry is represented by thou-
+sands or millions of anisotropic 3D Gaussians, whose ap-
+pearances are directly stored in their representation via
+learnable per-Gaussian opacity and Spherical Harmonics
+coefficients.
+2.1. Neural Radiance Fields (NeRF)
+Both models have undergone further improvements, lead-
+ing to reduced training times and improved quality. Instant-
+NGP [15] introduced a novel feature-grid-based learnable
+scene representation that increases the expressive power
+while decreasing the training time of NeRFs. Models such
+as Mip-NeRF [1] and Zip-NeRF [2] reduce aliasing arti-
+facts by reasoning about sub-volumes along a cone. Ad-
+ditionally, to improve the visual quality of reflections and
+specular highlights, methods like Ref-NeRF [17] extend the
+NeRF model by reparameterizing the view-dependent out-
+going radiance, showing the inherent lack of understanding
+of specular light interactions within the scene by standard
+NeRFs.
+2.2. Modifying the material model of 3DGS
+Various extensions have been proposed in the 3D Gaussian
+Splatting literature to modify the underlying material pa-
+rameters. These extensions not only enhanced the photore-
+alism of the scene but improved the representation of spec-
+ular materials, better capturing the specular highlights and
+reflections. Jiang et al. [8] provided a novel normal estima-
+tion with a simplified shading function on 3D Gaussians to
+enhance the neural rendering in scenes with reflective sur-
+faces. Yang et al. [18] introduced a new 3D Gaussian rep-
+resentation that utilizes an anisotropic spherical Gaussian
+(ASG) appearance field with an MLP to model the appear-
+ance of each 3D Gaussian.
+We propose tackling the specular representation prob-
+lem in the 3D Gaussian Splatting model without a machine
+learning model or an extended shading function that might
+negatively influence the rendering and training speed.
+2.3. Modifying the shape of 3DGS
+The Gaussian model was also enhanced in terms of its ge-
+ometric representation. Huang et al. [7] flattened the 3D
+Gaussian model into anisotropic 2D Gaussian discs to bet-
+ter capture the underlying 3D geometry surface.
+Hamdi
+et al. [3] used the Generalized Exponential Function (GEF)
+
+to model 3D scenes instead of the standard 3D Gaussians.
+Yu et al. [19] proposed to extract Gaussian Opacity Fields
+(GOF), by leveraging an explicit ray-Gaussian and defining
+the opacity of any 3D point as the minimal opacity among
+all training views that observed the point. Finally, Held et al.
+[6] utilized 3D smooth convexes as primitives for modeling
+radiance fields from multi-view images.
+These methods show a simple paradigm in 3D Gaussian
+Splatting literature - we can achieve improved, more photo-
+realistic results with simple introductions to the underlying
+3DGS model. Similarly, we propose one of these simple
+modifications to extend the 3D Gaussian Splatting model
+with a view-dependent opacity.
+In this paper, we extend the 3DGS model by introduc-
+ing a learnable per-Gaussian symmetric matrix. This ma-
+trix transforms the scalar opacity into a function that varies
+with the viewing direction, allowing for improved repre-
+sentation of specular highlights and reflections without any
+neural network introduced. Notably, this enhancement does
+not result in any significant increase in rendering time or
+memory usage.
+3. Preliminaries
+3.1. 3D Gaussian Splatting (3DGS)
+Kerbl et al. [9] proposed parameterizing the scene with a
+set of learnable 3D Gaussian primitives, rendering images
+using differentiable rasterization through volume splatting.
+Each 3D Gaussian can be represented by its respective 3D
+covariance matrix Σ and the position of its center µ:
+G(x) = e−1
+2 (x−µ)T Σ−1(x−µ),
+(1)
+where the covariance matrix Σ = RSST RT is factorized
+into the corresponding learnable scaling matrix S and ro-
+tation matrix R to guarantee positive semi-definiteness of
+the matrix Σ. Then, the 3D Gaussian is transformed into
+camera coordinates, using a viewing transformation W,
+and projected onto the image plane, via the Jacobian of
+the affine approximation of the projective transformation J
+[20]:
+Σ′ = JWΣJT WT .
+(2)
+Projecting each of the 3D Gaussians onto a 2D plane,
+we obtain a 2D Gaussian representation G2D, which can be
+efficiently sorted and then rasterized using a volumetric α
+blending approach, where each color C can be defined as:
+C(p) =
+N
+X
+i=1
+ciαiG2D
+i
+(x)
+i−1
+Y
+j=1
+(1 −αjG2D
+j (x)),
+(3)
+where the N Gaussians overlapping with the pixel p are or-
+dered from front to back, ci is defined as the color of each
+Gaussian, represented as Spherical Harmonics coefficients,
+and αi is a learned per-Gaussian scalar opacity.
+To optimize all the parameters of each Gaussian, the au-
+thors use standard gradient descent with a loss L defined
+as a combination of the L1 color loss and a D-SSIM term,
+scaled with a hyperparameter λ:
+L = (1 −λ)L1 + λLD-SSIM.
+(4)
+To better reconstruct the scene, 3DGS performs an adap-
+tive density control step, cloning Gaussians in the under-
+reconstructed areas and splitting Gaussians in the over-
+reconstructed areas. Additionally, to account for potential
+floaters near the camera and to help control the increase in
+Gaussians, the opacity values are set to a value close to zero
+every few thousand iterations.
+3.2. The Symmetric GGX (SGGX) distribution
+In the context of physically based rendering of volumes, it is
+important to be able to specify angularly varying properties
+of the medium present in the scene. Heitz et al. [5] intro-
+duced an SSGX distribution that effectively represents the
+spatially varying properties of anisotropic microflake par-
+ticipating media through a symmetric 3x3 matrix.
+In the Canonical Basis, the SGGX distribution can be
+defined by a 3 × 3 symmetric positive definite matrix of six
+coefficients:
+S =
+
+
+Sxx
+Sxy
+Sxz
+Sxy
+Syy
+Syz
+Sxz
+Syz
+Szz
+
+,
+(5)
+However, the SGGX distribution can also be defined
+based on the projected area of the microflake in the
+eigenspace:
+S = (ω1, ω2, ω3)
+
+
+S11
+0
+0
+0
+S22
+0
+0
+0
+S33
+
+(ω1, ω2, ω3)T , (6)
+where S11 = σ2(ω1), S22 = σ2(ω2) and S33 = σ2(ω3) are
+positive eigenvalues that are equal to the squared projected
+areas of the ellipsoid in the directions given by the orthonor-
+mal eigenvectors. Given a matrix S and a direction ωi, the
+projected area of the ellipsoid can
+
+
+==========================================================================================
+### 2507.07733_RTR-GS  (pages=16, img=2507.07733_RTR-GS_fig.png)
+==========================================================================================
+RTR-GS: 3D Gaussian Splatting for Inverse Rendering with
+Radiance Transfer and Reflection
+Yongyang Zhou
+yongyangzhou@bit.edu.cn
+Beijing Institute of Technology
+Beijing, China
+Fang-Lue Zhang
+fanglue.zhang@vuw.ac.nz
+Victoria University of Wellington
+Wellington, New Zealand
+Zichen Wang
+zichenwang@bit.edu.cn
+Beijing Institute of Technology
+Beijing, China
+Lei Zhang
+leizhang@bit.edu.cn
+Beijing Institute of Technology
+Beijing, China
+Figure 1: We propose RTR-GS, a framework for geometry-light-material decomposition from multi-view images. Our method
+significantly enhances normal estimation and visual realism for reflective surfaces compared to GS-IR [31] and GShader
+[22]. Additionally, we achieve material and lighting decomposition while accounting for secondary lighting effects through
+physically-based deferred rendering. The material components include albedo, metallic, and roughness. This high-quality
+decomposition enables realistic relighting and material editing.
+Abstract
+3D Gaussian Splatting (3DGS) has demonstrated impressive capabil-
+ities in novel view synthesis. However, rendering reflective objects
+remains a significant challenge, particularly in inverse rendering
+and relighting. We introduce RTR-GS, a novel inverse rendering
+framework capable of robustly rendering objects with arbitrary
+reflectance properties, decomposing BRDF and lighting, and deliv-
+ering credible relighting results. Given a collection of multi-view im-
+ages, our method effectively recovers geometric structure through
+a hybrid rendering model that combines forward rendering for radi-
+ance transfer with deferred rendering for reflections. This approach
+successfully separates high-frequency and low-frequency appear-
+ances, mitigating floating artifacts caused by spherical harmonic
+overfitting when handling high-frequency details. We further refine
+BRDF and lighting decomposition using an additional physically-
+based deferred rendering branch. Experimental results show that
+our method enhances novel view synthesis, normal estimation, de-
+composition, and relighting while maintaining efficient training
+inference process. https://github.com/ZyyZyy06/RTR-GS
+CCS Concepts
+• Computing methodologies →Rasterization; • Point-based
+models; • Machine learning approaches; • Rendering;
+Keywords
+Novel view synthesis, Gaussian Splatting, Relighting
+1
+Introduction
+Inverse rendering is a long-standing challenge that seeks to de-
+compose a 3D scene’s physical attributes—geometry, materials,
+and lighting—from captured images. This decomposition enables
+downstream tasks such as relighting and editing. The problem is
+particularly challenging due to the complex interplay of these at-
+tributes during rendering, especially under unknown illumination
+conditions, which make it inherently under-constrained. Neural
+Radiance Fields (NeRF) [36] have achieved remarkable success in
+novel view synthesis, laying the groundwork for inverse rendering.
+Methods such as [7, 32, 62, 64] use implicit neural representations,
+like Multi-Layer Perceptrons (MLPs), to decompose physical com-
+ponents. However, MLPs suffer from limited expressiveness and
+arXiv:2507.07733v2 [cs.GR] 16 Dec 2025
+
+MM ’25, October 27–31, 2025, Dublin, Ireland
+Yongyang Zhou, Fang-Lue Zhang, Zichen Wang, and Lei Zhang
+high computational costs, making it challenging to balance qual-
+ity and efficiency. 3D Gaussian Splatting (3DGS) [25] improves
+both the speed and quality of learning-based volumetric rendering,
+and several methods [16, 31, 43] have integrated physically-based
+rendering into this framework. However, spherical harmonic func-
+tions lack the directional resolution needed to accurately represent
+specular reflections, and overfitting during Gaussian splatting and
+cloning can introduce floating artifacts.
+Accurate geometry is crucial for decomposing materials and
+lighting from complex appearances. However, high-frequency de-
+tails can cause overfitting, leading to floating artifacts that deviate
+from physically smooth surfaces and compromise geometric ac-
+curacy. To address this issue, we propose using a reflection map
+to store specular components, isolating high-frequency appear-
+ance details from the radiance component to mitigate overfitting.
+Additionally, we replace independent spherical harmonics with
+radiance transfer rendering, which imposes stronger global low-
+frequency constraints when computing radiance components. By
+separating high-frequency and low-frequency appearances, our
+method enables accurate recovery of geometric structures with ar-
+bitrary reflectance properties. Following geometry reconstruction,
+we model occlusion and indirect illumination by baking visibility
+into 3D voxels and introducing indirect lighting parameters. This
+approach reduces aliasing artifacts in albedo, shadows, and lighting
+during decomposition. Finally, we achieve effective material and
+lighting decomposition by integrating an additional differentiable,
+physically-based deferred rendering branch.
+The primary contribution of our work is the introduction of
+a Gaussian splatting-based inverse rendering framework, RTR-
+GS, which accurately estimates surface normals, bidirectional re-
+flectance distribution functions (BRDF), and environmental lighting
+from multi-view images of both diffuse and specular objects. Specif-
+ically, it includes the following key aspects:
+• We propose a 3DGS-based hybrid rendering model that in-
+tegrates reflection maps with radiance transfer, effectively
+separating high-frequency and low-frequency appearances.
+This enables efficient rendering of objects with arbitrary re-
+flectance properties while reducing floating artifacts, thereby
+improving geometric structure recovery with high-quality
+normals.
+• We further enhance appearance decomposition through a
+dual-branch rendering approach, enabling efficient and accu-
+rate material and lighting decomposition via rational lighting
+modeling and occlusion data baked into 3D voxels.
+• Comprehensive experiments demonstrate that our method
+achieves state-of-the-art performance in novel view synthe-
+sis and relighting, producing credible results for both diffuse
+and specular objects.
+2
+RELATED WORK
+2.1
+Neural representations
+Recent advancements in Neural Radiance Fields (NeRF) [36] have
+garnered significant attention. Subsequent research has focused on
+enhancing rendering quality [2, 4, 26], improving surface recon-
+struction [29, 47, 54], and advancing object generation [11, 40, 49,
+59], among other areas. Additionally, some methods aim to balance
+speed and quality [10, 12, 15, 20, 37, 45], facilitating more efficient
+evaluations.
+3D Gaussian Splatting [25] effectively combines radiance field
+rendering with rasterization by leveraging discrete Gaussian dis-
+tributions and the splatting technique. Subsequent research has
+focused on enhancing rendering quality [33, 57], more accurate
+geometry reconstruction [21, 35, 58], expanding editability [34, 60],
+and increasing scalability [39]. However, these methods do not
+decompose appearance into materials and lighting, limiting their
+suitability for relighting and editing tasks.
+2.2
+Inverse rendering
+Inverse rendering aims to decompose physically-based attributes
+from observations, including geometry, material, and lighting. A
+variety of methods simplify this problem by assuming controllable
+lighting conditions [1, 5, 6, 17, 41]. Some works relax these as-
+sumptions to consider direct lighting effects [7, 8, 62]. These works
+[13, 51, 53, 61, 64, 65] model secondary lighting effects using ad-
+ditional MLPs. To reduce computational overhead, some methods
+[23, 28] employ tensor decomposition techniques inspired by Ten-
+soRF [12]. For compatibility with existing rendering pipelines, NvD-
+iffrec [38] and NvDiffrecMC [19] utilize differentiable rendering
+with rasterization or ray-tracing pipelines.
+Methods based on 3D Gaussian Splatting (3DGS) have signifi-
+cantly accelerated training and rendering. GS-IR [31], GIR [43], and
+R3DG [16] constrain surface normals using pseudo normals derived
+from depth and model shadows and indirect lighting through bak-
+ing or ray-tracing. By leveraging pre-computed radiance transfer,
+PRT-GS [18] enables relighting, including secondary lighting effects.
+Phys3DGS [14] integrates 3D Gaussian splats with mesh-based rep-
+resentations. Although these methods retain the high efficiency of
+3DGS, using spherical harmonic functions as a radiance represen-
+tation for geometry recovery often introduces floating artifacts on
+reflective surfaces, leading to geometric inaccuracies.
+2.3
+Reflective object reconstruction
+Reconstructing reflective objects poses a significant challenge in
+inverse rendering tasks due to the high-frequency appearance
+changes that result in view inconsistencies. Ref-NeRF [46] tries
+to address this by using reflection directions instead of view di-
+rections and introducing Integrating Direction Encoding (IDE) to
+model reflections effectively. NeRO [32] explicitly models the re-
+flection process. Spec-Gaussian [52] simulates reflections using
+anisotropic Gaussians. Deferred rendering approaches, such as De-
+ferredGS [50], 3DGS-DR [55], GS-ROR [66], and GUS-IR[30] replace
+forward rendering to better handle reflections. GaussianShader [22]
+separates specular components and incorporates residual terms to
+capture secondary lighting effects. Additionally, PRD-GS [56] in-
+troduces progressive radiance distillation.
+Inspired by these works, we adopt 3D Gaussians as the scene
+representation and develop an inverse rendering framework capable
+of effectively rendering object with arbitrary reflectance properties
+while also decomposing material and lighting components.
+
+RTR-GS: 3D Gaussian Splatting for Inverse Rendering with Radiance Transfer and Reflection
+MM ’25, October 27–31, 2025, Dublin, Ireland
+Splatting Rasterization
+Radiance
+Hybrid 
+Rendering
+Physically-based 
+Rendering
+Visibility
+Normal
+Reflection
+Recovery
+Materials
+𝐼𝑝𝑏𝑟
+𝐼𝑟𝑔𝑏
+𝐼𝑔𝑡
+Reflection Map
+Environment Map
+Baking
+Depth
+G-Buffers
+Deferred Rendering
+Cached Volumes
+With Gradients
+W/o Gradients
+Hybrid Rendering Branch
+Physically-based Rendering Branch
+Light SHs
+𝑐𝑗
+MLP
+𝐺
+Forward Rendering
+𝑓𝑡
+𝑐𝑗
+𝑐𝑗
+𝑡
+𝑐𝑗
+𝑡(𝑜)
+𝐺
+Radiance Transfer 
+Rendering
+Geometry Attributes
+𝑥, Σ, 𝛼
+BRDF Attributes
+𝒄, 𝑟, 𝑚
+Indirect Light SHs
+𝐿𝑖𝑛𝑑
+Reflection Attributes
+𝑅𝑖, 𝑅𝑟, 𝑅𝑡
+Reflect Direction
+Radiance Transfer Attributes
+Transfer Vector
+Transfer Features
+𝑐𝑗
+𝑡
+𝑓𝑡
+Base Color
+𝜌𝑑, 𝜌𝑠
+𝜌𝑑, 𝜌𝑠
+Gaussian Attributes
+Shaded Gaussian
+3D Gaussians
+Pseudo Normal
+Indirect Light
+Figure 2: RTR-GS Rendering Pipeline. Our rendering pipeline consists of a hybrid rendering branch and a physically-based
+rendering branch. The hybrid rendering branch computes the radiance color for each Gaussian using forward rendering through
+radiance transfer, which is then blended with the reflections from deferred rendering after splatting. The physically-based
+rendering branch is fully implemented during the deferred rendering phase. Initially, the hybrid rendering branch reconstructs
+the fundamental geometric structure and stores visibility in voxel grids. The physically-based rendering branch is then activated
+to further decompose material appearances.
+3
+Method
+3.1
+Overview
+Figure 2 illustrates the overall framework of the proposed RTR-GS.
+We initialize 3D Gaussians using sparse point clouds generated
+randomly or estimated by COLMAP [42]. To model reflections, it is
+essential to define the normals for the Gaussians. We define normals
+as the shortest axis of each Gaussian, oriented toward the viewing
+direction, and optimize them synergistically using deferred render-
+ing of reflections and pseudo-normals derived from a depth map
+(Sec. 3.2). Subsequently, we refine the Gaussians by introducing
+additional parameters and integrating key components into a hy-
+brid rendering model (Sec. 3.3). This model combines radiance from
+forward rendering with reflections from deferred rendering, effec-
+tively separating high-frequency and low-frequency appearances to
+better represent complex materials and achieve high-quality scene
+reconstruction. Next, we decompose the appearance using differen-
+tiable physically-based deferred rendering, incorporating occlusion
+baking, indirect lighting modeling, and additional BRDF parameters.
+During this process, we employ two rendering branches simulta-
+neously to refine the geometry (Sec. 3.4). Finally, we enhance the
+results through rendering losses and additional regularization terms
+(Sec. 3.5).
+3.2
+Deferred Rendering and Normal Modeling
+In the 3DGS framework, the attributes of multiple Gaussians are
+blended in the image plane using splatting and alpha blending, as
+follows:
+𝐼𝑓=
+𝑁
+∑︁
+𝑖=0
+𝑓𝑖𝛼𝑖𝑇𝑖
+(1)
+where 𝛼𝑖is the opacity, 𝑇𝑖= Î𝑖−1
+𝑗=1(1 −𝛼𝑗) represents the accumu-
+lated transmittance, 𝑓𝑖denotes the parameters of the 𝑖-th Gauss-
+ian, and 𝐼𝑓represents the splatted screen-space attribute buffer. In
+vanilla 3DGS [25], outgoing radiance is computed per-Gaussian
+before blending. This process is referred to as forward rendering.
+Additionally, the attributes associated with each Gaussian can be
+transformed into screen space for subsequent shading, a process
+known as deferred rendering. The following section explains our
+normal design and optimization based on the deferred rendering
+implementation.
+Accurate normals are essential for modeling reflection. We define
+the normal direction as the shortest axis of the Gaussian. During
+the optimization process, the Gaussian shape typically flattens as
+it aligns with the surface, causing the shortest axis to correspond
+to a larger area.

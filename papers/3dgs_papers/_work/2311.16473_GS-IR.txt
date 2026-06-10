@@ -1,0 +1,1303 @@
+GS-IR: 3D Gaussian Splatting for Inverse Rendering
+Zhihao Liang1,*, Qi Zhang2,*, Ying Feng2, Ying Shan2, Kui Jia3,†
+1South China University of Technology,
+2 Tencent AI Lab,
+3 School of Data Science, The Chinese University of Hong Kong, Shenzhen
+eezhihaoliang@mail.scut.edu.cn,
+nwpuqzhang@gmail.com,
+vonyfeng@gmail.com,
+yingsshan@tencent.com,
+kuijia@cuhk.edu.cn
+Abstract
+We propose GS-IR, a novel inverse rendering approach
+based on 3D Gaussian Splatting (3DGS) that leverages for-
+ward mapping volume rendering to achieve photorealistic
+novel view synthesis and relighting results. Unlike previ-
+ous works that use implicit neural representations and vol-
+ume rendering (e.g. NeRF), which suffer from low expres-
+sive power and high computational complexity, we extend
+3DGS, a top-performance representation for novel view
+synthesis, to estimate scene geometry, surface material, and
+environment illumination from multi-view images captured
+under unknown lighting conditions. There are two main
+problems when introducing 3DGS to inverse rendering: 1)
+3DGS does not support producing plausible normal na-
+tively; 2) forward mapping (e.g. rasterization and splatting)
+cannot trace the occlusion like backward mapping (e.g. ray
+tracing). To address these challenges, our GS-IR proposes
+an efficient optimization scheme incorporating a depth-
+derivation-based regularization for normal estimation and
+a baking-based occlusion to model indirect lighting. The
+flexible and expressive 3DGS representation allows us to
+achieve fast and compact geometry reconstruction, photore-
+alistic novel view synthesis, and effective physically-based
+rendering. We demonstrate the superiority of our method
+over baseline methods through qualitative and quantitative
+evaluations of various challenging scenes. The source code
+is available at https://github.com/lzhnb/GS-
+IR.
+1. Introduction
+Inverse rendering is a long-standing task, seeking to answer
+the question: “How can we deduce physical attributes (e.g.
+geometry, material, and lighting) of a 3D scene from multi-
+view images?”. This problem is inherently challenging and
+* indicates equal contribution.
+†Correspondence to Kui Jia <kuijia@cuhk.edu.cn>.
+Normal
+Albedo Metallic
+Roughness
+Normal
+Albedo
+Roughness
+Relighting
+Material Editing
+AO
+AO
+GS-IR
+3D gaussians
+Figure 1. Given multi-view captured images of a complex scene,
+we propose GS-IR (3D Gaussian Splatting for Inverse Rendering),
+which utilizes 3D Gaussian and forward mapping splatting to re-
+cover high-quality physical properties (e.g., normal, material, il-
+lumination). This enables us to perform relighting and material
+editing, resulting in outstanding inverse rendering results. Better
+viewed on screen with zoom in, especially the remarkable mate-
+rial decomposition and normal reconstruction of bicycle axle.
+ill-posed, particularly when input images are captured in
+uncontrolled environments with unknown illumination. Re-
+cent research [9, 10, 37, 48] has sought to address this issue
+by employing implicit neural representations akin to NeRF
+[31] that utilizes multi-layer perceptrons (MLPs).
+How-
+ever, current methods incorporating MLP face challenges
+in terms of their low expressive capacity and high computa-
+tional demands, which significantly limits the effectiveness
+and efficiency of inverse rendering, especially when it can-
+not be rendered at interactive rates.
+3D Gaussian Splatting (3DGS) [24] has recently
+emerged as a promising technique to model 3D static scenes
+and significantly boost the rendering speed to a real-time
+level. It makes the scene representation more compact and
+achieves fast and top performance for novel view synthesis.
+Introducing it to the inverse rendering pipeline is natural and
+essential, including geometry reconstruction, materials de-
+composition, and illumination estimation. Unlike ray trac-
+1
+arXiv:2311.16473v3  [cs.CV]  28 Mar 2024
+
+ing in NeRF, 3DGS produces a set of 3D Gaussians around
+sparse points. During the 3DGS optimization, the adaptive
+control of the Gaussian density may lead to loose geome-
+try, making it difficult to estimate accurate scene’s normal.
+Consequently, it is necessary to introduce a well-designed
+strategy to regularize 3DGS’s normal estimation.
+Our goal is to use 3D Gaussians as the scene representa-
+tion for inverse rendering from multi-view images captured
+under unknown lighting conditions. However, capturing ob-
+servations under natural illumination often shows complex
+effects such as soft shadows and interreflections. TensoIR
+[22] leverages the ray tracing of NeRF to directly model
+occlusion and indirect illumination. In contrast, 3DGS re-
+places the ray tracing in the NeRF with differentiable for-
+ward mapping volume rendering, which directly projects
+3D Gaussians onto the 2D plane. This strategy improves
+the rendering efficiency but makes it difficult to calculate
+occlusion. Inspired by the “Indirect Lighting Cache” used
+in real-time rendering [4], we attempt to bake the occlusion
+into volumes for caching.
+In this paper, we present a novel 3D Gaussian-based
+inverse rendering framework called GS-IR (3D Gaussian
+Splatting for Inverse Rendering) that leverages forward
+mapping splatting to deduce the physical attributes of a
+complex scene. To the best of our knowledge, our method is
+the first work to introduce the 3DGS technique for inverse
+rendering, which can simultaneously estimate scene geom-
+etry, materials, and illumination from multi-view images.
+Our GS-IR addresses two main issues when using 3DGS
+for inverse rendering. Firstly, we develop an intuitive and
+well-designed regularization to estimate the scene’s nor-
+mal. Secondly, we use a baking-based method embedded
+in GS-IR to cache occlusions, obtaining an efficient indi-
+rect illumination model. As shown in Fig. 1, our approach
+can reconstruct high-fidelity geometry and materials of a
+complex real scene under unknown natural illumination, en-
+abling state-of-the-art rendering of novel view synthesis and
+additional applications like relighting. Our technical contri-
+butions are summarized as follows:
+• We present GS-IR that models a scene as a set of 3D Gaus-
+sians to achieve physically-based rendering and state-of-
+the-art decomposition results for both objects and scenes;
+• We propose an efficient optimization scheme with regu-
+larization to concentrate depth gradient around 3DGS and
+produce reliable normals for GS-IR;
+• We develop a baking-based method embedded in GS-IR
+to handle the occlusion in modeling indirect lighting;
+We demonstrate the superiority of our method to baseline
+methods qualitatively and quantitatively on various chal-
+lenging scenes, including the TensoIR synthesis dataset [22]
+and Mip-NeRF 360 real dataset [5].
+2. Related Works
+Neural Representation Recently, neural rendering tech-
+niques, exemplified by Neural Radiance Field (NeRF) [31],
+have achieved impressive success in addressing visual com-
+puting problems, giving rise to numerous neural represen-
+tations [14, 21, 32, 38, 41, 42] tailored for different tasks
+[11–13, 18, 28, 29, 35, 45]. The vanilla NeRF models a con-
+tinuous radiance field implicitly in MLPs, which requires
+massive repeated queries during training and inference. To
+address the computational inefficiencies, many neural scene
+representations are proposed with more discretized geome-
+try proxies such as voxel grids [17, 20, 38], hash grids [32],
+tri-planes [14] or points [41]. Neural features are stored in
+a structured manner, allowing for efficient storage and re-
+trieval. The computational cost can thus be significantly
+reduced by introducing interpolation techniques, however,
+with an inevitable loss in image quality. 3D Guassians are
+introduced as an unstructured scene representation to strike
+a balance between efficiency and quality [24]. With the spe-
+cially designed tile-based rasterizer for Guassian splats, this
+method achieves real-time rendering with high quality for
+novel-view synthesis. In this work, 3D Gaussian represen-
+tation is combined with the physical-based rendering (PBR)
+model for inverse rendering.
+Inverse Rendering Inverse rendering aims to decompose
+the image’s appearance into the geometry, material, and
+lighting conditions. Considering the inherent ambiguity be-
+tween observed images and underlying properties, many
+methods are proposed with different constrained settings,
+such as capturing images with fixed lighting and rotating
+object [16, 40], capturing with moving camera and co-
+located lighting [7, 8, 30, 34]. Combined with neural rep-
+resentations, inverse rendering models the scene simulating
+how the light interacts with the neural volume with various
+material properties, and estimates the lighting and material
+parameters during optimization [6, 9, 10, 19, 22, 37, 44, 46,
+48, 49]. Neural Reflectance Fields [6] assumes a known
+point light source and represents the scene as a field of vol-
+ume density, surface normals, and bi-directional reflectance
+distribution functions(BRDFs) with one bounce direct illu-
+mination. NeRV [37] and InvRender [49] extend to arbi-
+trary known lighting conditions and train an additional MLP
+to model the light visibility. PhySG [44] assumes full light
+source visibility without shadow simulation, and represents
+the lighting and scene BRDFs with spherical Guassians for
+acceleration.
+TensoIR [22] adopts the efficient TensoRF
+[14] representation which enables the computation of vis-
+ibility and indirect lighting by raytracing, while limited to
+object-level. For modeling surface geometry using point
+clouds, Fuzzy Metaballs (FMs) [25, 26] offers a great way
+to render depth from 3D Gaussian using Order Independent
+Transparency (OIT) and approximate intersection. How-
+ever, it requires silhouettes as input and struggles to handle
+2
+
+intricate geometry (e.g. Lego and Ficus) let alone complex
+scenes. In this work, we propose a 3DGS-based pipeline to
+recover the geometry, material, and lighting that is available
+for both objects and unbounded scenes.
+3. Preliminary
+In this section, we give the technical backgrounds and math
+symbols that are necessary for the presentation of our pro-
+posed method in subsequent sections.
+3D Gaussian Splatting (3DGS) [24] is an explicit 3D scene
+representation in the form of point clouds. Each point is
+represented as a Gaussian function g that approximates the
+shape of a bell curve, which is defined as,
+g(x|µ, Σ) = e−1
+2 (x−µ)T Σ−1(x−µ),
+(1)
+where µ ∈R3 is its mean vector, and Σ ∈R3×3 is an
+anisotropic covariance matrix. The mean vector µ of a 3D
+Gaussian is parameterized as µ = (µx, µy, µz), and the co-
+variance matrix Σ is factorized into a scaling matrix S and
+a rotation matrix R as Σ = RSS⊤R⊤. S and R refer to a
+diagonal matrix diag(sx, sy, sz) and a rotation matrix con-
+structed from a unit quaternion q. Given a viewing transfor-
+mation with extrinsic matrix T and intrinsic matrix K, the
+mean vector µ and covariance matrix Σ′ from the 3D point
+x to 2D pixel u is defined as,
+µ′ = KT [µ, 1]⊤, Σ′ = JT ΣT ⊤J ⊤,
+(2)
+where J is the Jacobian matrix of the affine approximation
+of the perspective projection. Besides, each Gaussian rep-
+resents the view-dependent color ci via a set of coefficients
+of spherical harmonics (SH), which is then multiplied by
+opacity α for volume rendering. We finally obtain the color
+ˆC at pixel u based on Eq. (1) and Eq. (2),
+ˆ
+C =
+X
+i∈N
+Tigi(u|µ′, Σ′)αici, Ti =
+i−1
+Y
+j=1
+(1 −gj(u|µ′, Σ′)αj),
+(3)
+where accumulated transmittance Ti quantifies the proba-
+bility density of i-th Gaussian at pixel u.
+The Rendering Equation In GS-IR, we leverage the clas-
+sic rendering equation to formulate the outgoing radiance of
+a surface point x with normal n:
+Lo(x, v) =
+Z
+Ω
+Li(x, l)fr(l, v)(l · n)dl,
+(4)
+Ωdenotes the upper hemisphere centered at x, l and v de-
+note incident and view directions respectively. Li(x, l) de-
+notes the radiance received at x from l. Notably, we follow
+Cook-Torrance microfacet model [15, 39] and formulate the
+bidirectional reflectance distribution function (BRDF) fr as
+a function of albedo a ∈[0, 1]3, metallic m ∈[0, 1], and
+roughness ρ ∈[0, 1]:
+fr(l, v) = (1 −m)a
+π
+|
+{z
+}
+diffuse
++
+DFG
+4(n · l)(n · v)
+|
+{z
+}
+specular
+,
+(5)
+where microfacet distribution function D, Fresnel reflection
+F, and geometric shadowing factor G are related to the sur-
+face roughness ρ. We use 3D Gaussians to store these ma-
+terial properties in GS-IR.
+4. Method
+Given a set of calibrated RGB images {Im}M
+m=1 of a tar-
+get scene captured from multiple views under static, yet un-
+known illumination, inverse rendering aims to decompose
+the scene’s intrinsic properties, including normal, materi-
+als, and illumination. This decomposition facilitates the re-
+covery and subsequent edition of the target scene. Moti-
+vated by the remarkable performance in quality and speed
+of 3DGS [24], we present a novel framework GS-IR con-
+sisting of three well-designed stage strategies, as shown in
+Fig. 2. In the initial stage, we leverage differentiable splat-
+ting to optimize 3D Gaussians. Concurrently, we utilize the
+gradient derived from the rendered depth map to supervise
+the normal stored in 3D Gaussians (cf. Sec. 4.1). In the
+second stage, we precompute the occlusion based on the
+learned geometric information (i.e. depth and normal) and
+store it in an efficient spherical harmonics-based architec-
+ture to model indirect illumination (cf. Sec. 4.2). In the
+final stage, we combine a differentiable splatting with the
+physical-based rendering (PBR) pipeline to optimize illu-
+mination and material-aware 3D Gaussians (cf. Sec. 4.3).
+4.1. Normal Reconstruction
+During the initial stage, we optimize 3D Gaussians for ge-
+ometry reconstruction from observed images, denoted as G.
+The optimized G functions as a geometric proxy for sur-
+face points and their corresponding normals n, which are
+crucial for successful inverse rendering. As highlighted in
+Sec. 1, generating reasonable normals within the 3DGS-
+based framework poses a significant challenge. To address
+this obstacle, we introduce an intuitive strategy that im-
+proves depth ˆD and leverages the depth gradient to derive
+pseudo normals ˆn ˆ
+D = ∇uv ˆD. These pseudo normals then
+guide the optimization of normals within the 3D Gaussians.
+Depth Generation Given a pretrained 3D Gaussians G and
+a view designated for rendering, the pixel’s shading results
+in that view can be obtained by Eq. (3). Consequently, it
+is reasonable to utilize the same volumetric accumulation
+to compute the depth ˆD = PN
+i=1 Tiαidi, where di de-
+notes the distance from the corresponding 3D Gaussian to
+the image plane. However, we observed the floating prob-
+lem during volumetric accumulation, unlike the backward
+mapping volume rendering used in NeRF. During the 3DGS
+optimization, the adaptive control of the Gaussian density
+may result in the depth falling in front of the 3D Gaus-
+sians, thereby posing challenges in accurately predicting the
+depth. Specifically, the backward mapping methods can ob-
+tain an accurate depth by considering only peak samples,
+3
+
+Occlusion
+Depth / Surface Point
+Normal
+Material
+Rendering
+Indirect Illumination
+3D Gaussians 𝒢𝒢
+Depth ෡𝑫𝑫
+Normal ෡𝑵𝑵
+Material ෡𝑴𝑴
+Environment Map ෡𝑬𝑬
+Volumes  𝒱𝒱
+Caching
+Recovery
+Rendering ෠𝑰𝑰shade
+Occlusion
+Indirect Illumination
+Differentiable Splatting
+𝒙𝒙
+Diffuse lobe
+Specular lobe
+normal 𝒏𝒏
+view 𝒗𝒗
+incidence 𝒍𝒍
+Physical-Based Rendering
+ℒ𝑛𝑛
+ℒshade
+ℒlight
+ℒmaterial
+Connection with gradients
+Connection w/o gradients
+Loss Supervision
+ℒ
+Initial Stage: 
+ℒ𝑐𝑐+ ℒ𝑛𝑛
+Decomposition Stage:
+ℒshade + ℒmaterial + ℒlight
+ℒc
+(a) Initial
+(b) Baking
+(c) Decomposition
+Figure 2. GS-IR Pipeline. We propose a novel GS-based inverse rendering framework, called GS-IR, to reconstruct scene geometry,
+materials, and unknown natural illumination from multi-view captured images. Our GS-IR consists of three well-designed stage strategies
+using 3D Gaussian and differentiable forward mapping splatting to achieve physical-based rendering. In our approach, the Gaussian stores
+not only the basic 3DGS information but also the normal and material properties, enhancing its capabilities for inverse rendering tasks.
+…
+…
+Image Plane
+View
+𝑑𝑑1(𝑑𝑑min)
+𝑑𝑑𝑁𝑁(𝑑𝑑max)
+3D Gaussians in Object Space
+𝑑𝑑i
+𝑑𝑑min ≤෡𝐷𝐷= mix( 𝑑𝑑𝑖𝑖𝑖𝑖=1
+𝑁𝑁, 𝑤𝑤𝑖𝑖𝑖𝑖=1
+𝑁𝑁) ≤𝑑𝑑𝑚𝑚𝑚𝑚𝑚𝑚
+View Direction
+Figure 3. Depth Illustration. By considering the depth as a lin-
+ear interpolation of the distances from 3D Gaussians to the image
+plane, and ensuring it lies between the minimum and maximum
+distance, our method could produce accurate depth.
+that is ˆD = di∗, where i∗= arg maxi Tiαi. However, for
+3DGS, a typical forward mapping method, the peak selec-
+tion results in disc aliasing within 3DGS. To overcome this
+limitation, we consider that depth ˆD must be between the
+minimum and maximum distance of 3D Gaussians to the
+image plane, as illustrated in Fig. 3. We then treat the depth
+as a linear interpolation of the distances from 3D Gaussians
+to the image plane:
+ˆD =
+N
+X
+i=1
+ˆwidi,
+ˆwi =
+Tiαi
+PN
+i=1 Tiαi
+.
+(6)
+Normal Derivation While the accurate prediction of depth
+within Gaussians provides better guidance for the normal
+reconstruction, directly using depth gradient to produce nor-
+mals has two limitations that still cannot meet the require-
+ment for effective inverse rendering. First, the depth gradi-
+ent estimation is highly sensitive to noise, making the pre-
+dicted normal often extremely noisy; Second, the normals
+derived individually from each view’s depth map do not sat-
+isfy multi-view consistency. To address these issues, we
+use Gaussian G as a proxy for normal estimation instead of
+directly from the depth gradient. Benefiting from the effi-
+ciency of 3DGS, we obtain the depth ˆD and normals ˆn of
+the observed view after performing a single rendering pass.
+We then tie these predicted pseudo normal to the underlying
+depth gradient normal ˆn ˆ
+D using a simple penalty:
+Ln-p = ∥ˆn −ˆn ˆ
+D∥,
+(7)
+where ˆn = PN
+i=1 Tiαini, and ni is the normal stored in
+the 3D Gaussian. Secondly, unlike the MLP-based normal
+estimation [22] acting MLP as a low-pass filter, the pre-
+dicted normal of Gaussian G is rough, so smoothness reg-
+ularization should be included. We introduce the TV term
+TV normal to smooth the predicted normal ˆn. For more de-
+tails, please refer to the supplement.
+In optimization of the first stage, we optimize 3D Gaus-
+sians G (storing SH coefficients for view-dependent color c,
+opacity α, and normal ˆn) by using the color reconstruction
+loss Lc, which is the same as 3DGS [24], and the proposed
+normal loss Ln,
+Ln = Ln-p + λn-T V TV normal.
+(8)
+4
+
+3D Gaussians 𝒢𝒢
+Splatting
+×6
+Threshold
+SH Coefficients 𝒇𝒇𝑖𝑖
+o
+Depth Cubemap ෡𝑫𝑫𝑝𝑝𝑖𝑖
+𝑝𝑝=1
+6
+Occlusion Cubemap ෡𝑶𝑶𝑝𝑝𝑖𝑖
+𝑝𝑝=1
+6
+Convolution
+Placed Volume
+𝒗𝒗𝑖𝑖
+occl
+Figure 4. Baking. We employ the spherical harmonics (SH) ar-
+chitecture to bake occlusion volumes for modeling indirect illumi-
+nation. For each grid of occlusion volumes, we initially use 3D
+Gaussians to compute the depth cubemap by performing six for-
+ward mapping splatting passes. Next, we convert the depth cube-
+map into a binary occlusion cubemap based on a distance thresh-
+old. Finally, the occlusion cubemap is baked as SH coefficients,
+enabling efficient interpolation of the occlusion cubemap at any
+point within the scene.
+4.2. Indirect Illumination Modeling
+Drawing inspiration from the successful implementation of
+precomputation techniques in the video game industry (e.g.
+Irradiance Volume in Blender [3], Lightmass Volume in Un-
+real [1], and Light Probes in Unity [2]), we introduce spher-
+ical harmonics (SH) architectures to store occlusion infor-
+mation and model indirect illumination.
+Given the optimized 3D Gaussians G from one stage (cf.
+Sec. 4.1), we freeze G and regularly place occlusion vol-
+umes Voccl in the 3D space. For each volume voccl
+i
+⊂Voccl,
+we then cache the occlusion in the form of SH coefficients
+f o
+i . Consequently, the formula of the occlusion O(·) of voccl
+i
+with respect to the direction (θ, ϕ) is expressed as:
+O(θ, ϕ) =
+deg
+X
+l=0
+l
+X
+m=−l
+fo
+i(lm)Ylm(θ, ϕ),
+(9)
+where deg denotes the degree of SH, and {Ylm(·)} is a set
+of real basis of SH.
+As discussed in Sec. 4.1, the 3DGS technique employs
+a forward mapping approach that projects 3D points to the
+2D plane, in contrast to the backward mapping volume ren-
+dering utilized in NeRF, which means it cannot use ray
+marching to calculate occlusions. To precompute the SH
+coefficients f o
+i of occlusion volume voccl
+i
+, we obtain the
+depth cubemap { ˆDi
+p}6
+p=1 by performing six times render-
+ing passes, once for each face of the cubemap. We then
+convert it into a binary occlusion cubemap { ˆOi
+p}6
+p=1 based
+on a manually set distance threshold.
+Finally,
+we convolve the the occlusion cubemap
+{ ˆOi
+p}6
+p=1 using SH bases and get the SH coefficients f o
+i :
+f o
+i(lm) =
+Z
+S2
+ˆ
+O(ω)Ylm(ω)dω
+=
+Z 2π
+0
+Z π
+0
+sin θ ˆ
+O(θ, ϕ)Ylm(θ, ϕ)dθdϕ,
+(10)
+where S2 denotes the unit sphere, and ˆO(θ, ϕ) denotes
+the occlusion query from the occlusion cubemap { ˆOi
+p}6
+p=1.
+Note that we numerically calculate the convolution in
+Eq. (10) in parallel. The caching process is shown in Fig. 4.
+To handle the indirect illumination in occlusion regions,
+we also maintain illumination volumes Villu to cache the
+indirect illumination.
+Similar to the caching process of
+occlusion volumes, the caching target of illumination vol-
+umes changes from the occlusion cubemap { ˆOi
+p}6
+p=1 to the
+captured environment cubemap { ˆIi
+p}6
+p=1. These cubemaps
+can be obtained simultaneously by conducting six rendering
+passes. For more details, please refer to the supplement.
+4.3. Intrinsic Decomposition
+In the final stage, we employ differentiable splatting in con-
+junction with a PBR pipeline to accomplish the intrinsic de-
+composition. According to Eq. (5), the rendering equation
+Eq. (4) is rewritten as diffuse Ld and specular Ls compo-
+nents:
+Lo(x, v) =
+Z
+Ω
+
+(1 −m) a
+π +
+DF G
+4(n · l)(n · v)
+
+Li(x, l)(l · n)dl
+Ld =(1 −m) a
+π
+Z
+Ω
+Li(x, l)(l · n)dl
+Ls =
+Z
+Ω
+DF G
+4(n · l)(n · v) Li(x, l)(l · n)dl.
+(11)
+In GS-IR, we adopt an image-based lighting (IBL) model
+and split-sum approximation [23] to tackle the intractable
+integral. To calculate the diffuse component Ld, the illumi-
+nation Id is defined as:
+Id(x) =
+Z
+Ω
+Li(x, l)(l · n)dl
+=
+Z
+ΩVis
+Ldir
+i (x, l)(l · n)dl +
+Z
+ΩOccl
+Lindir
+i
+(x, l)(l · n)dl
+≈(1 −O(x)) Idir
+d (x) + O(x)Iindir
+d
+(x),
+(12)
+where the first component indicates direct illumination and
+the second is indirect illumination. Notably, our baking-
+based indirect illumination model enables us to calculate the
+occlusion and illumination online. This means that our GS-
+IR achieves intrinsic decomposition while maintaining real-
+time rendering performance. For the specular component
+Ls, we follow split-sum approximation and treat the integral
+as two separate integrals:
+Ls =
+Z
+Ω
+DFG
+4 ⟨n · l⟩⟨n · v⟩Li(l) ⟨l · n⟩dl
+≈
+Z
+Ω
+DFG
+4 ⟨n · l⟩⟨n · v⟩⟨l · n⟩dl
+|
+{z
+}
+Environment BRDF -R
+Z
+Ω
+D Li(l) ⟨l · n⟩dl
+|
+{z
+}
+Pre-Filtered Environment Map - Is
+,
+(13)
+5
+
+GT
+Ours
+TensoIR
+NVDiffrec
+GT
+Ours
+TensoIR
+NVDiffrec
+Normal
+Albedo
+Rendering
+Figure 5. Qualitative comparison on TensoIR Synthetic. We visualize the estimated normal, albedo, and rendering results of our GS-
+IR and baseline methods on two scenes. By utilizing the efficient 3D Gaussian representation and a robust tile-based rasterizer, GS-IR
+achieves rapid convergence and supports real-time rendering. This performance advantage underscores the effectiveness of our method in
+addressing complex inverse rendering tasks, thereby surpassing existing state-of-the-art approaches. (For albedo reconstruction results, we
+follow NeRFactor [48] and scale each RGB channel by a global scalar.)
+where both R and Is can be precomputed in advance and
+stored in look-up tables. With Eq. (12) and Eq. (13), the
+rendering results of Eq. (11) can be represented as:
+Lo(x, v)=Ld + Ls
+≈(1 −m) a
+π
+
+(1 −O(x)) Idir
+d (x)+O(x)Iindir
+d
+(x)
+
++RIs.
+(14)
+For intrinsic decomposition, we optimize the material
+ˆ
+M (i.e. albedo a, metallic value m, and roughness ρ) stored
+in 3D Gaussians G, environment map ˆE, and illumination
+volumes Villu by minimizing the decomposition loss Ld:
+Ld =
+I −ˆIshade( ˆ
+M, ˆ
+E, Villu)
+
+|
+{z
+}
+Lshade
++ λM TV mat
+|
+{z
+}
+Lmaterial
++ λE TV light
+|
+{z
+}
+Llight
+,
+(15)
+where Lshade indicate the shade loss. ˆIshade( ˆ
+M, ˆE, Villu) is
+the recovered image that uses the PBR pipeline defined by
+Eq. (14).Please refer to the supplment for more details about
+the material TV loss Lmaterial and lighting TV loss Llight.
+5. Experiments
+Dataset & Metrics We conduct expermients using bench-
+mark datasets of TensoIR Synthetic [22] and Mip-NeRF
+360 [5] for decompositing both objects and scenes. They
+contain 4 objects with reference materials and 7 publicly
+available scenes, respectively. To verify the efficacy of our
+normal reconstruction, we evaluate the normal quality on
+the TensoIR Synthetic [22] dataset using mean angular error
+(MAE). We further assess our reconstructed albedo quality
+on this synthetic dataset. More generally, we evaluate the
+Figure 6.
+Novel view synthesis results on Mip-NeRF 360.
+GS-IR can reconstruct scene details including geometric normals
+and high-frequency appearance, rendering high-fidelity appear-
+ance and recovering fine geometric details such as those on leaves
+and bicycle axles. Better viewed on screen with zoom in.
+synthesized novel view on both datasets in terms of Peak
+Signal-to-Noise Ratio (PSNR), Structural Similarity Index
+Measure (SSIM), and Learned Perceptual Image Patch Sim-
+ilarity (LPIPS) [47]. Note that albedo quality assessment
+uses the same metrics as novel view synthesis.
+5.1. Comparisons
+We conduct a comprehensive comparison against state-of-
+the-art neural field-based inverse rendering methods on the
+public TensoIR Synthetic dataset [22].
+All the methods
+utilize multi-view images captured under unknown light-
+ing conditions. Our evaluation encompasses normal quality
+6
+
+Method
+Normal
+MAE ↓
+Novel View Synthesis
+Albedo
+Relight
+Runtime
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+NeRFactor [48]
+6.314
+24.679
+0.922
+0.120
+25.125
+0.940
+0.109
+23.383
+0.908
+0.131
+> 100 hrs
+InvRender [49]
+5.074
+27.367
+0.934
+0.089
+27.341
+0.933
+0.100
+23.973
+0.901
+0.101
+15 hrs
+NVDiffrec [33]
+6.078
+30.696
+0.962
+0.052
+29.174
+0.908
+0.115
+19.880
+0.879
+0.104
+< 1 hr
+TensoIR [22]
+4.100
+35.088
+0.976
+0.040
+29.275
+0.950
+0.085
+28.580
+0.944
+0.081
+5 hrs
+Ours
+4.948
+35.333
+0.974
+0.039
+30.286
+0.941
+0.084
+24.374
+0.885
+0.096
+< 1 hr
+Table 1. Quantatitive Comparison on TensoIR Synthetic dataset. Our method outperforms baseline methods in terms of novel view
+synthesis and albedo quality, showcasing the effectiveness of material decomposition and PBR rendering. This is particularly noteworthy
+considering that our normal reconstruction is slightly inferior to TensoIR. In terms of relighting performance, we rank second, trailing only
+behind TensoIR. Importantly, the average training time of our GS-IR is accelerated by a factor of 5x, making its performance acceptable
+and further demonstrating the effectiveness of our approach in handling complex inverse rendering tasks.
+Method
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+Runtime ↓
+NeRF++ [43]
+25.112
+0.696
+0.375
+≈20h
+Plenoxels [17]
+23.079
+0.625
+0.462
+≈30m
+INGP-Base [32]
+25.303
+0.671
+0.371
+≈5m
+INGP-Big [32]
+25.587
+0.699
+0.331
+≈8m
+Mip-NeRF 360 [32]
+27.569
+0.793
+0.234
+≈48h
+3DGS [24]
+27.21
+0.815
+0.214
+≈35m
+Ours
+25.381
+0.757
+0.267
+≈45m
+Table 2.
+Quantatitive Comparison on Mip-NeRF 360.
+The
+results show that our inverse rendering approach even surpasses
+some NeRF variants dedicated to novel view synthesis.
+(measured by MAE), novel view synthesis, albedo fidelity,
+relighting effects (measured by PSNR, SSIM, and LPIPS),
+and efficiency. Tab. 1 summarizes the quantitative compar-
+isons on the synthesis dataset. Our method achieves supe-
+rior performance in novel view synthesis and albedo quality
+compared to the baseline methods, demonstrating the effec-
+tiveness of material decomposition and PBR rendering, par-
+ticularly given that our normal reconstruction is slightly in-
+ferior to TensoIR. Our relighting performance ranks second,
+only behind TensoIR. Notably, the average training time of
+our GS-IR is accelerated by a factor of 5x, making its per-
+formance acceptable and demonstrating the effectiveness of
+our approach in handling complex inverse rendering tasks.
+We also include qualitative comparisons in Fig. 5, which
+show that our GS-IR produces reasonable albedo and pho-
+torealistic renderings that are closer to the ground truth than
+most methods.
+Meanwhile, owing to our more efficient and compact
+representation with powerful expressiveness, our method
+showcases remarkable performance on complex real un-
+bounded scenes [5]. Tab. 2 presents the quantitative com-
+parisons on the real dataset. Fig. 6 demonstrates the normal
+reconstruction and novel view synthesis on the real dataset.
+Our method renders a high-fidelity appearance and recovers
+fine geometric details, such as those on the leaves and bicy-
+cle axil. In summary, by leveraging the efficient 3D Gaus-
+sian representation and a powerful tile-based rasterizer, GS-
+IR achieves fast convergence and supports real-time render-
+ing. This performance advantage highlights the effective-
+Method
+TensoIR Synthetic [22]
+Mip-NeRF 360 [5]
+Normal
+MAE ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+Vol. Accum.
+16.347
+25.756
+0.855
+0.131
+22.052
+0.610
+0.394
+Peak Selec.
+9.466
+28.750
+0.927
+0.084
+23.093
+0.719
+0.317
+Linear Interp.
+6.218
+28.983
+0.939
+0.066
+23.119
+0.707
+0.319
+Vol. Accum.†
+9.315
+30.091
+0.940
+0.071
+24.664
+0.747
+0.277
+Peak Selec.†
+7.986
+31.064
+0.950
+0.060
+25.143
+0.753
+0.281
+Linear Interp.†
+4.948
+35.333
+0.974
+0.039
+25.381
+0.757
+0.267
+Table 3. Analyses on the impact of different depth generation
+strategies on normals. Methods without † marks directly use the
+normals derived from the depth map; Methods marked with † use
+depth derivation to optimize the normals stored in 3D Gaussians.
+(b) Volumetric Accumulation
+(c) Peak Selction
+(d) Linear Interpolation
+(a) Reference Image
+Figure 7. Visual comparison of depth produced by different
+strategies. The linear interpolation adopted in GS-IR overcomes
+the floating problem and disc aliasing.
+Method
+TensoIR Synthetic [22]
+Mip-NeRF 360 [5]
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+w/o occlusion
+34.997
+0.962
+0.041
+25.060
+0.753
+0.270
+w/o indirect illum.
+35.186
+0.965
+0.044
+24.898
+0.749
+0.272
+Ours
+35.333
+0.974
+0.039
+25.381
+0.757
+0.267
+Table 4. Analyses on the occlusion and indirect illumination.
+Physically modeling indirect illumination improves the inverse
+rendering of objects and scenes.
+ness of our method in handling complex inverse rendering
+tasks, outperforming existing state-of-the-art approaches.
+5.2. Ablation Studies
+We initially introduce the 3DGS technique for inverse ren-
+dering in GS-IR and propose depth-derivation-based nor-
+mal regularization and a baking-based method to address
+the challenges encountered during the process. To evalu-
+ate the efficacy of our proposed schemes, we design elabo-
+rate experiments on both TensoIR Synthetic [22] and Mip-
+NeRF 360 [5] datasets, providing comprehensive insights
+into the effectiveness of our approach in handling complex
+inverse rendering tasks. Below is the detailed ablation study
+7
+
+Figure 8. Relighting Visualization. We perform relighting experiments on both synthetic and real scenes using the recovered geometry,
+material, and illumination properties from our GS-IR method. We test our method under different lighting conditions and directions.
+Figure 9. Ambient Occlusion Visualization. The visualization
+highlights the intricate shadowing and occlusion details captured
+by our GS-IR method, emphasizing the performance of our ap-
+proach in modeling indirect illumination.
+on Normal Regularization and Indirect Illumination.
+Analysis on the Normal Regularization Reliable normal
+estimation is critical for conducting inverse rendering. To
+this end, we present depth-derivation-based regularization
+to facilitate 3D Gaussian-based normal estimation as stated
+in Sec. 4.1. In this section, we explore the impact of dif-
+ferent acquisition schemes on the final normal quality and
+inverse rendering results. The quantitative results shown
+in Tab. 3 demonstrate that using 3D Gaussians as a nor-
+mal proxy and adopting the linear interpolation strategy sig-
+nificantly improves the normal estimation and inverse ren-
+dering results. In addition, Fig. 7 qualitatively shows that
+conducting volumetric accumulation results in the floating
+problem (cf. Fig. 7 (b)). Despite peak selection overcomes
+this problem, it introduces disc aliasing (cf. Fig. 7 (c)).
+Compared with them, the linear interpolation adopted in
+GS-IR robustly produces accurate depth (cf. Fig. 7 (d)).
+Analysis on the Indirect Illumination To demonstrate the
+effectiveness of our indirect illumination model, we com-
+pare our method with two variants: a model without occlu-
+sion volume (w/o occlusion) and a model without indirect
+illumination (w/o indirect illum.). The quantitative com-
+parisons in Tab. 4 indicate that each component is crucial
+for estimating accurate material decomposition and gener-
+ating photorealistic rendering results. Additionally, Fig. 9
+showcases the ambient occlusion visualization in both syn-
+thetic and real scenes. The visualization highlights the intri-
+cate shadowing and occlusion details captured by our GS-IR
+method, emphasizing the performance of our approach in
+modeling indirect illumination. This analysis further sup-
+ports the effectiveness of using occlusion volume and in-
+troducing indirect illumination in enhancing the decompo-
+sition capabilities of our GS-IR.
+5.3. Application
+We perform relighting experiments using the recovered ge-
+ometry, material, and illumination from our GS-IR method.
+We test GS-IR under different lighting conditions and di-
+rections, observing how the reconstructed scene responds
+to the changes in lighting. The results of these experiments
+demonstrate that our GS-IR method can effectively han-
+dle relighting applications, producing photorealistic render-
+ings under various lighting conditions. More results can be
+found in the supplement.
+6. Conclusion
+We present GS-IR, a novel inverse rendering approach
+based on 3D Gaussian Splatting (3DGS), which employs
+forward mapping volume rendering to achieve photoreal-
+istic novel view synthesis and relighting results. Our GS-
+IR proposes an optimization scheme with depth-derivation-
+based regularization for normal estimation and a baking-
+based occlusion to model indirect lighting. These compo-
+nents are eventually employed to decompose material and
+illumination. Our extensive experiments demonstrate the
+effectiveness of GS-IR in achieving state-of-the-art inverse
+rendering results, surpassing previous neural methods in
+terms of both reconstruction quality and efficiency.
+Limitation Spherical Harmonics (SH) is only suitable for
+representing low-frequency, and we only use the occlusion
+represented by SH to model the diffuse term of indirect illu-
+mination. Modeling the specular term of indirect illumina-
+tion remains a limitation of GS-IR, and has been a challeng-
+ing problem in computer graphics. We believe it would be
+valuable to address this limitation in future work and sug-
+gest screen space global illumination (SSGI) techniques.
+8
+
+References
+[1] Unreal engine. https://www.unrealengine.com/.
+5
+[2] Unity. https://unity.com/. 5
+[3] Blender. https://www.blender.org/. 5
+[4] Tomas Akenine-Mo, Eric Haines, Naty Hoffman, et al. Real-
+time rendering. 2018. 2
+[5] Jonathan T Barron, Ben Mildenhall, Dor Verbin, Pratul P
+Srinivasan, and Peter Hedman. Mip-nerf 360: Unbounded
+anti-aliased neural radiance fields.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 5470–5479, 2022. 2, 6, 7, 3
+[6] Sai Bi, Zexiang Xu, Pratul Srinivasan, Ben Mildenhall,
+Kalyan Sunkavalli, Miloˇs Haˇsan, Yannick Hold-Geoffroy,
+David Kriegman, and Ravi Ramamoorthi.
+Neural re-
+flectance fields for appearance acquisition. arXiv preprint
+arXiv:2008.03824, 2020. 2
+[7] Sai Bi, Zexiang Xu, Kalyan Sunkavalli, Miloˇs Haˇsan, Yan-
+nick Hold-Geoffroy, David Kriegman, and Ravi Ramamoor-
+thi. Deep reflectance volumes: Relightable reconstructions
+from multi-view photometric images. In Computer Vision–
+ECCV 2020: 16th European Conference, Glasgow, UK, Au-
+gust 23–28, 2020, Proceedings, Part III 16, pages 294–311.
+Springer, 2020. 2
+[8] Sai Bi, Zexiang Xu, Kalyan Sunkavalli, David Kriegman,
+and Ravi Ramamoorthi. Deep 3d capture: Geometry and
+reflectance from sparse multi-view images. In Proceedings
+of the IEEE/CVF conference on computer vision and pattern
+recognition, pages 5960–5969, 2020. 2
+[9] Mark Boss, Raphael Braun, Varun Jampani, Jonathan T Bar-
+ron, Ce Liu, and Hendrik Lensch. Nerd: Neural reflectance
+decomposition from image collections. In Proceedings of
+the IEEE/CVF International Conference on Computer Vi-
+sion, pages 12684–12694, 2021. 1, 2
+[10] Mark Boss, Varun Jampani, Raphael Braun, Ce Liu,
+Jonathan Barron, and Hendrik Lensch.
+Neural-pil: Neu-
+ral pre-integrated lighting for reflectance decomposition.
+Advances in Neural Information Processing Systems, 34:
+10691–10704, 2021. 1, 2
+[11] Ang Cao and Justin Johnson. Hexplane: A fast representa-
+tion for dynamic scenes. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 130–141, 2023. 2
+[12] Eric R Chan, Marco Monteiro, Petr Kellnhofer, Jiajun Wu,
+and Gordon Wetzstein. pi-gan: Periodic implicit generative
+adversarial networks for 3d-aware image synthesis. In Pro-
+ceedings of the IEEE/CVF conference on computer vision
+and pattern recognition, pages 5799–5809, 2021.
+[13] Eric R Chan, Connor Z Lin, Matthew A Chan, Koki Nagano,
+Boxiao Pan, Shalini De Mello, Orazio Gallo, Leonidas J
+Guibas, Jonathan Tremblay, Sameh Khamis, et al. Efficient
+geometry-aware 3d generative adversarial networks. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 16123–16133, 2022. 2
+[14] Anpei Chen, Zexiang Xu, Andreas Geiger, Jingyi Yu, and
+Hao Su. Tensorf: Tensorial radiance fields. In European
+Conference on Computer Vision, pages 333–350. Springer,
+2022. 2
+[15] Robert L Cook and Kenneth E. Torrance.
+A reflectance
+model for computer graphics. ACM Transactions on Graph-
+ics (ToG), 1(1):7–24, 1982. 3
+[16] Yue Dong, Guojun Chen, Pieter Peers, Jiawan Zhang, and
+Xin Tong. Appearance-from-motion: Recovering spatially
+varying surface reflectance under unknown lighting. ACM
+Transactions on Graphics (TOG), 33(6):1–12, 2014. 2
+[17] Sara Fridovich-Keil, Alex Yu, Matthew Tancik, Qinhong
+Chen, Benjamin Recht, and Angjoo Kanazawa. Plenoxels:
+Radiance fields without neural networks. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 5501–5510, 2022. 2, 7, 3
+[18] Sara Fridovich-Keil, Giacomo Meanti, Frederik Rahbæk
+Warburg, Benjamin Recht, and Angjoo Kanazawa. K-planes:
+Explicit radiance fields in space, time, and appearance. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, pages 12479–12488, 2023. 2
+[19] Jon Hasselgren, Nikolai Hofmann, and Jacob Munkberg.
+Shape, light, and material decomposition from images using
+monte carlo rendering and denoising. Advances in Neural
+Information Processing Systems, 35:22856–22869, 2022. 2
+[20] Peter Hedman,
+Pratul P Srinivasan,
+Ben Mildenhall,
+Jonathan T Barron, and Paul Debevec. Baking neural ra-
+diance fields for real-time view synthesis. In Proceedings
+of the IEEE/CVF International Conference on Computer Vi-
+sion, pages 5875–5884, 2021. 2
+[21] Zhangjin Huang, Zhihao Liang, Haojie Zhang, Yangkai Lin,
+and Kui Jia. Sur2f: A hybrid representation for high-quality
+and efficient surface reconstruction from multi-view images.
+arXiv preprint arXiv:2401.03704, 2024. 2
+[22] Haian Jin, Isabella Liu, Peijia Xu, Xiaoshuai Zhang, Song-
+fang Han, Sai Bi, Xiaowei Zhou, Zexiang Xu, and Hao
+Su. Tensoir: Tensorial inverse rendering. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 165–174, 2023. 2, 4, 6, 7
+[23] Brian Karis and Epic Games. Real shading in unreal engine
+4. Proc. Physically Based Shading Theory Practice, 4(3):1,
+2013. 5
+[24] Bernhard Kerbl, Georgios Kopanas, Thomas Leimk¨uhler,
+and George Drettakis.
+3d gaussian splatting for real-time
+radiance field rendering.
+ACM Transactions on Graphics
+(ToG), 42(4):1–14, 2023. 1, 2, 3, 4, 7
+[25] Leonid Keselman and Martial Hebert. Approximate differ-
+entiable rendering with algebraic surfaces. In European Con-
+ference on Computer Vision, pages 596–614. Springer, 2022.
+2
+[26] Leonid Keselman and Martial Hebert. Flexible techniques
+for differentiable rendering with 3d gaussians. arXiv preprint
+arXiv:2308.14737, 2023. 2
+[27] Diederik P Kingma and Jimmy Ba. Adam: A method for
+stochastic optimization.
+arXiv preprint arXiv:1412.6980,
+2014. 1
+[28] Zhengqi Li, Simon Niklaus, Noah Snavely, and Oliver Wang.
+Neural scene flow fields for space-time view synthesis of dy-
+namic scenes. In Proceedings of the IEEE/CVF Conference
+9
+
+on Computer Vision and Pattern Recognition, pages 6498–
+6508, 2021. 2
+[29] Zhihao Liang, Zhangjin Huang, Changxing Ding, and Kui
+Jia. Helixsurf: A robust and efficient neural implicit sur-
+face learning of indoor scenes with iterative intertwined reg-
+ularization.
+In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 13165–
+13174, 2023. 2
+[30] Fujun Luan, Shuang Zhao, Kavita Bala, and Zhao Dong.
+Unified shape and svbrdf recovery using differentiable monte
+carlo rendering. In Computer Graphics Forum, pages 101–
+113. Wiley Online Library, 2021. 2
+[31] Ben Mildenhall, Pratul P Srinivasan, Matthew Tancik,
+Jonathan T Barron, Ravi Ramamoorthi, and Ren Ng. Nerf:
+Representing scenes as neural radiance fields for view syn-
+thesis. In European Conference on Computer Vision, pages
+405–421, 2020. 1, 2
+[32] Thomas M¨uller, Alex Evans, Christoph Schied, and Alexan-
+der Keller. Instant neural graphics primitives with a mul-
+tiresolution hash encoding. ACM Transactions on Graphics
+(ToG), 41(4):1–15, 2022. 2, 7, 3
+[33] Jacob Munkberg, Jon Hasselgren, Tianchang Shen, Jun Gao,
+Wenzheng Chen, Alex Evans, Thomas M¨uller, and Sanja Fi-
+dler. Extracting triangular 3d models, materials, and lighting
+from images. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 8280–
+8290, 2022. 7
+[34] Giljoo Nam, Joo Ho Lee, Diego Gutierrez, and Min H Kim.
+Practical svbrdf acquisition of 3d objects with unstructured
+flash photography. ACM Transactions on Graphics (TOG),
+37(6):1–12, 2018. 2
+[35] Keunhong Park, Utkarsh Sinha, Jonathan T Barron, Sofien
+Bouaziz, Dan B Goldman, Steven M Seitz, and Ricardo
+Martin-Brualla. Nerfies: Deformable neural radiance fields.
+In Proceedings of the IEEE/CVF International Conference
+on Computer Vision, pages 5865–5874, 2021. 2
+[36] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer,
+James Bradbury, Gregory Chanan, Trevor Killeen, Zeming
+Lin, Natalia Gimelshein, Luca Antiga, et al. Pytorch: An im-
+perative style, high-performance deep learning library. Ad-
+vances in neural information processing systems, 32, 2019.
+1
+[37] Pratul P Srinivasan,
+Boyang Deng,
+Xiuming Zhang,
+Matthew Tancik, Ben Mildenhall, and Jonathan T Barron.
+Nerv: Neural reflectance and visibility fields for relighting
+and view synthesis. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pages
+7495–7504, 2021. 1, 2
+[38] Cheng Sun, Min Sun, and Hwann-Tzong Chen. Direct voxel
+grid optimization: Super-fast convergence for radiance fields
+reconstruction. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 5459–
+5469, 2022. 2
+[39] Bruce Walter, Stephen R Marschner, Hongsong Li, and Ken-
+neth E Torrance. Microfacet models for refraction through
+rough surfaces.
+In Proceedings of the 18th Eurographics
+conference on Rendering Techniques, pages 195–206, 2007.
+3
+[40] Rui Xia, Yue Dong, Pieter Peers, and Xin Tong. Recover-
+ing shape and spatially-varying surface reflectance under un-
+known illumination. ACM Transactions on Graphics (TOG),
+35(6):1–12, 2016. 2
+[41] Qiangeng Xu, Zexiang Xu, Julien Philip, Sai Bi, Zhixin
+Shu, Kalyan Sunkavalli, and Ulrich Neumann. Point-nerf:
+Point-based neural radiance fields.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 5438–5448, 2022. 2
+[42] Lior Yariv, Yoni Kasten, Dror Moran, Meirav Galun, Matan
+Atzmon, Basri Ronen, and Yaron Lipman. Multiview neu-
+ral surface reconstruction by disentangling geometry and ap-
+pearance. Advances in Neural Information Processing Sys-
+tems, 33:2492–2502, 2020. 2
+[43] Kai Zhang, Gernot Riegler, Noah Snavely, and Vladlen
+Koltun. Nerf++: Analyzing and improving neural radiance
+fields. arXiv preprint arXiv:2010.07492, 2020. 7, 3
+[44] Kai Zhang, Fujun Luan, Qianqian Wang, Kavita Bala, and
+Noah Snavely. Physg: Inverse rendering with spherical gaus-
+sians for physics-based material editing and relighting. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, pages 5453–5462, 2021. 2
+[45] Kai Zhang, Nick Kolkin, Sai Bi, Fujun Luan, Zexiang Xu,
+Eli Shechtman, and Noah Snavely. Arf: Artistic radiance
+fields. In European Conference on Computer Vision, pages
+717–733. Springer, 2022. 2
+[46] Kai Zhang, Fujun Luan, Zhengqi Li, and Noah Snavely. Iron:
+Inverse rendering by optimizing neural sdfs and materials
+from photometric images. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 5565–5574, 2022. 2
+[47] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shecht-
+man, and Oliver Wang. The unreasonable effectiveness of
+deep features as a perceptual metric. In Proceedings of the
+IEEE conference on computer vision and pattern recogni-
+tion, pages 586–595, 2018. 6
+[48] Xiuming Zhang, Pratul P Srinivasan, Boyang Deng, Paul De-
+bevec, William T Freeman, and Jonathan T Barron. Ner-
+factor: Neural factorization of shape and reflectance under
+an unknown illumination. ACM Transactions on Graphics
+(ToG), 40(6):1–18, 2021. 1, 2, 6, 7
+[49] Yuanqing Zhang, Jiaming Sun, Xingyi He, Huan Fu, Rongfei
+Jia, and Xiaowei Zhou. Modeling indirect illumination for
+inverse rendering. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pages
+18643–18652, 2022. 2, 7
+10

@@ -1,0 +1,1088 @@
+TensoRF: Tensorial Radiance Fields
+Anpei Chen1⋆
+Zexiang Xu2⋆
+Andreas Geiger3
+Jingyi Yu1
+Hao Su4
+1ShanghaiTech University
+2Adobe Research
+3University of T¨ubingen and MPI-IS, T¨ubingen
+4UC San Diego
+https://apchenstu.github.io/TensoRF/
+Abstract. We present TensoRF, a novel approach to model and recon-
+struct radiance fields. Unlike NeRF that purely uses MLPs, we model the
+radiance field of a scene as a 4D tensor, which represents a 3D voxel grid
+with per-voxel multi-channel features. Our central idea is to factorize the
+4D scene tensor into multiple compact low-rank tensor components. We
+demonstrate that applying traditional CANDECOMP/PARAFAC (CP)
+decomposition – that factorizes tensors into rank-one components with
+compact vectors – in our framework leads to improvements over vanilla
+NeRF. To further boost performance, we introduce a novel vector-matrix
+(VM) decomposition that relaxes the low-rank constraints for two modes
+of a tensor and factorizes tensors into compact vector and matrix factors.
+Beyond superior rendering quality, our models with CP and VM decom-
+positions lead to a significantly lower memory footprint in comparison to
+previous and concurrent works that directly optimize per-voxel features.
+Experimentally, we demonstrate that TensoRF with CP decomposition
+achieves fast reconstruction (< 30 min) with better rendering quality
+and even a smaller model size (< 4 MB) compared to NeRF. Moreover,
+TensoRF with VM decomposition further boosts rendering quality and
+outperforms previous state-of-the-art methods, while reducing the recon-
+struction time (< 10 min) and retaining a compact model size (< 75
+MB).
+1
+Introduction
+Modeling and reconstructing 3D scenes as representations that support high-
+quality image synthesis is crucial for computer vision and graphics with various
+applications in visual effects, e-commerce, virtual and augmented reality, and
+robotics. Recently, NeRF [37] and its many follow-up works [70,31] have shown
+success on modeling a scene as a radiance field and enabled photo-realistic
+rendering of scenes with highly complex geometry and view-dependent appearance
+effects. Despite the fact that (purely MLP-based) NeRF models require small
+memory, they take a long time (hours or days) to train. In this work, we pursue
+⋆Equal contribution.
+Research done when Anpei Chen was in a remote internship with UCSD.
+arXiv:2203.09517v2  [cs.CV]  29 Nov 2022
+
+2
+A. Chen, Z. Xu et al.
+ TensoRF-VM
+  Scene
+NeRF
+PlenOctrees
+ Quantitative Results on the Synthetic NeRF Dataset
+Plenoxels
+Ours
+NeRF
+31.01
+PSNR Method
+(Point sizes correspond to PNSRs)
+30.38
+31.71
+31.71
+31.95
+31.56
+32.52
+33.14
+PlenOctrees
+Plenoxels
+DVGO
+Ours-CP-384-30k
+Ours-VM-192-15k
+Ours-VM-192-30k
+SNeRG
+DVGO
+SNeRG
+Fig. 1: Left: We model a scene as a tensorial radiance field using a set of vectors
+(v) and matrices (M) that describe scene appearance and geometry along their
+corresponding axes. These vector/matrix factors are used to compute volume
+density σ and view-dependent RGB color via vector-matrix outer products for
+realistic volume rendering. Right: In comparison with previous and concurrent
+methods, our TensoRF models can achieve the best rendering quality and are
+the only methods that can simultaneously achieve fast reconstruction and high
+compactness. (Our models are denoted with their decomposition techniques,
+number of components, and training steps.)
+a novel approach that is both efficient in training time and compact in memory
+footprint, and at the same time achieves state-of-the-art rendering quality.
+To do so, we propose TensoRF, a novel radiance field representation that is
+highly compact and also fast to reconstruct, enabling efficient scene reconstruction
+and modeling. Unlike coordinate-based MLPs used in NeRF, we represent radiance
+fields as an explicit voxel grid of features. Note that it is unclear whether voxel
+grid representation can benefit the efficiency of reconstruction: While previous
+work has used feature grids [31,68,20], they require large GPU memory to store
+the voxels whose size grows cubically with resolution, and some even require
+pre-computing a NeRF for distillation, leading to very long reconstruction time.
+Our work addresses the inefficiency of voxel grid representations in a principled
+framework, leading to a family of simple yet effective methods. We leverage the
+fact that a feature grid can naturally be seen as a 4D tensor, where three of its
+modes correspond to the XYZ axes of the grid and the fourth mode represents the
+feature channel dimension. This opens the possibility of exploiting classical tensor
+decomposition techniques – which have been widely applied to high-dimensional
+data analysis and compression in various fields [27] – for radiance field modeling.
+We, therefore, propose to factorize the tensor of radiance fields into multiple low-
+rank tensor components, leading to an accurate and compact scene representation.
+Note that our central idea of tensorizing radiance fields is general and can be
+potentially adopted to any tensor decomposition technique.
+In this work, we first attempt the classic CANDECOMP/PARAFAC (CP)
+decomposition [7]. We show that TensoRF with CP decomposition can already
+achieve photo-realistic rendering and lead to a more compact model than NeRF
+that is purely MLP based (see Fig. 1 and Tab. 1). However, experimentally, to
+further push reconstruction quality for complex scenes, we have to use more
+component factors, which undesirably increases training time.
+
+TensoRF: Tensorial Radiance Fields
+3
+Therefore, we present a novel vector-matrix (VM) decomposition technique
+that effectively reduces the number of components required for the same expression
+capacity, leading to faster reconstruction and better rendering. In particular,
+inspired by the CP and block term decomposition [13], we propose to factorize the
+full tensor of a radiance field into multiple vector and matrix factors per tensor
+component. Unlike the sum of outer products of pure vectors in CP decomposition,
+we consider the sum of vector-matrix outer products (see Fig. 2). In essence,
+we relax the ranks of two modes of each component by jointly modeling two
+modes in a matrix factor. While this increases the model size compared to pure
+vector-based factorization in CP, we enable each component to express more
+complex tensor data of higher ranks, thus significantly reducing the required
+number of components in radiance field modeling.
+With CP/VM decomposition, our approach compactly encodes spatially
+varying features in the voxel grid. Volume density and view-dependent color can be
+decoded from the features, supporting volumetric radiance field rendering. Because
+a tensor expresses discrete data, we also enable efficient trilinear interpolation
+for our representation to model a continuous field. Our representation supports
+various types of per-voxel features with different decoding functions, including
+neural features – depending on an MLP to regress view-dependent colors from
+the features – and spherical harmonics (SH) features (coefficients) – allowing
+for simple color computation from the fixed SH functions and leading to a
+representation without neural networks.
+Our tensorial radiance fields can be effectively reconstructed from multi-view
+images and enable realistic novel view synthesis. In contrast to previous works that
+directly reconstruct voxels, our tensor factorization reduces space complexity from
+O(n3) to O(n) (with CP) or O(n2) (with VM), significantly lowering memory
+footprint. Note that, although we leverage tensor decomposition, we are not
+addressing a decomposition/compression problem, but a reconstruction problem
+based on gradient decent, since the feature grid/tensor is unknown. In essence,
+our CP/VM decomposition offers low-rank regularization in the optimization,
+leading to high rendering quality. We present extensive evaluation of our approach
+with various settings, covering both CP and VM models, different numbers of
+components and grid resolutions. We demonstrate that all models are able to
+achieve realistic novel view synthesis results that are on par or better than
+previous state-of-the-art methods (see Fig. 1 and Tab. 1). More importantly, our
+approach is of high computation and memory efficiency. All TensoRF models
+can reconstruct high-quality radiance fields in 30 min; our fastest model with
+VM decomposition takes less than 10 min, which is significantly faster (about
+100x) than NeRF and many other methods, while requiring substantially less
+memory than previous and concurrent voxel-based methods. Note that, unlike
+concurrent works [50,38] that require unique data structures and customized
+CUDA kernels, our model’s efficiency gains are obtained using a standard PyTorch
+implementation. As far as we know, our work is the first that views radiance field
+modeling from a tensorial perspective and pose the problem of radiance field
+reconstruction as one of low-rank tensor reconstructions.
+
+4
+A. Chen, Z. Xu et al.
+2
+Related Work
+Tensor decomposition. Tensor decomposition [27] has been studied for decades
+with diverse applications in vision, graphics, machine learning, and other fields
+[43,24,59,14,1,23]. In general, the most widely used decompositions are Tucker
+decomposition [58] and CP decomposition [7,19], both of which can be seen as
+generalizations of the matrix singular value decomposition (SVD). CP decompo-
+sition can also be seen as a special Tucker decomposition whose core tensor is
+diagonal. By combining CP and Tucker decomposition, block term decomposition
+(BTD) has been proposed with its many variants [13] and used in many vision
+and learning tasks [2,67,66]. In this work, we leverage tensor decomposition for
+radiance field modeling. We directly apply CP decomposition and also introduce
+a new vector-matrix decomposition, which can be seen as a special BTD.
+Scene representations and radiance fields. Various scene representations,
+including meshes [18,61], point clouds [47], volumes [22,48], implicit functions
+[35,46], have been extensively studied in recent years. Many neural representa-
+tions [10,71,53,33,4] are proposed for high-quality rendering or natural signal
+representation [52,56,29]. NeRF [37] introduces radiance fields to address novel
+view synthesis and achieves photo-realistic quality. This representation has been
+quickly extended and applied in diverse graphics and vision applications, includ-
+ing generative models [9,40], appearance acquisition [3,5], surface reconstruction
+[62,42], fast rendering[49,68,20,17], appearance editing [64,32], dynamic capture
+[28,44] and generative model [41,8]. While leading to realistic rendering and
+a compact model, NeRF with its pure MLP-based representation has known
+limitations in slow reconstruction and rendering. Recent methods [68,31,20] have
+leveraged a voxel grid of features in radiance field modeling, achieving fast render-
+ing. However, these grid-based methods still require long reconstruction time and
+even lead to high memory costs, sacrificing the compactness of NeRF. Based on
+feature grids, we present a novel tensorial scene representation, leveraging tensor
+factorization techniques, leading to fast reconstruction and compact modeling.
+Other methods design generalizable network modules trained across scenes
+to achieve image-dependent radiance field rendering [57,69,63,12] and fast recon-
+struction [11,65]. Our approach focuses on radiance field representation and only
+considers per-scene optimization (like NeRF). We show that our representation
+can already lead to highly efficient radiance field reconstruction without any
+across-scene generalization. We leave the extensions to generalizable settings as
+future work.
+Concurrent work. The field of radiance field modeling is moving very fast and
+many concurrent works have appeared on arXiv as preprints over the last few
+months. DVGO [55] and Plenoxels [50] also optimize voxel grids of (neural or
+SH) features for fast radiance field reconstruction. However, they still optimize
+per-voxel features directly like previous voxel-based methods, thus requiring
+large memory. Our approach instead factorizes the feature grid into compact
+components and leads to significantly higher memory efficiency. Instant-NGP
+[38] uses multi-resolution hashing for efficient encoding and also leads to high
+
+TensoRF: Tensorial Radiance Fields
+5
+=
++ 
++ 
++ … + 
++ … + 
++ … + 
++ … + 
+=
+Fig. 2: Tensor factorization. Left: CP decomposition (Eqn. 1), which factorizes a
+tensor as a sum of vector outer products. Right: our vector-matrix decomposition
+(Eqn. 3), which factorizes a tensor as a sum of vector-matrix outer products.
+compactness. This technique is orthogonal to our factorization-based technique;
+potentially, each of our vector/matrix factor can be encoded with this hashing
+technique and we leave such combination as future work. EG3D [8] uses a tri-
+plane representation for 3D GANs; their representation is similar to our VM
+factorization and can be seen as a special VM version that has constant vectors.
+3
+CP and VM Decomposition
+We factorize radiance fields into compact components for scene modeling. To do
+so, we apply both the classic CP decomposition and a new vector-matrix (VM)
+decomposition; both are illustrated in Fig. 2. We now discuss both decompsitions
+with an example of a 3D (3rd-order) tensor. We will introduce how to apply
+tensor factorization in radiance field modeling (with a 4D tensor) in Sec. 4.
+CP decomposition. Given a 3D tensor T ∈RI×J×K, CP decomposition fac-
+torizes it into a sum of outer products of vectors (shown in Fig. 2):
+  
+\
+T
+ens
+or
+ =  \
+s u m 
+_{r=1}^R \Vector _r^{1} \OuterP \Vector _r^{2} \OuterP \Vector _r^{3} \label {eqn:cpvector} 
+(1)
+where v1
+r ◦v2
+r ◦v3
+r corresponds to a rank-one tensor component, and v1
+r ∈RI,
+v2
+r ∈RJ, and v3
+r ∈RK are factorized vectors of the three modes for the rth
+component. Superscripts denote the modes of each factor; ◦represents the outer
+product. Hence, each tensor element Tijk is a sum of scalar products:
+  \T e
+n
+s
+or 
+_{
+ijk} 
+= \su
+m _{r=1}^R \Vector _{r,i}^{1} \Vector _{r,j}^{2} \Vector _{r,k}^{3} \label {eqn:cpelement} 
+(2)
+where i, j, k denote the indices of the three modes.
+CP decomposition factorizes a tensor into multiple vectors, expressing multiple
+compact rank-one components. CP can be directly applied in our tensorial
+radiance field modeling and generate high-quality results (see Tab. 1). However,
+because of too high compactness, CP decomposition can require many components
+to model complex scenes, leading to high computational costs in radiance field
+reconstruction. Inspired by block term decomposition (BTD), we present a new
+VM decomposition, leading to more efficient radiance field reconstruction.
+
+6
+A. Chen, Z. Xu et al.
+Vector-Matrix (VM) decomposition. Unlike CP decomposition that utilizes
+pure vector factors, VM decomposition factorizes a tensor into multiple vectors
+and matrices as shown in Fig. 2 right. This is expressed by
+  
+\T
+e
+nso
+r 
+=  \sum
+ 
+_
+{r
+=
+1}^
+{R
+_ 1 } \V
+e
+c
+to
+r
+ _r
+^{
+1 }  \Ou
+terP \Matrix _r^{2,3} + \sum _{r=1}^{R_2}\Vector _r^{2} \OuterP \Matrix _r^{1,3} + \sum _{r=1}^{R_3}\Vector _r^{3} \OuterP \Matrix _r^{1,2} \label {eqn:vmrrr} 
+(3)
+where M2,3
+r
+∈RJ×K, M1,3
+r
+∈RI×K, M1,2
+r
+∈RI×J are matrix factors for two
+(denoted by superscripts) of the three modes. For each component, we relax
+its two mode ranks to be arbitrarily large, while restricting the third mode to
+be rank-one; e.g., for component tensor v1
+r ◦M2,3
+r , its mode-1 rank is 1, and
+its mode-2 and mode-3 ranks can be arbitrary, depending on the rank of the
+matrix M2,3
+r . In general, instead of using separate vectors in CP, we combine
+every two modes and represent them by matrices, allowing each mode to be
+adequately parametrized with a smaller number of components. R1, R2, R3 can
+be set differently and should be chosen depending on the complexity of each
+mode. Our VM decomposition can be seen as a special case of general BTD.
+Note that, each of our component tensors has more parameters than a
+component in CP decomposition. While this leads to lower compactness, a VM
+component tensor can express more complex high-dimensional data than a CP
+component, thus reducing the required number of components when modeling
+the same complex function. On the other hand, VM decomposition is still of
+very high compactness, reducing memory complexity from O(N 3) to O(N 2),
+compared to dense grid representations.
+Tensor for scene modeling. In this work, we focus on the task of modeling and
+reconstructing radiance fields. In this case, the three tensor modes correspond
+to XYZ axes, and we thus directly denote the modes with XYZ to make it
+intuitive. Meanwhile, in the context of 3D scene representation, we consider
+R1 = R2 = R3 = R for most of scenes, reflecting the fact that a scene can
+distribute and appear equally complex along its three axes. Therefore, Eqn. 3
+can be re-written as
+  
+\
+T
+ens
+or
+ =  \su
+m
+ _{
+r = 1}^{
+R
+}  \
+V e ctor
+ _r^{X} \OuterP \Matrix _r^{Y,Z} + \Vector _r^{Y} \OuterP \Matrix _r^{X,Z} + \Vector _r^{Z} \OuterP \Matrix _r^{X,Y} \label {eqn:vmr} 
+(4)
+In addition, to simplify notation and the following discussion in later sections,
+we also denote the three types of component tensors as AX
+r
+= vX
+r ◦MY Z
+r
+,
+AY
+r = vY
+r ◦MXZ
+r
+, and AZ
+r = vZ
+r ◦MXY
+r
+; here the superscripts XYZ of A indicate
+different types of components. With this, a tensor element Tijk is expressed as
+  \T e
+n
+s
+or 
+_
+{
+ij
+k} = & \sum _{r=1}^{R} \sum _{m} \Comp _{r,ijk}^m \label {eqn:vmrelement}
+(5)
+where m ∈XY Z, AX
+r,ijk = vX
+r,iMY Z
+r,jk, AY
+r,ijk = vY
+r,jMXZ
+r,ik, and AZ
+r,ijk = vZ
+r,kMXY
+r,ij .
+Similarly, we can also denote a CP component as Aγ = vX
+r ◦vY
+r ◦vZ
+r , and Eqn. 5
+
+TensoRF: Tensorial Radiance Fields
+7
+can also express CP decomposition by considering m = γ, where the summation
+over m can be removed.
+4
+Tensorial Radiance Field Representation
+We now present our Tensorial Radiance Field Representation (TensoRF). For
+simplicity, we focus on presenting TensoRF with our VM decomposition. CP
+decomposition is simpler and its decomposition equations can be directly applied
+with minimal modification (like Eqn. 5).
+4.1
+Feature grids and radiance field.
+Our goal is to model a radiance field, which is essentially a function that maps any
+3D location x and viewing direction d to its volume density σ and view-dependent
+color c, supporting differentiable ray marching for volume rendering. We leverage
+a regular 3D grid G with per-voxel multi-channel features to model such a function.
+We split it (by feature channels) into a geometry grid Gσ and an appearance grid
+Gc, separately modelling the volume density σ and view-dependent color c.
+Our approach supports various types of appearance features in Gc, depending
+on a pre-selected function S that coverts an appearance feature vector and a
+viewing direction d to color c. For example, S can be a small MLP or spherical
+harmonics (SH) functions, where Gc contains neural features and SH coefficients
+respectively. We show that both MLP and SH functions work well with our model
+(see Tab.1). On the other hand, we consider a single-channel grid Gσ, whose
+values represent volume density directly, without requiring an extra converting
+function. The continuous grid-based radiance field can be written as
+  \ D ens , \Rad = \ Grid _\Dens (\Pos ), \ShadFunc (\Grid _\Rad (\Pos ),\Dir ) \label {eqn:rf} 
+(6)
+where Gσ(x), Gc(x) represent the trilinearly interpolated features from the two
+grids at location x. We model Gσ and Gc as factorized tensors.
+4.2
+Factorizing radiance fields
+While Gσ ∈RI×J×K is a 3D tensor, Gc ∈RI×J×K×P is a 4D tensor. Here I, J,
+K correspond to the resolutions of the feature grid along the X, Y, Z axes, and
+P is the number of appearance feature channels.
+We factorize these radiance field tensors to compact components. In particular,
+with the VM decomposition. the 3D geometry tensor Gσ is factorized as
+  \
+Gr
+i
+d _
+{\
+Den s  }  
+= \ s um
+ _{ r =1}
+^{R _ \D
+ens  } \
+Vec t
+or
+ 
+_{\
+D
+ens ,
+ r
+}^{X} \OuterP \Matrix _{\Dens ,r}^{YZ} + \Vector _{\Dens ,r}^{Y} \OuterP \Matrix _{\Dens ,r}^{XZ} + \Vector _{\Dens ,r}^{Z} \OuterP \Matrix _{\Dens ,r}^{XY} = \sum _{r=1}^{R_\Dens } \sum _{m\in XYZ} \Comp ^m_{\Dens , r} \label {eqn:dense-vmr}
+(7)
+The appearance tensor Gc has an additional mode corresponding to the feature
+channel dimension. Note that, compared to the XYZ modes, this mode is often
+
+8
+A. Chen, Z. Xu et al.
++
++
+Ray Distance
+Rendering loss
+−
+. .
+2
+2
+Fig. 3: TensoRF (VM) reconstruction and rendering. We model radiance fields as
+tensors using a set of vectors (v) and matrices (M), which describe the scene along
+their corresponding (XYZ) axes and are used for computing volume density σ and
+view-dependent color c in differentiable ray marching. For each shading location
+x = (x, y, z), we use linearly/bilinearly sampled values from the vector/matrix
+factors to efficiently compute the corresponding trilinearly interpolated values
+(A(x)) of the tensor components. The density component values ( Aσ(x)) are
+summed to get the volume density (σ) directly. The appearance values (Ac(x)) are
+concatenated into a vector (⊕[Am
+c (x)]m) that is then multiplied by an appearance
+matrix B and sent to the decoding function S for RGB color (c) regression.
+of lower dimension, leading to a lower rank. Therefore, we do not combine this
+mode with other modes in matrix factors and instead only use vectors, denoted
+by br, for this mode in the factorization. Specifically, Gc is factorized as
+  \
+Gr
+i
+d _
+{\
+Rad  } =
+ \s u m _{r = 1}
+^{R _ \Ra
+d } &  \Vec t or
+ _{ \ Rad
+ , r }^{
+X
+} 
+\
+Out
+er
+P \ M atrix  _{
+\Ra d  ,r}^ { YZ
+} \ O uterP \AppVec _{3r-2} + \Vector _{\Rad ,r}^{Y} \OuterP \Matrix _{\Rad ,r}^{XZ} \OuterP \AppVec _{3r-1} + \Vector _{\Rad ,r}^{Z} \OuterP \Matrix _{\Rad ,r}^{XY} \OuterP \AppVec _{3r} \notag \\ =\sum _{r=1}^{R_\Rad } &\Comp _{\Rad ,r}^X \OuterP \AppVec _{3r-2} +\Comp _{\Rad ,r}^Y \OuterP \AppVec _{3r-1} +\Comp _{\Rad ,r}^Z \OuterP \AppVec _{3r} \label {eqn:rad-vmr}
+(8)
+Note that, we have 3Rc vectors br to match the total number of components.
+Overall, we factorize the entire tensorial radiance field into 3Rσ +3Rc matrices
+(MY Z
+σ,r ,...,MY Z
+c,r ,...) and 3Rσ+6Rc vectors (vX
+σ,r,...,vX
+c,r,...,br). In general, we adopt
+Rσ ≪I, J, K and Rc ≪I, J, K, leading to a highly compact representation that
+can encode a high-resolution dense grid. In essence, the XYZ-mode vector and
+matrix factors, vX
+σ,r, MY Z
+σ,r , vX
+c,r, MY Z
+c,r , ..., describe the spatial distributions of
+the scene geometry and appearance along their corresponding axes. On the other
+hand, the appearance feature-mode vectors br express the global appearance
+correlations. By stacking all br as columns together, we have a P ×3Rc matrix B;
+this matrix B can also be seen as a global appearance dictionary that abstracts
+the appearance commonalities across the entire scene.
+
+TensoRF: Tensorial Radiance Fields
+9
+4.3
+Efficient feature evaluation.
+Our factorization-based model can compute each voxel’s feature vector at low
+costs, only requiring one value per XYZ-mode vector/matrix factor. We also
+enable efficient trilinear interpolation for our model, leading to a continuous field.
+Direct evaluation. With VM factorization, a density value Gσ,ijk of a single
+voxel at indices ijk can be directly and efficiently evaluated by following Eqn. 5:
+  \Gri d
+ _
+{
+\De
+n
+s ,i j
+k}
+ = \sum _{r=1}^{R_\Dens } \sum _{m\in XYZ} \Comp ^m_{\Dens ,r,ijk} \label {eqn:dens-vmrelement}
+(9)
+Here, computing each Am
+σ,r,ijk only requires indexing and multiplying two values
+from its corresponding vector and matrix factors.
+As for the appearance grid Gc, we always need to compute a full P-channel
+feature vector, which the shading function S requires as input, corresponding to
+a 1D slice of Gc at fixed XYZ indices ijk:
+  \Gri d
+ _
+{
+\Ra
+d 
+,ijk} = \sum  _{
+r=1}^{R_\Rad  } 
+\Comp ^X_{\Rad ,r,ijk} \AppVec _{3r-2} + \Comp ^Y_{\Rad ,r,ijk} \AppVec _{3r-1} + \Comp ^Z_{\Rad ,r,ijk} \AppVec _{3r} \label {eqn:rad-vmrslice}
+(10)
+Here, there’s no additional indexing for the feature mode, since we compute a full
+vector. We further simplify Eqn. 10 by re-ordering the computation. For this, we
+denote ⊕[Am
+c,ijk]m,r as the vector that stacks all Am
+c,r,ijk values for m = X, Y, Z
+and r = 1, ..., Rc, which is a vector of 3Rc dimensions; ⊕can also be considered as
+the concatenation operator that concatenates all scalar values (1-channel vectors)
+into a 3Rc-channel vector in practice. Using matrix B (introduced in Sec. 4.1)
+that stacks all br, Eqn. 10 is equivalent to a matrix vector product:
+  \Gri d  _{\Ra
+d ,ijk} = \AppMat (\oplus [\Comp ^m_{\Rad ,ijk}]_{m,r}) \label {eqn:rad-vmrfeature}
+(11)
+Note that, Eqn. 11 is not only formally simpler but also leads to a simpler
+implementation in practice. Specifically, when computing a large number of
+voxels in parallel, we first compute and concatenate Am
+c,r,ijk for all voxels as
+column vectors in a matrix and then multiply the shared matrix B once.
+Trilinear interpolation. We apply trilinear interpolation to model a continuous
+field. Na¨ıvely achieving trilinear interpolation is costly, as it requires evaluation
+of 8 tensor values and interpolating them, increasing computation by a factor of 8
+compared to computing a single tensor element. However, we find that trilinearly
+interpolating a component tensor is naturally equivalent to interpolating its
+vector/matrix factors linearly/bilinearly for the corresponding modes, thanks to
+the beauty of linearity of the trilinear interpolation and the outer product.
+For example, given a component tensor AX
+r = vX
+r ◦MY Z
+r
+with its each tensor
+element Ar,ijk = vX
+r,iMY Z
+r,jk, we can compute its interpolated values as:
+  
+\ Com p  ^
+X _r(\P o
+s
+ ) = \Vector _r^X(x)\Matrix _{r}^{YZ}(y,z) \label {eqn:xinter} 
+(12)
+
+10
+A. Chen, Z. Xu et al.
+where AX
+r (x) is Ar’s trilinearly interpolated value at location x = (x, y, z) in
+the 3D space, vX
+r (x) is vX
+r ’s linearly interpolated value at x along X axis, and
+MY Z
+r
+(y, z) is MY Z
+r
+’s bilinearly interpolated value at (y, z) in the YZ plane.
+Similarly, we have AY
+r (x) = vY
+r (y)MXZ
+r
+(x, z) and AZ
+r (x) = vZ
+r (z)MXY
+r
+(x, y)
+(for CP decomposition Aγ
+r(x) = vX
+r (x)vY
+r (y)vZ
+r (z) is also valid). Thus, trilinearly
+interpolating the two grids is expressed as
+  \Gr i
+d
+ 
+_
+{
+\D
+ens }(
+\Pos
+ ) &=  \sum _
+r \sum _m \Comp ^m_{\Dens ,r}(\Pos ) \label {eqn:dens-vmrinter} \\ \Grid _{\Rad }(\Pos ) &= \AppMat (\oplus [\Comp ^m_{\Rad ,r}(\Pos )]_{m,r}) \label {eqn:rad-vmrinter}
+(14)
+These equations are very similar to Eqn. 9 and 11, simply replacing the tensor
+elements with interpolated values. We avoid recovering 8 individual tensor el-
+ements for trilinear interpolation and instead directly recover the interpolated
+value, leading to low computation and memory costs at run time.
+4.4
+Rendering and reconstruction.
+Equations 6, 12–14 describe the core components of our model. By combining
+Eqn. 6,13,14, our factorized tensorial radiance field can be expressed as
+  \ D
+e
+n
+s
+ 
+, 
+\Rad = \ sum _{r}
+\sum _m \Com p ^m_{\Dens ,r}(\Pos )\:,\: \ShadFunc (\AppMat (\oplus [\Comp ^m_{\Rad ,r}(\Pos )]_{m,r}), \Dir ) 
+(15)
+i.e., we obtain continuous volume density and view-dependent color given any
+3D location and viewing direction. This allows for high-quality radiance field
+reconstruction and rendering. Note that, this equation is general and describes
+TensoRF with both CP and VM decomposition. Our full pipeline of radiance
+field reconstruction and rendering with VM decomposition is illustrated in Fig. 3.
+Volume rendering. To render images, we use differentiable volume rendering,
+following NeRF [37]. Specifically, for each pixel, we march along a ray, sampling
+Q shading points along the ray and computing the pixel color by
+  
+\
+C
+olo
+r = \ sum _{q=1}^Q \ Tr a ns _q
+ (1
+-
+\ex
+p (-\Dens _q \Step _q)) \Rad _q, \\Trans _q = \exp (-\sum _{p=1}^{q-1} \Dens _p \Step _p ) \label {eq:raymarching} 
+(16)
+Here, σq, cq are the corresponding density and color computed by our model at
+their sampled locations xq; ∆q is the ray step size and τq represents transmittance.
+Reconstruction. Given a set of multi-view input images with known camera
+poses, our tensorial radiance field is optimized per scene via gradient descent,
+minimizing an L2 rendering loss, using only the ground truth pixel colors as
+supervision. Our radiance field is explained by tensor factorization and modeled
+by a set of global vectors and matrices as basis factors that correlate and
+regularize the entire field in the optimization. However, this can sometimes lead
+to overfitting and local minima issues in gradient descent, leading to outliers
+
+TensoRF: Tensorial Radiance Fields
+11
+or noises in regions with fewer observations. We utilize standard regularization
+terms that are commonly used in compressive sensing, including an L1 norm loss
+and a TV (total variation) loss on our vector and matrix factors, which effectively
+address these issues. We find that only applying the L1 sparsity loss is adequate
+for most datasets. However, for real datasets that have very few input images
+(like LLFF[36]) or imperfect capture conditions (like Tanks and Temples [26,31]
+that has varying exposure and inconsistent masks), a TV loss is more efficient
+than the L1 norm loss.
+To further improve quality and avoid local minima, we apply coarse-to-
+fine reconstruction. Unlike previous coarse-to-fine techniques that require unique
+subdivisions on their sparse chosen sets of voxels, our coarse-to-fine reconstruction
+is simply achieved by linearly and bilinearly upsampling our XYZ-mode vector
+and matrix factors.
+5
+Implementation details
+We briefly discuss our implementation; please refer to the appendix for more
+details. We implement our TensoRF using PyTorch [45], without customized
+CUDA kernels. We implement the feature decoding function S as either an MLP
+or SH function and use P = 27 features for both. For SH, this corresponds to
+3rd-order SH coefficients with RGB channels. For neural features, we use a small
+MLP with two FC layers (with 128-channel hidden layers) and ReLU activation.
+We use the Adam optimizer [25] with initial learning rates of 0.02 for tensor
+factors and (when using neural features) 0.001 for the MLP decoder. We optimize
+our model for T steps with a batch size of 4096 pixel rays on a single Tesla
+V100 GPU (16GB). We apply a feature grid with a total number of N 3 voxels;
+the actual resolution of each dimension is computed based on the shape of the
+bounding box. To achieve coarse-to-fine reconstruction, we start from an initial
+low-resolution grid with N 3
+0 voxels with N0 = 128; we then upsample the vectors
+and matrices linearly and bilinearly at steps 2000, 3000, 4000, 5500, 7000 with
+the numbers of voxels interpolated between N 3
+0 and N 3 linearly in logarithmic
+space. Please refer to Sec. 6 for the analysis on different total steps (T), different
+resolutions (N), and different number of total components (3Rσ + 3Rc).
+6
+Experiments
+We now present an extensive evaluation of our tensorial radiance fields. We
+first analyze our decomposition techniques, the number of components, grid
+resolutions, and optimization steps. We then compare our approach with previous
+and concurrent works on both 360◦objects and forward-facing datasets.
+Analysis of different TensoRF models. We evaluate our TensoRF on the
+Synthetic NeRF dataset [37] using both CP and VM decompositions with different
+numbers of components and different numbers of grid voxels. Table 2 shows the
+averaged rendering PSNRs, reconstruction time, and model size for each model.
+
+12
+A. Chen, Z. Xu et al.
+We use the same MLP decoding function (as described in Sec. 5) for all variants
+and optimize each model for 30k steps with a batch size of 4096.
+Note that both TensoRF-CP and TensoRF-VM achieve consistently better
+rendering quality with more components or higher grid resolutions. TensoRF-CP
+achieves super compact modeling; even the largest model with 384 components
+and 5003 voxels requires less than 4MB. This CP model also achieves the best
+rendering quality in all of our CP variants, leading to a high PSNR of 31.56,
+which even outperforms vanilla NeRF (see Tab. 1).
+On the other hand, because it compresses more parameters in each component,
+TensoRF-VM achieves significantly better rendering quality than TensoRF-CP;
+even the smallest TensoRF-VM model with only 48 components and 2003 voxels
+is able to outperform the best CP model that uses many more components and
+voxels. Remarkably, the PSNR of 31.81 from this smallest VM model (which
+only takes 8.6 MB) is already higher than the PSNRs of NeRF and many other
+previous and concurrent techniques (see Tab. 1). In addition, 192 components
+are generally adequate for TensoRF-VM; doubling the number to 384 only leads
+to marginal improvement. TensoRF-VM with 3003 voxels can already lead to
+high PSNRs close to or greater than 33, while retaining compact model sizes
+(<72MB). Increasing the resolution further leads to improved quality, but also
+larger model size.
+Also note that all of our TensoRF models can achieve very fast reconstruction.
+Except for the largest VM model, all models finish reconstruction in less than 30
+min, significantly faster than NeRF and many previous methods (see Tab. 1).
+Optimization steps. We further evaluate our approach with different optimiza-
+tion steps for our best CP model and the VM models with 3003 voxels. PSNRs
+and reconstruction time are shown in Tab. 3. All of our models consistently
+achieve better rendering quality with more steps. Our compact CP-384 model
+(3.9MB) can even achieve a PSNR greater than 32 after 60k steps, higher than
+the PSNRs of all previous methods in Tab. 1. On the other hand, our VM models
+can quickly achieve high rendering quality in very few steps. With only 15k steps,
+many models achieve high PSNRs that are already state-of-the-art.
+Comparisons on 360◦scenes. We compare our approach with state-of-the-art
+novel view synthesis methods, including previous works (SRN[54], NeRF[37],
+NSVF[31]), SNeRG[20], PlenOctrees[68]) and concurrent works (Plenoxels [50],
+DVGO[55]). In particular, we compare with them using our best CP model and
+our VM models (3003 voxels) with 48 and 192 components. We also show a
+192-component VM model with spherical harmonics shading function. Table
+1 shows the quantitative results (PSNRs and SSIMs) of ours and comparison
+methods on three challenging datasets, where we also show the corresponding
+batch size, optimization steps, time, and final output model size for each model, to
+compare all methods from multiple perspectives. Note that all of our CP and VM
+models can outperform NeRF on all three datasets while taking substantially less
+optimization time and fewer steps. Our best VM-192 model can even achieve the
+best PSNRs and SSIMs on all datasets, significantly outperforming the comparison
+
+TensoRF: Tensorial Radiance Fields
+13
+Synthetic-NeRF
+NSVF
+TanksTemples
+Method
+BatchSize
+Steps
+Time ↓
+Size(MB)↓
+PSNR↑
+SSIM↑
+PSNR↑
+SSIM↑
+PSNR↑
+SSIM↑
+SRN [54]
+-
+-
+>10h
+-
+22.26
+0.846
+24.33
+0.882
+24.10
+0.847
+NSVF [31]
+8192
+150k
+>48∗h
+-
+31.75
+0.953
+35.18
+0.979
+28.48
+0.901
+NeRF [37]
+4096
+300k
+∼35h
+5.00
+31.01
+0.947
+30.81
+0.952
+25.78
+0.864
+SNeRG [20]
+8192
+250k
+∼15h
+1771.5
+30.38
+0.950
+-
+-
+-
+-
+PlenOctrees [68]
+1024
+200k
+∼15h
+1976.3
+31.71
+0.958
+-
+-
+27.99
+0.917
+Plenoxels [50]
+5000
+128k
+11.4m
+778.1
+31.71
+0.958
+-
+-
+27.43
+0.906
+DVGO [55]
+5000
+30k
+15.0m
+612.1
+31.95
+0.957
+35.08
+0.975.
+28.41
+0.911
+Ours-CP-384
+4096
+30k
+25.2m
+3.9
+31.56
+0.949
+34.48
+0.971
+27.59
+0.897
+Our-VM-192-SH
+4096
+30k
+16.8m
+71.9
+32.00
+0.955
+35.30
+0.977
+27.81
+0.907
+Ours-VM-48
+4096
+30k
+13.8m
+18.9
+32.39
+0.957
+35.34
+0.976
+28.06
+0.909
+Ours-VM-192
+4096
+15k
+8.1m
+71.8
+32.52
+0.959
+35.59
+0.978
+28.07
+0.913
+Ours-VM-192
+4096
+30k
+17.4m
+71.8
+33.14
+0.963
+36.52
+0.982
+28.56
+0.920
+Table 1: We compare our method with previous and concurrent novel view
+synthesis methods on three datasets. All scores of the baseline methods are
+directly taken from their papers whenever available. We also report the averaged
+reconstruction time and model size for the Synthetic-NeRF dataset. NVSF
+requires 8 GPUs for optimization (marked by a star), while others run on a
+single GPU. DVGO’s 30k steps correspond to 10k for coarse and 20k for fine
+reconstruction.
+#Comp
+2003
+3003
+5003
+TensoRF-CP
+48
+27.98/09:29/0.74
+28.24/11:45/1.09
+28.38/14:20/1.85
+96
+28.50/09:57/0.88
+28.83/12:12/1.29
+29.06/15:27/2.18
+192
+29.50/11:09/1.08
+29.99/13:41/1.59
+30.33/18.03/2.66
+384
+30.47/14:41/1.59
+31.08/18:09/2.33
+31.56/25:11/3.93
+TensoRF-VM
+48
+31.81/11:29/08.6
+32.39/13:51/23.5
+32.63/18:17/55.8
+96
+32.33/11:54/16.5
+32.86/14:08/37.3
+33.06/20:11/105.
+192
+32.63/13:26/32.3
+33.14/17:36/76.7
+33.31/27.18/204.
+384
+32.69/17:24/63.4
+33.21/25:14/143.
+33.39/43:19/397.
+Table 2: We compare the averaged PSNRs / optimization time (mm:ss) / model
+sizes (MB) of CP and VM TensoRF models on Synthetic NeRF dataset [37] with
+different numbers of components and grid resolutions, optimized for 30k steps.
+5k
+15k
+30k
+60k
+5k
+15k
+30k
+60k
+CP-384 28.37 30.80 31.56 32.03 03:03 11:30 25:11 51:47
+VM-48 29.28 31.80 32.39 32.68 01:57 06:21 13:51 27:20
+VM-96 29.65 32.26 32.86 33.17 02:01 06:41 14:08 28:57
+VM-192 29.86 32.52 33.14 33.44 02:16 08:08 17:37 35:50
+VM-384 29.95 32.62 33.21 33.52 02:51 11:30 25:14 52:50
+Table 3: PSNRs and time of CP and VM
+models with different training steps on
+the Synthetic-NeRF dataset [37].
+Method
+Time ↓
+Size
+PSNR↑SSIM↑
+NeRF [37]
+36h
+5.00M
+26.50
+0.811
+Plenoxels [50] 24:00m
+2.59G
+26.29
+0.829
+Ours-VM-48
+19:44m 90.4M
+26.51
+0.832
+Ours-VM-96
+25.43m 179.7M 26.73 0.839
+Table 4: Quantitative comparisons of
+our method with NeRF and Plenoxels
+on forward-facing scenes [36].
+methods. Our approach can also achieve qualitatively better renderings with
+more appearance and geometry details and less outliers, as shown in Fig. 4.
+Our models are highly efficient, which all require less than 75MB space and can
+be reconstructed in less than 30 min. This corresponds to more than 70x speed up
+compared to NeRF that requires about 1.5 days for optimization. Our CP model
+is even more compact than NeRF. Moreover, SNeRG and PlenOctrees require
+pre-training a NeRF-like MLP, requiring long reconstruction time too. DVGO
+and Plenoxels are concurrent works, which can also achieve fast reconstruction
+
+14
+A. Chen, Z. Xu et al.
+Chair
+Lego
+Ours
+DVGO
+Plenoxels
+NeRF
+GT
+NSVF
+Fig. 4: Qualitative results of our VM-192-30k model and comparison methods
+(NeRF[37], plenoxels [50], DVGO [55], NSVF [31]) on two Synthetic NeRF scenes.
+in less than 15 min. However, as both are voxel-based methods and directly
+optimize voxel values, they lead to huge model sizes similar to previous voxel-
+based methods like SNeRG and PlenOctrees. In contrast, we factorize feature
+grids and model them with compact vectors and matrices, leading to substantially
+smaller model sizes. Meanwhile, our VM-192 can even reconstruct faster than
+DVGO and Plenoxels, taking only 15k steps, and achieving better quality in
+most cases. In fact, Plenoxels’ fast reconstruction relies on quickly optimizing
+significantly more steps (> 4 times our steps) with their CUDA implementation.
+Our models are implemented with standard PyTorch modules and already achieve
+much better rendering quality with fewer steps taking comparable and even less
+reconstruction time than Plenoxels. Note that our SH model essentially represents
+the same underlying feature grid as Plenoxels but can still lead to more compact
+modeling and better quality with fewer steps, showing the advantages of our
+factorization based modeling. In general, our approach enables fast reconstruction,
+compact modeling, and photo-realistic rendering simultaneously.
+Forward-facing scenes. Our approach can also achieve efficient and high-quality
+radiance field reconstruction for forward-facing scenes. We show quantitative
+results of our two VM models on the LLFF dataset [36] and compare with NeRF
+and Plenoxels in Tab. 4. Our models outperform the previous state-of-the-art
+NeRF and take significantly less reconstruction time. Compared with Plenoxels
+[50], our approach leads to comparable or faster reconstruction speed, better
+quality, and substantially smaller model sizes.
+7
+Conclusion.
+We have presented a novel approach for high-quality scene reconstruction and ren-
+dering. We propose a novel scene representation – TensoRF which leverages tensor
+
+TensoRF: Tensorial Radiance Fields
+15
+decomposition techniques to model and reconstruct radiance fields compactly as
+factorized low-rank tensor components. While our framework accommodates clas-
+sical tensor factorization techniques (like CP), we introduce a novel vector-matrix
+decomposition that leads to better reconstruction quality and faster optimization
+speed. Our approach enables highly efficient radiance field reconstruction in less
+than 30 min per scene, leading to better rendering quality compared to NeRF
+that requires substantially longer training time (20+ hours). Moreover, our tensor
+factorization based method achieves high compactness, leading to a memory
+footprint of less than 75MB, substantially smaller than many other previous
+and concurrent voxel-grid based methods. We hope our findings in tensorized
+low-rank feature modeling can inspire other modeling and reconstruction tasks.
+References
+1. Ballester-Ripoll, R., Pajarola, R.: Tensor decomposition methods in visual comput-
+ing. IEEE Vis. Tutorials 3 (2016)
+2. Ben-Younes, H., Cadene, R., Thome, N., Cord, M.: Block: Bilinear superdiagonal fu-
+sion for visual question answering and visual relationship detection. In: Proceedings
+of the AAAI Conference on Artificial Intelligence. vol. 33, pp. 8102–8109 (2019)
+3. Bi, S., Xu, Z., Srinivasan, P., Mildenhall, B., Sunkavalli, K., Haˇsan, M., Hold-
+Geoffroy, Y., Kriegman, D., Ramamoorthi, R.: Neural reflectance fields for appear-
+ance acquisition. arXiv preprint arXiv:2008.03824 (2020)
+4. Bi, S., Xu, Z., Sunkavalli, K., Haˇsan, M., Hold-Geoffroy, Y., Kriegman, D., Ra-
+mamoorthi, R.: Deep reflectance volumes: Relightable reconstructions from multi-
+view photometric images. In: Proc. ECCV (2020)
+5. Boss, M., Braun, R., Jampani, V., Barron, J.T., Liu, C., Lensch, H.: Nerd: Neural
+reflectance decomposition from image collections. In: Proceedings of the IEEE/CVF
+International Conference on Computer Vision. pp. 12684–12694 (2021)
+6. Candes, E.J., Plan, Y.: Matrix completion with noise. Proceedings of the IEEE
+98(6), 925–936 (2010)
+7. Carroll, J.D., Chang, J.J.: Analysis of individual differences in multidimensional
+scaling via an n-way generalization of “eckart-young” decomposition. Psychometrika
+35(3), 283–319 (1970)
+8. Chan, E.R., Lin, C.Z., Chan, M.A., Nagano, K., Pan, B., Mello, S.D., Gallo, O.,
+Guibas, L., Tremblay, J., Khamis, S., Karras, T., Wetzstein, G.: Efficient geometry-
+aware 3D generative adversarial networks. In: CVPR (2022)
+9. Chan, E.R., Monteiro, M., Kellnhofer, P., Wu, J., Wetzstein, G.: pi-gan: Periodic
+implicit generative adversarial networks for 3d-aware image synthesis. In: Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition.
+pp. 5799–5809 (2021)
+10. Chen, A., Wu, M., Zhang, Y., Li, N., Lu, J., Gao, S., Yu, J.: Deep surface light
+fields. Proceedings of the ACM on Computer Graphics and Interactive Techniques
+1(1), 1–17 (2018)
+11. Chen, A., Xu, Z., Zhao, F., Zhang, X., Xiang, F., Yu, J., Su, H.: Mvsnerf: Fast
+generalizable radiance field reconstruction from multi-view stereo. In: Proceedings
+of the IEEE/CVF International Conference on Computer Vision. pp. 14124–14133
+(2021)

@@ -1,0 +1,1198 @@
+Zip-NeRF: Anti-Aliased Grid-Based Neural Radiance Fields
+Jonathan T. Barron
+Ben Mildenhall
+Dor Verbin
+Pratul P. Srinivasan
+Peter Hedman
+Google Research
+(a) Ground Truth
+(b) Our Model
+(c) mip-NeRF 360 [3]
+(d) iNGP [21]
+(e) mip-NeRF 360 + iNGP
+Figure 1: (a) Test-set images from the mip-NeRF 360 dataset [3] with renderings from (b) our model and (c, d, e) three
+state-of-the-art baselines. Our model accurately recovers thin structures and finely detailed foliage, while the baselines either
+oversmooth or exhibit aliasing in the form of jaggies and missing scene content. PSNR values for each patch are inset.
+Abstract
+Neural Radiance Field training can be accelerated
+through the use of grid-based representations in NeRF’s
+learned mapping from spatial coordinates to colors and vol-
+umetric density. However, these grid-based approaches lack
+an explicit understanding of scale and therefore often in-
+troduce aliasing, usually in the form of jaggies or missing
+scene content. Anti-aliasing has previously been addressed
+by mip-NeRF 360, which reasons about sub-volumes along
+a cone rather than points along a ray, but this approach is
+not natively compatible with current grid-based techniques.
+We show how ideas from rendering and signal processing
+can be used to construct a technique that combines mip-
+NeRF 360 and grid-based models such as Instant NGP to
+yield error rates that are 8% – 77% lower than either prior
+technique, and that trains 24× faster than mip-NeRF 360.
+In Neural Radiance Fields (NeRF), a neural network is
+trained to model a volumetric representation of a 3D scene
+such that novel views of that scene can be rendered via ray-
+tracing [19]. NeRF has proven to be an effective tool for
+tasks such as view synthesis [17], generative media [25],
+robotics [33], and computational photography [18].
+The original NeRF model used a multilayer perceptron
+(MLP) to parameterize the mapping from spatial coordi-
+nates to colors and densities. Though compact and expres-
+sive, MLPs are slow to train, and recent work has acceler-
+ated training by replacing or augmenting MLPs with voxel-
+grid-like datastructures [7, 15, 27, 35]. One example is In-
+stant NGP (iNGP), which uses a pyramid of coarse and fine
+grids (the finest of which are stored using a hash map) to
+construct learned features that are processed by a tiny MLP,
+enabling greatly accelerated training [21].
+In addition to being slow, the original NeRF model was
+also aliased: NeRF reasons about individual points along a
+ray, which results in “jaggies” in rendered images and lim-
+its NeRFs ability to reason about scale. Mip-NeRF [2] re-
+solved this issue by casting cones instead of rays, and by
+featurizing the entire volume within a conical frustum for
+1
+arXiv:2304.06706v3  [cs.CV]  26 Oct 2023
+
+Fine ←→Coarse
+Method
+(a) Input / Baseline, 14.6 dB
+(b) Ground-truth
+(c) Downweighting, 24.3 dB
+(d) Multisampling, 25.2 dB
+(e) Our Approach, 26.5 dB
+Figure 2: Here we show a toy 1-dimensional iNGP [21] with 1 feature per scale. Each subplot represents a different strategy
+for querying the iNGP at all coordinates along the x axis — imagine a Gaussian moving left to right, where each line is the
+iNGP feature for each coordinate, and where each color is a different scale in the iNGP. (a) The naive solution of querying
+the Gaussian’s mean results in features with piecewise-linear kinks, where the high frequencies past the bandwidth of the
+Gaussian are large and inaccurate. (b) The true solution, obtained by convolving the iNGP features with a Gaussian —
+an intractable solution in practice — results in coarse features that are smooth but informative and fine features that are
+near 0. (c) We can suppress unreliable high frequencies by downweighing them based on the scale of the Gaussian (color
+bands behind each feature indicate the downweighting), but this results in unnaturally sharp discontinuities in coarse features.
+(d) Alternatively, supersampling produces reasonable coarse scales features but erratic fine-scale features. (e) We therefore
+multisample isotropic sub-Gaussians (5 shown here) and use each sub-Gaussian’s scale to downweight frequencies.
+use as input to the MLP. Mip-NeRF and its successor mip-
+NeRF 360 [3] showed that this approach enables highly ac-
+curate rendering on challenging real-world scenes.
+Regrettably, the progress made on these two problems
+of fast training and anti-aliasing are, at first glance, incom-
+patible with each other. This is because mip-NeRF’s anti-
+aliasing strategy depends critically on the use of positional
+encoding [28, 30] to featurize a conical frustum into a dis-
+crete feature vector, but current grid-based approaches do
+not use positional encoding, and instead use learned fea-
+tures that are obtained by interpolating into a hierarchy of
+grids at a single 3D coordinate. Though anti-aliasing is a
+well-studied problem in rendering [8, 9, 26, 31], most ap-
+proaches do not generalize naturally to inverse-rendering in
+grid-based NeRF models like iNGP.
+In this work, we leverage ideas from multisampling,
+statistics, and signal processing to integrate iNGP’s pyra-
+mid of grids into mip-NeRF 360’s framework. We call our
+model “Zip-NeRF” due to its speed, its similarity with mip-
+NeRF, and its ability to fix zipper-like aliasing artifacts. On
+the mip-NeRF 360 benchmark [3], Zip-NeRF reduces er-
+ror rates by as much as 19% and trains 24× faster than the
+previous state-of-the-art. On our multiscale variant of that
+benchmark, which more thoroughly measures aliasing and
+scale, Zip-NeRF reduces error rates by as much as 77%.
+1. Preliminaries
+Mip-NeRF 360 and Instant NGP (iNGP) are both NeRF-
+like [19]: A pixel is rendered by casting a 3D ray and fea-
+turizing locations at distances t along the ray, and those fea-
+tures are fed to a neural network whose outputs are alpha-
+composited to render a color. Training consists of repeat-
+edly casting rays corresponding to pixels in training im-
+ages and minimizing (via gradient descent) the difference
+between each pixel’s rendered and observed colors.
+Mip-NeRF 360 and iNGP differ significantly in how co-
+ordinates along a ray are parameterized. In mip-NeRF 360,
+a ray is subdivided into a set of intervals [ti, ti+1), each
+of which represents a conical frustum whose shape is ap-
+proximated with a multivariate Gaussian, and the expected
+positional encoding with respect to that Gaussian is used as
+input to a large MLP [2]. In contrast, iNGP trilinearly in-
+terpolates into a hierarchy of differently-sized 3D grids to
+produce feature vectors for a small MLP [21]. Our model
+combines mip-NeRF 360’s overall framework with iNGP’s
+featurization approach, but naively combining these two ap-
+proaches introduces two forms of aliasing:
+1. Instant NGP’s feature grid approach is incompati-
+ble with mip-NeRF 360’s scale-aware integrated po-
+sitional encoding technique, so the features produced
+by iNGP are aliased with respect to spatial coordinates
+and thus produce aliased renderings. In Section 2, we
+address this by introducing a multisampling-like solu-
+tion for computing prefiltered iNGP features.
+2. Using iNGP dramatically accelerates training, but this
+reveals a problem with mip-NeRF 360’s online distil-
+lation approach that causes highly visible “z-aliasing”
+(aliasing along a ray), wherein scene content errati-
+cally disappears as the camera moves. In Section 3
+we resolve this with a new loss function that prefilters
+along each ray when computing the loss function used
+to supervise online distillation.
+
+(a) Training
+(b) Testing
+Figure 3: Here we show a toy 3D ray with an exaggerated
+pixel width (viewed along the ray as an inset) divided into
+4 frustums denoted by color. We multisample each frustum
+with a hexagonal pattern that matches the frustum’s first and
+second moments. Each pattern is rotated around the ray and
+flipped along the ray (a) randomly when training and (b)
+deterministically when rendering.
+2. Spatial Anti-Aliasing
+Mip-NeRF uses features that approximate the integral
+over the positional encoding of the coordinates within a sub-
+volume, which is a conical frustum. This results in Fourier
+features whose amplitudes are small when the feature si-
+nusoid’s period is larger than the standard deviation of the
+Gaussian — the features express the spatial location of the
+sub-volume only at the wavelengths that are larger than the
+size of the sub-volume. Because this feature encodes both
+position and scale, the MLP that consumes it is able to learn
+a multi-scale representation of the 3D scene that renders
+anti-aliased images. Grid-based representations like iNGP
+do not natively allow for sub-volumes to be queried, and in-
+stead use trilinear interpolation at a single point to construct
+features for use in an MLP, which results in learned models
+that cannot reason about scale or aliasing.
+We resolve this by turning each conical frustum into a
+set of isotropic Gaussians, using a combination of multi-
+sampling and feature-downweighting: The anisotropic sub-
+volume is first converted into a set of points that approx-
+imate its shape, and then each point is assumed to be an
+isotropic Gaussian with some scale. This isotropic assump-
+tion lets us approximate the true integral of the feature grid
+over a sub-volume by leveraging the fact that the values in
+the grid are zero-mean. By averaging these downweighted
+features, we obtain scale-aware prefiltered features from an
+iNGP grid. See Figure 2 for a visualization.
+Anti-aliasing is well explored in the graphics literature.
+Mip mapping [31] (mip-NeRF’s namesake) precomputes a
+datastructure that enables fast anti-aliasing, but it is unclear
+how this approach can be applied to iNGP’s hash-based
+datastructures. Supersampling techniques [8] adopt a brute-
+force approach to anti-aliasing and use a large number of
+samples; we will demonstrate that this is less effective and
+more expensive than our approach. Multisampling tech-
+niques [11] construct a small set of samples, and then pool
+information from those multisamples into an aggregate rep-
+resentation that is provided to an expensive rendering pro-
+cess — a strategy that resembles our approach.
+Multisampling
+Following mip-NeRF [2], we assume
+each pixel corresponds to a cone with radius ˙rt, where t
+is distance along the ray. Given an interval along the ray
+[t0, t1), we would like to construct a set of multisamples
+that approximate the shape of that conical frustum. We use
+a 6-point hexagonal pattern whose angles θj are:
+  \ bo ldsym bol { \thet a } =  \l e ft [\, 0, \sfrac {2\pi }{3}, \sfrac {4\pi }{3}, \sfrac {3\pi }{3}, \sfrac {5\pi }{3}, \sfrac {\pi }{3} \,\right ]\,, 
+(1)
+which are linearly-spaced angles around one rotation of a
+circle, permuted to give a pair of triangles that are shifted
+by 60 degrees. The distances along the ray tj are:
+ t _ j =
+ t
+_
+0 
++  \frac {\zd \left (\! t_1^2 + 2\zc ^2 + \frac {3}{\sqrt {7}}\left ( \frac {2j}{5}-1 \right ) \sqrt {\!\left (\zd ^2 - \zc ^2 \right )^2\! + 4 \zc ^4}\right )}{\zd ^2 + 3 \zc ^2} \nonumber \\ \text {where} \,\, \zc = (\zval _0 + \zval _1) / 2\,,\,\,\, \zd = (\zval _1 - \zval _0) / 2
+(2)
+which are linearly-spaced values in [t0, t1), shifted and
+scaled to concentrate mass near the far base of the frustum.
+Our multisample coordinates relative to the ray are:
+ 
+\
+l
+e
+f
+t \{  {\begin
+ 
+{
+bmat rix} \ba
+s
+e
+ra
+d
+i
+us t_ j  \c os  ( \ t h
+e
+t
+a _j)/\sqrt {2} \\ \baseradius t_j \sin (\theta _j)/\sqrt {2} \\ t_j \end {bmatrix} \,\Bigg |\, \begin {matrix} j = 0, 1, \ldots , 5 \end {matrix} } \right \}\, .
+(3)
+These 3D coordinates are rotated into world coordinates by
+multiplying them by an orthonormal basis whose third vec-
+tor is the ray direction (and whose first two vectors are an
+arbitrary frame that is perpendicular to the ray) and then
+shifted by the ray origin. By construction, the sample means
+and variances (along the ray and perpendicular to the ray) of
+these multisamples exactly match those of the conical frus-
+tum, analogously to mip-NeRF Gaussians [2] (see the sup-
+plement for details). During training, we randomly rotate
+and flip each pattern, and during rendering we deterministi-
+cally flip and rotate every other pattern by 30 degrees. See
+Figure 3 for visualizations of both strategies.
+We use these 6 multisamples {xj} as the means of
+isotropic Gaussians each with a standard deviation of σj.
+We set σj to ˙rtj/
+√
+2 scaled by a hyperparameter, which
+is 0.5 in all experiments. Because iNGP grids require in-
+put coordinates to lie in a bounded domain, we apply the
+contraction function from mip-NeRF 360 [3]. Since these
+Gaussians are isotropic, we can compute the scale factor
+induced by this contraction using an efficient alternative to
+the Kalman filter approach used by mip-NeRF 360; see the
+supplement for details.
+
+Figure 4: Here we visualize the problem of z-aliasing. Left: we have a scene where 2 training cameras face a narrow red
+chair in front of a gray wall. Middle: As we sweep a test camera between those training cameras, we see that the baseline
+algorithm (top) “misses” or “hits” the chair depending on its distance and therefore introduces tearing artifacts, while our
+model (bottom) consistently “hits” the chair to produce artifact-free renderings. Left: This is because the baseline (top) has
+learned non-smooth proposal distributions due to aliasing in its supervision, while our model (bottom) correctly predicts
+proposal distributions that capture both the foreground and the background at all depths due to our anti-aliased loss function.
+Downweighting
+Though multisampling is an effective
+tool for reducing aliasing, using naive trilinear interpolation
+for each multisample still results in aliasing at high frequen-
+cies, as can be seen in Figure 2(d). To anti-alias interpola-
+tion for each individual multisample, we re-weight the fea-
+tures at each scale in a way that is inversely-proportional to
+how much each multisample’s isotropic Gaussian fits within
+each grid cell: if the Gaussian is much larger than the cell
+being interpolated into, the interpolated feature is likely un-
+reliable and should be downweighted. Mip-NeRF’s IPE fea-
+tures have a similar interpretation.
+In iNGP, interpolation into each grid or hash {Vℓ} at co-
+ordinate x is done by scaling x by the grid’s linear size
+nℓand performing trilinear interpolation into Vℓto get a
+cℓ-length vector.
+We instead interpolate a set of multi-
+sampled isotropic Gaussians with means {xj} and stan-
+dard deviations {σj}. By reasoning about Gaussian CDFs
+we can compute the fraction of each Gaussian’s PDF that
+is inside the [−1/2n, 1/2n]3 cube in Vℓbeing interpolated
+into as a scale-dependent downweighting factor ωj,ℓ=
+erf(1/√
+8σ2
+j n2
+ℓ), where ωj,ℓ∈[0, 1]. As detailed in Sec-
+tion 4, we impose weight decay on {Vℓ}, which encour-
+ages the values in Vℓto be normally distributed and zero-
+mean. This zero-mean assumption lets us approximate the
+expected grid feature with respect to each multisample’s
+Gaussian as ωj · fj,ℓ+ (1 −ωj) · 0 = ωj · fj,ℓ. With this,
+we can approximate the expected feature corresponding to
+the conical frustum being featurized by taking a weighted
+mean of each multisample’s interpolated features:
+  \ mathbf {f} _ \level = \ o per ator name {mean}_j\left (\downweight _{j, \ell } \cdot \operatorname {trilerp}(\gridsize _\level \cdot \mathbf {x}_j ; \grid _\ell ) \right )\,. 
+(4)
+This set of features {fℓ} is concatenated and provided as
+input to an MLP, as in iNGP. We also concatenate featurized
+versions of {ωj,ℓ}, see the supplement for details.
+3. Z-Aliasing and Proposal Supervision
+Though
+the
+previously-detailed
+multisampling
+and
+downweighting approach is an effective way to reduce spa-
+tial aliasing, there is an additional source of aliasing along
+the ray that we must consider, which we will refer to as
+z-aliasing. This z-aliasing is due to mip-NeRF 360’s use
+of a proposal MLP that learns to produce upper bounds
+on scene geometry: during training and rendering, inter-
+vals along a ray are repeatedly evaluated by this proposal
+MLP to generate histograms that are resampled by the next
+round of sampling, and only the final set of samples is ren-
+dered by the NeRF MLP. Mip-NeRF 360 showed that this
+approach significantly improves speed and rendering qual-
+ity compared to prior strategies of learning one [2] or mul-
+tiple [19] NeRFs that are all supervised using image recon-
+struction. We observe that the proposal MLP in mip-NeRF
+360 tends to learn a non-smooth mapping from input coordi-
+nates to output volumetric densities. This results in artifacts
+in which a ray “skips” scene content, which can be seen in
+Figure 4. Though this artifact is subtle in mip-NeRF 360,
+if we use an iNGP backend for our proposal network in-
+stead of an MLP (thereby increasing our model’s ability to
+optimize rapidly) it becomes common and visually salient,
+especially when the camera translates along its z-axis.
+The root cause of z-aliasing in mip-NeRF 360 is the “in-
+terlevel loss” used to supervise the proposal network, which
+assigns an equivalent loss to NeRF and proposal histogram
+bins whether their overlap is partial or complete — proposal
+histogram bins are only penalized when they completely fail
+to overlap. To resolve this issue, we present an alternative
+loss that, unlike mip-NeRF 360’s interlevel loss, is continu-
+ous and smooth with respect to distance along the ray. See
+Figure 6 for a comparison of both loss functions.
+
+{
+T
+g=">AB6XicbVDLSgNBEOz1GeMr6tHLYBA8hd3g6xj04jGKeUCyhNnJbDJkdnaZ6RXCkj/w4kERr/6RN/GSbIHTSxoKq6
+6e4KEikMu63s7K6tr6xWdgqbu/s7u2XDg6bJk414w0Wy1i3A2q4FIo3UKDk7URzGgWSt4LR7dRvPXFtRKwecZxwP6IDJULB
+KFrpoap7pbJbcWcgy8TLSRly1Hulr24/ZmnEFTJjel4boJ+RjUKJvmk2E0NTygb0QHvWKpoxI2fzS6dkFOr9EkYa1sKyUz9
+PZHRyJhxFNjOiOLQLHpT8T+vk2J47WdCJSlyxeaLwlQSjMn0bdIXmjOUY0so08LeStiQasrQhlO0IXiLy+TZrXiXVYu7s/
+LtZs8jgIcwmcgQdXUIM7qEMDGITwDK/w5oycF+fd+Zi3rj5zBH8gfP5A1FOjTw=</latexit>2r
+⇤
+=
+<latexit sha1_base64="6JvA5TXxlzx1N/3Csk8aiB6p524=">AB63icbVBNS8NAEJ3Ur1q/qh69BIvgqSTi17HoxWMFawtKJvtpl26uwm7E6GE/gUvHhTx6h/y5r9x0+agrQ8GHu/N
+MDMvTAQ36HnfTmldW19o7xZ2dre2d2r7h8mjVlLVoLGLdCYlhgivWQo6CdRLNiAwFa4fj29xvPzFteKwecJKwQJKh4hGnBHOpxX2qzWv7s3gLhO/IDUo0OxXv3qDmKaSKaSCGNP1vQSDjGjkVLBpZcalhA6JkPWtVQRyUyQzW6duid
+WGbhRrG0pdGfq74mMSGMmMrSdkuDILHq5+J/XTG6DjKukhSZovNFUSpcjN38cXfANaMoJpYQqrm91aUjoglFG0/FhuAvrxMHs/q/mX94v681rgp4ijDERzDKfhwBQ24gya0gMInuEV3h
+zpvDjvzse8teQUM4fwB87nDyXojlM=</lat
+exit>Z
+L
+{
+{
+{
+o
+5gHJEmYnvcmQ2dlZlYIS/7AiwdFvPpH3vwbJ8keNLGgoajqprsrSATXxnW/ncLK6tr6RnGztLW9s7tX3j9o6jhVDBsFrFqB1Sj4BIbhuB7UQhjQKBrWB0O/VbT6g0j+WjGSfoR3QgecgZNVZ6Ga9csWtujOQZeLlpAI56r3yV7cfszRCaZigWnc8NzF+
+RpXhTOCk1E01JpSN6A7lkoaofaz2aUTcmKVPgljZUsaMlN/T2Q0nocBbYzomaoF72p+J/XSU147WdcJqlByeaLwlQE5Pp26TPFTIjxpZQpri9lbAhVZQZG07JhuAtvrxMmdV7J6cX9eqd3kcRThCI7hFDy4ghrcQR0awCEZ3iFN2fkvDjvzse8teD
+kM4fwB87nD57EjW8=</latexit>
+{
+normalize
+di↵(interp(·))
+{
+r
+(s, w)
+C
+OnicbZDLSsNAFIYnXmu9V26mVoEBS2JeKOrohuXCrYKSiT6aQdOrkwc6KUkOdy41O4c+HGhSJufQCnbcR6OTDw8/3nMOf8Xiy4AtN8NCYmp6Z
+nZgtzxfmFxaXl0spqU0WJpKxBIxHJa48oJnjIGsBsOtYMhJ4gl15vdOBf3XDpOJReAn9mLkB6YTc5SARq3ShSOYD1tOQKDr+anKdrDjS0LTL
+3KbZem3a1tOuebiXTyGak513Iz7Eje6cJ2q1Qxq+aw8F9h5aKC8jpvlR6cdkSTgIVABVHKtswY3JRI4FSwrOgkisWE9kiH2VqGJGDKTYenZ3hT
+kzb2I6lfCHhIxydSEijVDzdOdhY/fYG8D/PTsA/dlMexgmwkI4+8hOBIcKDHGbS0ZB9LUgVHK9K6ZdopMDnXZRh2D9PvmvaO5VrcPqwcV+pX6
+Sx1FA62gDbSELHaE6OkPnqIEoukNP6AW9GvfGs/FmvI9aJ4x8Zg39KOPjE4A4rc=</latexit>✓
+s,
+w
+s[1:] −s[:−1]
+◆
+v
+UPvhXxNkpVZ7YOBwzr3ce8+khZIOo+h3EK69WH+50dpsb2/ev2ms/P20pnSChgKo4y9TrkDJTUMUaKC68ICz1MFV+nNWeNf3YJ10ujvOC8gyflUy0wKjl4adywzBViOxmqeQ5Wq0rKxQyiyUtesyxRkeMhyjrM0q1z9nrLMclH9UX7UdfXHcWse5LQY/pIOmHd4zjxjZYyK6czPBp3elE/WoA+J/GK9MgKF+POTzYxosxBo1DcuVEcFZh
+U3KIUCuo2Kx0UXNzwKYw8bQ5xSbXIpqYHXpnQzFj/NKF+rij4rlz8z1lc3S7qnXiP/zRiVmX5NK6qJE0GI5KCsVRUOboOlEWhCo5p5wYaXflYoZ9+Gh/462DyF+evJzcvmhH3/uf/r2sTc4XcXRIvkHTkMflCBuScXJAhEeQXuQ82glZwF6F7XB7WRoGq5d8g/CvQeJyLYo</latexit>
+blur stepfun
+✓
+s,
+w
+s[1:] −s[:−1], r
+◆
+r
+2Ac0sUymk3boZBJmJkoJ+Q83/obF4q4Elz4N07aCNp6YODMOfdy7z1exKhUlvVlFBYWl5ZXiqultfWNzS1ze6clw1hg0sQhC0XHQ5IwyklTUcVIJxIEBR4jbW90mfntOyIkDfmNGkfEDdCAU59ipLTUM2sVZ4hU4gRIDT0/kWl6BH8+9+ltMumh6WeWbaq
+1gRwntg5KYMcjZ754fRDHAeEK8yQlF3bipSbIKEoZiQtObEkEcIjNCBdTkKiHSTyW0pPNBKH/qh0I8rOF/dyQokHIceLoy21LOepn4n9eNlX/uJpRHsSIcTwf5MYMqhFlQsE8FwYqNUFYUL0rxEMkEFY6ziwEe/bkedKqVe3T6sn1cbl+kcdRBHtgH1S
+ADc5AHVyBmgCDB7AE3gBr8aj8Wy8Ge/T0oKR9+yCPzA+vwGzYaJ3</latexit>
+(ˆs, wˆs)
+(ˆs, ˆw)
+ˆs4
+ˆs1
+ˆs2
+Y
+wTwWcLsZDYZMju7zPQKYclfePGgiFf/xpt/4yTZg0YLGoqbrq7gkQKg675RSWldW14rpY3Nre2d8u5e08SpZrzBYhnrdkANl0LxBgqUvJ1oTqNA8lYwupn6rUeujYjVPY4T7kd0oEQoGEUrPXSHFDMz6Z2WeuWKW3VnIH+Jl5MK5Kj3yp/dfszSiCtk
+khrT8dwE/YxqFEzySambGp5QNqID3rFU0YgbP5tdPCFHVumTMNa2FJKZ+nMio5Ex4yiwnRHFoVn0puJ/XifF8MrPhEpS5IrNF4WpJBiT6fukLzRnKMeWUKaFvZWwIdWUoQ1pGoK3+PJf0jypehfV87uzSu06j6MIB3AIx+DBJdTgFurQAYKnuAFXh3jPDt
+vzvu8teDkM/vwC87HNw92kI=</latexit>ˆs3
+ˆs0
+wˆs
+0
+wˆs
+1
+wˆs
+2
+M
+tn0PE3rJMUkPCkZ7em9HMPD/hTCrL+jZKC4tLyvl1cra+sbmlrm905JxKghtkpjHouNjSTmLaFMxWknERSHPqdtf3hd+O0HKiSLozs1Sqgb4n7EAkaw0pJn7j16J/eZM8Aqc0KsBn6QyTzPK5ZtWrWGie2FNShSkanvnl9GKShjRShGMpu7aVKDfDQjHCaV5xUkTIa4T7uaRjik0s3GD+ToUCs9FMRCV6TQWP09keFQylHo687i
+SDnrFeJ/XjdVwaWbsShJFY3IZFGQcqRiVKSBekxQovhIE0wE07ciMsACE6UzK0KwZ1+eJ63jmn1eO7s9rdavpnGUYR8O4AhsuIA63EADmkAgh2d4hTfjyXgx3o2PSWvJmM7swh8Ynz8w2ZbO</latexit>
+wˆs
+3
+1
+2
+3
+4
+5
+Figure 5: Computing our anti-aliased loss requires that we smooth and resample a NeRF histogram (s, w) into the same set
+of endpoints as a proposal histogram (ˆs, ˆw), which we outline here. (1) We divide w by the size of each interval in s to yield a
+piecewise constant PDF that integrates to ≤1. (2) We convolve that PDF with a rectangular pulse to obtain a piecewise linear
+PDF. (3) This PDF is integrated to produce a piecewise-quadratic CDF that is queried via piecewise quadratic interpolation
+at each location in ˆs. (4) By taking the difference between adjacent interpolated values we obtain wˆs, which are the NeRF
+histogram weights w resampled into the endpoints of the proposal histogram ˆs. (5) After resampling, we evaluate our loss
+Lprop as an element-wise function of wˆs and ˆw, as they share a common coordinate space.
+Blurring a Step Function
+To design a loss function that
+is smooth with respect to distance along the ray, we must
+first construct a technique for turning a piecewise constant
+step function into a continuous piecewise-linear function.
+Smoothing a discrete 1D signal is trivial, and requires just
+discrete convolution with a box filter (or a Gaussian filter,
+etc.). But this problem becomes difficult when dealing with
+piecewise constant functions whose endpoints are continu-
+ous, as the endpoints of each interval in the step function
+may be at any location. Rasterizing the step function and
+performing convolution is not a viable solution, as this fails
+in the common case of extremely narrow histogram bins.
+A new algorithm is therefore required. Consider a step
+function (x, y) where (xi, xi+1) are the endpoints of inter-
+val i and yi is the value of the step function inside interval
+i. We want to convolve this step function with a rectangu-
+Proposal w
+NeRF w
+Loss
+(a) mip-NeRF 360
+(b) Our Approach
+Figure 6: Here we visualize proposal supervision for a toy
+setting where a narrow NeRF histogram (blue) translates
+along a ray relative to a coarse proposal histogram (orange).
+(a) The loss used by mip-NeRF 360 is piecewise constant,
+but (b) our loss is smooth because we blur NeRF histograms
+into piecewise linear splines (green). Our prefiltered loss
+lets us learn anti-aliased proposal distributions.
+lar pulse with radius r that integrates to 1: [|x| < r]/(2r)
+where [ ] are Iverson brackets. Observe that the convolu-
+tion of a single interval i of a step function with this rect-
+angular pulse is a piecewise linear trapezoid with knots at
+(xi −r, 0), (xi + r, yi), (xi+1 −r, yi), (xi+1 + r, 0), and
+that a piecewise linear spline is the double integral of scaled
+delta functions located at each spline knot [12]. With this,
+and with the fact that summation commutes with integra-
+tion, we can efficiently convolve a step function with a
+rectangular pulse as follows: We turn each endpoint xi of
+the step function into two signed delta functions located
+at xi −r and xi + r with values that are proportional to
+the change between adjacent y values, we interleave (via
+sorting) those delta functions, and we then integrate those
+sorted delta functions twice (see Algorithm 1 of the sup-
+plement for pseudocode). With this, we can construct our
+anti-aliased loss function.
+Anti-Aliased Interlevel Loss
+The proposal supervision
+approach in mip-NeRF 360, which we inherit, requires a
+loss function that takes as input a step function produced
+by the NeRF (s, w) and a similar step function produced
+by the proposal model (ˆs, ˆw). Both of these step functions
+are histograms, where s and ˆs are vectors of endpoint lo-
+cations while w and ˆw are vectors of weights that sum to
+≤1, where wi denote how visible scene content is interval
+i of the step function. Each si is some normalized function
+of true metric distance ti, according to some normalization
+function g(·), which we discuss later. Note that s and ˆs are
+not the same — the endpoints of each histogram are distinct.
+To train a proposal network to bound the scene geom-
+etry predicted by the NeRF without introducing aliasing,
+we require a loss function that can measure the distance
+between (s, w) and (ˆs, ˆw) that is smooth with respect to
+translation along the ray, despite the challenge that the end-
+
+points of both step functions are different. To do this, we
+will blur the NeRF histogram (s, w) using our previously-
+constructed algorithm and then resample that blurred distri-
+bution into the set of intervals of the proposal histogram ˆs
+to produce a new set of histogram weights wˆs. This proce-
+dure is described in Figure 5. After resampling our blurred
+NeRF weights into the space of our proposal histogram, our
+loss function is an element-wise function of wˆs and ˆw:
+  \texts tyle \pr o p
+l
+o
+s \left (
+\
+mathb
+f  { \sdis tance }, \mathbf {w}, \proposal {\mathbf {\sdistance }}, \proposal {\mathbf {w}} \right ) = \sum _{i} \frac {1}{\proposal {w}_i}\operatorname {max}(0, \stopgrad (w_i^{\hat {\mathbf {s}}}) - \proposal {w_i})^2 \,. 
+(5)
+Though this loss resembles mip-NeRF 360’s (a half-
+quadratic chi-squared loss with a stop-gradient), the blur-
+ring and resampling used to generate wˆs prevents aliasing.
+Normalizing Metric Distance
+As in mip-NeRF 360, we
+parameterize metric distance along a ray t ∈[tnear, tfar]
+in terms of normalized distance s ∈[0, 1] (where tnear
+and tfar are manually-defined near and far plane distances).
+Rendering uses metric distance t, but resampling and pro-
+posal supervision use normalized distance s, with some
+function g(·) defining a bijection between the two. The in-
+terlevel loss used in mip-NeRF 360 is invariant to mono-
+tonic transformations of distance, so it is unaffected by the
+choice of g(·). However, the prefiltering in our anti-aliased
+loss removes this invariance, and using mip-NeRF 360’s
+g(·) in our model results in catastrophic failure, so we must
+construct a new normalization. To do this, we construct a
+novel power transformation [5, 29]:
+  \p ow e rl a dd
+e
+r 
+(
+x,  \p o w
+er
+ )
+ 
+= \frac {|\power - 1|}{\power }\left (\!\left (\!\frac {x}{|\power -1|} + 1 \!\right )^{\!\power } - 1 \!\right )\,. 
+(6)
+The slope of this function at the origin is 1, so normal-
+ized distance near the ray origin is proportional to metric
+0
+1
+2
+3
+4
+5
+x
+0
+1
+2
+3
+4
+5
+(x, )
+-
+-4
+-1
+0
+0.6
+0.9
+1
+1.1
+1.4
+2
+4
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Normalized Distance s
+0
+1
+2
+3
+4
+5
+Metric Distance t
+log(t), tnear = 0.0001
+log(t), tnear = 0.001
+log(t), tnear = 0.01
+log(t), tnear = 0.1
+1/t, tnear = 0.001
+1/t, tnear = 0.01
+1/t, tnear = 0.1
+1/t, tnear = 1
+Ours, (2t, -1.5)
+Figure 7: Many NeRF approaches require a function for
+converting metric distance t ∈[0, ∞) into normalized dis-
+tance s ∈[0, 1]. Left: Our power transformation P(x, λ)
+lets us interpolate between common curves such as linear,
+logarithmic, and inverse by modifying λ, while retaining a
+linear-like shape near the origin. Right: This lets us con-
+struct a curve that transitions from linear to inverse/inverse-
+square, and supports scene content close to the camera.
+distance (obviating the need to tune a non-zero near plane
+distance tnear), but far from the origin metric distance be-
+comes curved to resemble log-distance [22] (λ = 0) or
+inverse-distance [3] (λ = −1). This lets us smoothly inter-
+polate between different normalizations, instead of swap-
+ping in different discrete functions. See Figure 7 for a visu-
+alization of P(x, λ) and a comparison of prior normaliza-
+tion approaches to ours, which is g(x) = P(2x, −1.5) — a
+curve that is roughly linear when s ∈[0, 1/2) but is between
+inverse and inverse-square when s ∈[1/2, 1].
+4. Results
+Our model is implemented in JAX [6] and based on the
+mip-NeRF 360 codebase [20], with a reimplementation of
+iNGP’s pyramid of voxel grids and hashes in place of the
+large MLP used by mip-NeRF 360. Our overall model ar-
+chitecture is identical to mip-NeRF 360 except for the anti-
+aliasing adjustments introduced in Sections 2 and 3, as well
+as some additional modifications that we describe here.
+Like mip-NeRF 360, we use two rounds of proposal sam-
+pling with 64 samples each, and then 32 samples in the fi-
+nal NeRF sampling round. Our anti-aliased interlevel loss
+is imposed on both rounds of proposal sampling, with a
+rectangular pulse width of r = 0.03 in the first round and
+r = 0.003 in the second round, and with a loss multiplier
+of 0.01. We use separate proposal iNGPs and MLPs for
+each round of proposal sampling, and our NeRF MLP uses
+a much larger view-dependent branch than is used by iNGP.
+See the supplement for details.
+One small but important modification we make to iNGP
+is imposing a normalized weight decay on the feature codes
+stored in its pyramid of grids and hashes: P
+ℓmean
+ V 2
+ℓ
+
+.
+By penalizing the sum of the mean of squared grid/hash val-
+ues at each pyramid level Vℓwe induce very different behav-
+ior than the naive solution of penalizing the sum of all val-
+ues, as coarse scales are penalized by orders of magnitude
+more than fine scales. This simple trick is extremely ef-
+fective — it improves performance greatly compared to no
+weight decay, and significantly outperforms naive weight
+decay. We use a loss multiplier of 0.1 on this normalized
+weight decay in all experiments unless otherwise stated.
+360 Dataset
+Since our model is an extension of mip-
+NeRF 360, we evaluate on the “360” benchmark presented
+in that paper using the same evaluation procedure [3]. We
+evaluate NeRF [19], mip-NeRF [2], NeRF++ [36], mip-
+NeRF 360, iNGP [21] (using carefully tuned hyperparame-
+ters taken from recent work [32]), and a baseline in which
+we naively combine mip-NeRF 360 and iNGP without any
+of this paper’s contributions. Average error metrics across
+all scenes are shown in Table 2 (see the supplement for per-
+scene metrics) and renderings of these four approaches are
+shown in Figure 1. Our model, mip-NeRF 360, and our
+
+Scale Factor:
+1×
+2×
+4×
+8×
+Error Metric:
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+Time (hrs)
+Instant NGP [21, 32]
+24.36
+0.642
+0.366
+25.23
+0.712
+0.251
+26.84
+0.809
+0.142
+28.42
+0.877
+0.092
+0.15
+mip-NeRF 360 [3, 20]
+27.51
+0.779
+0.254
+29.19
+0.864
+0.136
+30.45
+0.912
+0.077
+30.86
+0.931
+0.058
+21.86
+mip-NeRF 360 + iNGP
+26.46
+0.773
+0.253
+27.92
+0.855
+0.141
+27.67
+0.866
+0.116
+25.58
+0.804
+0.160
+0.31
+Our Model
+28.25
+0.822
+0.198
+30.00
+0.892
+0.099
+31.57
+0.933
+0.056
+32.52
+0.954
+0.037
+0.90
+A) Naive Sampling
+27.93
+0.797
+0.233
+29.70
+0.880
+0.114
+29.24
+0.887
+0.094
+26.53
+0.820
+0.144
+0.53
+B) Naive Supersampling (6×)
+27.48
+0.803
+0.224
+29.03
+0.881
+0.109
+28.42
+0.881
+0.097
+25.97
+0.810
+0.151
+2.54
+C) Jittered
+27.91
+0.797
+0.233
+29.60
+0.879
+0.116
+29.45
+0.893
+0.090
+27.58
+0.855
+0.120
+0.55
+D) Jittered Supersampling (6×)
+27.50
+0.810
+0.212
+28.99
+0.884
+0.105
+28.91
+0.896
+0.086
+27.65
+0.870
+0.109
+3.04
+E) No Multisampling
+28.15
+0.817
+0.208
+29.87
+0.886
+0.105
+31.33
+0.927
+0.061
+32.12
+0.948
+0.043
+0.54
+F) No Downweighting
+28.22
+0.818
+0.205
+29.94
+0.889
+0.102
+31.25
+0.928
+0.060
+31.67
+0.944
+0.046
+0.88
+G) No Appended Scale ω
+28.23
+0.820
+0.200
+29.98
+0.890
+0.101
+31.48
+0.931
+0.057
+32.19
+0.951
+0.041
+0.89
+H) Random Multisampling
+28.09
+0.816
+0.207
+29.75
+0.886
+0.106
+31.18
+0.928
+0.061
+32.03
+0.950
+0.042
+0.95
+I) Unscented Multisampling
+28.27
+0.822
+0.198
+30.03
+0.891
+0.100
+31.57
+0.933
+0.056
+32.46
+0.954
+0.038
+1.11
+J) No New Interlevel Loss
+28.12
+0.824
+0.196
+29.82
+0.892
+0.098
+31.31
+0.932
+0.056
+32.23
+0.953
+0.039
+0.86
+K) No Weight Decay
+27.34
+0.814
+0.203
+28.91
+0.881
+0.109
+30.29
+0.921
+0.067
+31.23
+0.941
+0.050
+0.90
+L) Un-Normalized Weight Decay
+27.99
+0.821
+0.196
+29.65
+0.889
+0.100
+31.10
+0.930
+0.058
+32.09
+0.951
+0.040
+0.91
+M) Small View-Dependent MLP
+27.41
+0.811
+0.207
+28.98
+0.882
+0.109
+30.32
+0.924
+0.065
+31.11
+0.944
+0.047
+0.63
+Table 1: Performance on our multiscale version of the 360 dataset [3], where we train and evaluate on multiscale images,
+as was done in mip-NeRF [2]. Red, orange, and yellow highlights indicate the 1st, 2nd, and 3rd-best performing technique
+for each metric. Our model significantly outperforms our two baselines — especially the iNGP-based one, and especially at
+coarse scales, where our errors are 55%–77% reduced. Rows A–M are ablations of our model, see the text for details.
+“mip-NeRF 360 + iNGP” baseline were all trained on 8
+NVIDIA Tesla V100-SXM2-16GB GPUs. The other base-
+lines were trained on different accelerators (TPUs were used
+for NeRF, mip-NeRF, and NeRF++, and a single NVIDIA
+3090 was used for iNGP) so to enable comparison their run-
+times have been rescaled to approximate performance on
+our hardware. The render time of our model (which is not a
+focus of this work) is 0.9s, while mip-NeRF 360 takes 7.4s
+and our mip-NeRF 360 + iNGP baseline takes 0.2s.
+Our model significantly outperforms mip-NeRF 360 (the
+previous state-of-the-art of this task) on this benchmark: we
+observe 11%, 17%, and 19% reductions in RMSE, DSSIM,
+and LPIPS respectively. Additionally, our model trains 24×
+faster than mip-NeRF 360. Compared to iNGP, our error
+reduction is even more significant: 28%, 42%, and 37% re-
+ductions in RMSE, DSSIM, and LPIPS, though our model
+is ∼6× slower to train than iNGP. Our combined “mip-
+NeRF 360 + iNGP” baseline trains significantly faster than
+mip-NeRF 360 (and is nearly 3× faster to train than our
+model) and produces error rates comparable to mip-NeRF
+360’s and better than iNGP’s. Our model’s improvement in
+image quality over these baselines is clear upon visual in-
+spection, as shown in Figure 1 and the supplemental video.
+Multiscale 360 Dataset
+Though the 360 dataset contains
+challenging scene content, it does not measure rendering
+quality as a function of scale — because this dataset was
+captured by orbiting a camera around a central object at a
+roughly constant distance, learned models need not general-
+ize well across different image resolutions or different dis-
+tances from the central object. We therefore use a more
+challenging evaluation procedure, similar to the multiscale
+Blender dataset used by mip-NeRF [2]: we turn each image
+into a set of four images that have been bicubically down-
+sampled by scale factors [1, 2, 4, 8] where the downsampled
+images act as a proxy for additional training/test views in
+which the camera has been zoomed out from the center of
+the scene. During training we multiply the data term by the
+scale factor of each ray, and at test time we evaluate each
+scale separately. This significantly increases the difficulty
+of reconstruction by requiring the learned model to general-
+ize across scales, and it causes aliasing artifacts to be highly
+salient, especially at coarse scales.
+In Table 1 we evaluate our model against iNGP, mip-
+NeRF 360, our mip-NeRF 360 + iNGP baseline, and many
+ablations. Though mip-NeRF 360 performs reasonably (as
+it can reason about scale) our model still reduces RMSE
+by 8% at the finest scale and 17% at the coarsest scale,
+while being 24× faster. The mip-NeRF 360 + iNGP base-
+line, which has no mechanism for anti-aliasing or reasoning
+about scale, performs poorly: our RMSEs are 19% lower
+at the finest scale and 55% lower at the coarsest scale, and
+both DSSIM and LPIPS at the coarsest scale are 77% lower.
+This improvement can be seen in Figure 8. Our mip-NeRF
+PSNR ↑
+SSIM ↑
+LPIPS ↓Time (hrs)
+NeRF [19, 10]
+23.85
+0.605
+0.451
+12.65
+mip-NeRF [2]
+24.04
+0.616
+0.441
+9.64
+NeRF++ [36]
+25.11
+0.676
+0.375
+28.73
+Instant NGP [21, 32]
+25.68
+0.705
+0.302
+0.15
+mip-NeRF 360 [3, 20]
+27.57
+0.793
+0.234
+21.69
+mip-NeRF 360 + iNGP
+26.43
+0.786
+0.225
+0.30
+Our Model
+28.54
+0.828
+0.189
+0.89
+Table 2: Performance on the 360 dataset [3]. Runtimes
+shown in gray are approximate, see text for details.
+
+(a) Ground Truth
+(b) mip-NeRF 360
+(c) Our Model
+(d) mip360 + iNGP
+Figure 8: A test-set view from our multiscale benchmark at
+(a) the four different scales that we train and test on. (b)
+Mip-NeRF 360 behaves reasonably across scales but is out-
+performed by (c) our model, especially on thin structures.
+(d) Our iNGP-based baseline produces extremely aliased
+renderings, especially at coarse scales. PSNRs are inset.
+360 + iNGP baseline generally outperforms iNGP (except
+at the coarsest scale), as we might expect from Table 2.
+In Table 1 we also include an ablation study of our
+model.
+(A) Using “naive” sampling with our multisam-
+pling and downweighting disabled (which corresponds to
+the approach used in NeRF and iNGP) significantly de-
+grades quality, and (B) supersampling [8] by a 6× fac-
+tor to match our multisample budget does not improve ac-
+curacy.
+(C, D) Randomly jittering these naive samples
+within the cone being cast improves performance at coarse
+scales, but only slightly. Individually disabling (E) multi-
+sampling and (F) downweighting lets us measure the im-
+pact of each component; they both contribute evenly. (G)
+Not using ω as a feature hurts performance slightly. Alter-
+native multisampling approaches like (H) sampling 6 ran-
+dom points from each mip-NeRF Gaussian or (G) using 7
+unscented transform control points from each Gaussian [14]
+as multisamples are competitive alternatives to our hexag-
+onal pattern, but have slightly worse speeds and/or accura-
+cies. (J) Disabling our anti-aliased interlevel loss has little
+effect on our single-image metrics, but causes z-aliasing ar-
+tifacts in our video results. (K) Disabling our normalized
+weight decay reduces accuracy significantly, and (L) using
+non-normalized weight decay performs poorly. (M) Using
+iNGP’s small view-dependent MLP decreases accuracy.
+Sample Efficiency
+Ablating our anti-aliased interlevel
+loss in our multiscale benchmark does not degrade quality
+significantly because mip-NeRF 360 (and our model, for the
+sake of fair comparison) uses a large number of samples1
+along each ray, which reduces z-aliasing. To reveal mip-
+NeRF 360’s vulnerability to z-aliasing, in Figure 9 we plot
+1Note that here we use “samples” to refer to sampled sub-frusta along
+the ray, not the sampled multisamples within each sub-frustum.
+Figure 9: Our anti-aliased interlevel loss function (red) lets
+performance degrades gracefully as the number of NeRF
+samples is reduced from 32 to 2. Mip-NeRF 360’s loss
+(blue) results in catastrophic failure if fewer than 16 sam-
+ples are used. Here we plot the mean and IQR of test-set
+PSNR. NeRF sample counts and PSNRs are inset.
+test-set PSNR for our multiscale benchmark as we reduce
+the number of samples along the ray (both for the NeRF and
+the proposal network) by factors of 2, while also doubling
+r and the number of training iterations. Though our anti-
+aliased loss only slightly outperforms mip-NeRF 360’s loss
+when the number of samples is large, as the sample count
+decreases the baseline loss fails catastrophically while our
+loss degrades gracefully.
+That said, the most egregious z-aliasing artifact of miss-
+ing scene content (shown in Figure 4) is hard to measure
+in small benchmarks of still images, as scene content only
+disappears at certain distances that the test set may not
+probe. See the supplemental video for demonstrations of
+z-aliasing, and for renderings from our model where that
+aliasing has been fixed.
+5. Conclusion
+We have presented Zip-NeRF, a model that integrates
+the progress made in the formerly divergent areas of scale-
+aware anti-aliased NeRFs and fast grid-based NeRF train-
+ing. By leveraging ideas about multisampling and prefilter-
+ing, our model is able to achieve error rates that are 8% –
+77% lower than prior techniques, while also training 24×
+faster than mip-NeRF 360 (the previous state-of-the-art on
+our benchmarks). We hope that the tools and analysis pre-
+sented here concerning aliasing (both the spatial aliasing of
+NeRF’s learned mapping from spatial coordinate to color
+and density, and z-aliasing of the loss function used during
+online distillation along each ray) enable further progress
+towards improving the quality, speed, and sample-efficiency
+of NeRF-like inverse rendering techniques.
+
+References
+[1] Jonathan T. Barron. A general and adaptive robust loss func-
+tion. CVPR, 2019.
+[2] Jonathan T. Barron, Ben Mildenhall, Matthew Tancik, Peter
+Hedman, Ricardo Martin-Brualla, and Pratul P. Srinivasan.
+Mip-NeRF: A Multiscale Representation for Anti-Aliasing
+Neural Radiance Fields. ICCV, 2021.
+[3] Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P.
+Srinivasan, and Peter Hedman. Mip-NeRF 360: Unbounded
+anti-aliased neural radiance fields. CVPR, 2022.
+[4] Piotr Bojanowski, Armand Joulin, David Lopez-Pas, and
+Arthur Szlam. Optimizing the latent space of generative net-
+works. ICML, 2018.
+[5] George E. P. Box and David R. Cox. An analysis of trans-
+formations. Journal of the Royal Statistical Society: Series
+B (Methodological), 1964.
+[6] James Bradbury, Roy Frostig, Peter Hawkins, Matthew J.
+Johnson, Chris Leary, Dougal Maclaurin, George Necula,
+Adam Paszke, Jake VanderPlas, Skye Wanderman-Milne,
+and Qiao Zhang.
+JAX: composable transformations of
+Python+NumPy programs, 2018.
+[7] Anpei Chen, Zexiang Xu, Andreas Geiger, Jingyi Yu, and
+Hao Su. TensoRF: Tensorial radiance fields. ECCV, 2022.
+[8] Robert L Cook. Stochastic sampling in computer graphics.
+TOG, 1986.
+[9] Franklin C. Crow. Summed-area tables for texture mapping.
+SIGGRAPH, 1984.
+[10] Boyang Deng, Jonathan T. Barron, and Pratul P. Srini-
+vasan. JaxNeRF: an efficient JAX implementation of NeRF,
+2020.
+http://github.com/google-research/
+google-research/tree/master/jaxnerf.
+[11] Ned Greene and Paul S. Heckbert. Creating raster omnimax
+images from multiple perspective views using the elliptical
+weighted average filter. IEEE Computer Graphics and Ap-
+plications, 1986.
+[12] Paul S Heckbert.
+Filtering by repeated integration.
+SIG-
+GRAPH, 1986.
+[13] Xun Huang and Serge Belongie. Arbitrary style transfer in
+real-time with adaptive instance normalization. ICCV, 2017.
+[14] Simon J Julier and Jeffrey K Uhlmann. Unscented filtering
+and nonlinear estimation. Proceedings of the IEEE, 2004.
+[15] Animesh Karnewar, Tobias Ritschel, Oliver Wang, and Niloy
+Mitra. ReLU fields: The little non-linearity that could. SIG-
+GRAPH, 2022.
+[16] Diederik P. Kingma and Jimmy Ba. Adam: A method for
+stochastic optimization. ICLR, 2015.
+[17] Ricardo Martin-Brualla, Noha Radwan, Mehdi S. M. Sajjadi,
+Jonathan T. Barron, Alexey Dosovitskiy, and Daniel Duck-
+worth. NeRF in the Wild: Neural Radiance Fields for Un-
+constrained Photo Collections. CVPR, 2021.
+[18] Ben Mildenhall, Peter Hedman, Ricardo Martin-Brualla,
+Pratul P. Srinivasan, and Jonathan T. Barron. NeRF in the
+dark: High dynamic range view synthesis from noisy raw
+images. CVPR, 2022.
+[19] Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik,
+Jonathan T. Barron, Ravi Ramamoorthi, and Ren Ng. NeRF:
+Representing scenes as neural radiance fields for view syn-
+thesis. ECCV, 2020.
+[20] Ben Mildenhall, Dor Verbin, Pratul P. Srinivasan, Peter
+Hedman, Ricardo Martin-Brualla, and Jonathan T. Barron.
+MultiNeRF: A Code Release for Mip-NeRF 360, Ref-NeRF,
+and RawNeRF, 2022.
+[21] Thomas M¨uller, Alex Evans, Christoph Schied, and Alexan-
+der Keller. Instant neural graphics primitives with a multires-
+olution hash encoding. SIGGRAPH, 2022.
+[22] Thomas Neff, Pascal Stadlbauer, Mathias Parger, Andreas
+Kurz, Joerg H. Mueller, Chakravarty R. Alla Chaitanya, An-
+ton S. Kaplanyan, and Markus Steinberger. DONeRF: To-
+wards Real-Time Rendering of Compact Neural Radiance
+Fields using Depth Oracle Networks. Computer Graphics
+Forum, 2021.
+[23] Taesung Park, Ming-Yu Liu, Ting-Chun Wang, and Jun-Yan
+Zhu. Semantic image synthesis with spatially-adaptive nor-
+malization. CVPR, 2019.
+[24] Ethan Perez, Florian Strub, Harm de Vries, Vincent Du-
+moulin, and Aaron C. Courville. Film: Visual reasoning with
+a general conditioning layer. AAAI, 2018.
+[25] Ben Poole, Ajay Jain, Jonathan T. Barron, and Ben Milden-
+hall. DreamFusion: Text-to-3D using 2D Diffusion. ICLR,
+2023.
+[26] Peter Shirley. Discrepancy as a quality measure for sample
+distributions. Eurographics, 1991.
+[27] Cheng Sun, Min Sun, and Hwann-Tzong Chen. Direct voxel
+grid optimization: Super-fast convergence for radiance fields
+reconstruction. CVPR, 2022.
+[28] Matthew Tancik, Pratul P. Srinivasan, Ben Mildenhall, Sara
+Fridovich-Keil, Nithin Raghavan, Utkarsh Singhal, Ravi Ra-
+mamoorthi, Jonathan T. Barron, and Ren Ng. Fourier fea-
+tures let networks learn high frequency functions in low di-
+mensional domains. NeurIPS, 2020.
+[29] John W. Tukey. Exploratory Data Analysis. 1977.
+[30] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszko-
+reit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia
+Polosukhin. Attention is all you need. NeurIPS, 2017.
+[31] Lance Williams. Pyramidal parametrics. Computer Graph-
+ics, 1983.
+[32] Lior Yariv, Peter Hedman, Christian Reiser, Dor Verbin,
+Pratul P. Srinivasan, Richard Szeliski, Jonathan T. Barron,
+and Ben Mildenhall. BakedSDF: Meshing neural SDFs for
+real-time view synthesis. SIGGRAPH, 2023.
+[33] Lin Yen-Chen, Pete Florence, Jonathan T. Barron, Tsung-
+Yi Lin, Alberto Rodriguez, and Phillip Isola.
+NeRF-
+Supervision: Learning dense object descriptors from neural
+radiance fields. ICRA, 2022.
+[34] In-Kwon Yeo and Richard A Johnson.
+A new family of
+power transformations to improve normality or symmetry.
+Biometrika, 2000.
+[35] Alex Yu, Sara Fridovich-Keil, Matthew Tancik, Qinhong
+Chen, Benjamin Recht, and Angjoo Kanazawa. Plenoxels:
+Radiance fields without neural networks. CVPR, 2022.
+[36] Kai Zhang, Gernot Riegler, Noah Snavely, and Vladlen
+Koltun. NeRF++: Analyzing and Improving Neural Radi-
+ance Fields. arXiv:2010.07492, 2020.

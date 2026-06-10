@@ -1,0 +1,939 @@
+GS-ROR2: Bidirectional-guided 3DGS and SDF for Reflective Object
+Relighting and Reconstruction
+ZUO-LIANG ZHU, VCIP, College of Computer Science, Nankai University, China
+BEIBEI WANG†, School of Intelligence Science and Technology, Nanjing University, China
+JIAN YANG†, VCIP, College of Computer Science, Nankai University, China
+Potion
+Tbell
+Helmet
+Toaster
+Qilin
+Bell
+Horse
+Teapot
+Car
+Toaster
+Relighting
+Extracted Mesh
+Fig. 1. We present bidirectional-guided 3DGS and SDF for Reflective Object Relighting and Reconstruction (GS-ROR2) from multi-view images. We show
+relighting results with reflective highlights (left) and their normal (right) in the 1𝑠𝑡row, including Potion, Tbell from NeRO [Liu et al. 2023], Helmet, Toaster
+from Ref-NeRF [Verbin et al. 2022], and Qilin from NeILF++ [Zhang et al. 2023], where Qilin is a real scene. Besides, we show extracted meshes in the 2𝑛𝑑
+row, including Bell, Horse, Teapot from NeRO and Car, Toaster from Ref-NeRF. Our method demonstrates a robust geometry reconstruction for reflective
+surfaces and faithful material decomposition, leading to photo-realistic reflective object relighting and high-fidelity geometry reconstruction.
+3D Gaussian Splatting (3DGS) has shown a powerful capability for novel
+view synthesis due to its detailed expressive ability and highly efficient
+rendering speed. Unfortunately, creating relightable 3D assets and recon-
+structing faithful geometry with 3DGS is still problematic, particularly for
+reflective objects, as its discontinuous representation raises difficulties in
+constraining geometries. In contrary, volumetric signed distance field (SDF)
+†Corresponding author.
+Authors’ addresses: Zuo-Liang Zhu, VCIP, College of Computer Science, Nankai Uni-
+versity, China, nkuzhuzl@gmail.com; Beibei Wang†, School of Intelligence Science and
+Technology, Nanjing University, China, beibei.wang@nju.edu.cn; Jian Yang†, VCIP,
+College of Computer Science, Nankai University, China, csjyang@nankai.edu.cn.
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for components of this work owned by others than the
+author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+republish, to post on servers or to redistribute to lists, requires prior specific permission
+and/or a fee. Request permissions from permissions@acm.org.
+© 2025 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+0730-0301/2025/1-ART1 $15.00
+https://doi.org/10.1145/3759248
+methods provide robust geometry reconstruction, while the expensive ray
+marching hinders its real-time application and slows the training. Besides,
+these methods struggle to capture sharp geometric details. To this end, we
+propose to guide 3DGS and SDF bidirectionally in a complementary manner,
+including an SDF-aided Gaussian splatting for efficient optimization of the re-
+lighting model and a GS-guided SDF enhancement for high-quality geometry
+reconstruction. At the core of our SDF-aided Gaussian splatting is the mutual
+supervision of the depth and normal between blended Gaussians and SDF,
+which avoids the expensive volume rendering of SDF. Thanks to this mutual
+supervision, the learned blended Gaussians are well-constrained with a mini-
+mal time cost. As the Gaussians are rendered in a deferred shading mode, the
+alpha-blended Gaussians are smooth, while individual Gaussians may still
+be outliers, yielding floater artifacts. Therefore, we introduce an SDF-aware
+pruning strategy to remove Gaussian outliers located distant from the sur-
+face defined by SDF, avoiding the floater issue. This way, our GS framework
+provides reasonable normal and achieves realistic relighting, while the mesh
+of truncated SDF (TSDF) fusion from depth is still problematic. Therefore, we
+design a GS-guided SDF refinement, which utilizes the blended normal from
+Gaussians to finetune SDF. Equipped with the efficient enhancement, our
+method can further provide high-quality meshes for reflective objects at the
+ACM Trans. Graph., Vol. 1, No. 1, Article 1. Publication date: January 2025.
+arXiv:2406.18544v4  [cs.CV]  2 Jun 2026
+
+1:2
+•
+Zuo-Liang Zhu, Beibei Wang†, and Jian Yang†
+cost of 17% extra training time. Consequently, our method outperforms the
+existing Gaussian-based inverse rendering methods in terms of relighting
+and mesh quality. Our method also exhibits competitive relighting/mesh
+quality compared to NeRF-based methods with at most 25%/33% of training
+time and allows rendering at 200+ frames per second on an RTX4090. Our
+code is available at https://github.com/NK-CS-ZZL/GS-ROR.
+CCS Concepts: • Computing methodologies →Rendering.
+Additional Key Words and Phrases: neural rendering, Gaussian splatting,
+relighting
+ACM Reference Format:
+Zuo-Liang Zhu, Beibei Wang†, and Jian Yang†. 2025. GS-ROR2: Bidirectional-
+guided 3DGS and SDF for Reflective Object Relighting and Reconstruction.
+ACM Trans. Graph. 1, 1, Article 1 (January 2025), 30 pages. https://doi.org/
+10.1145/3759248
+1
+INTRODUCTION
+Creating relightable 3D assets from multi-view images has been a
+long-standing and challenging task in computer graphics and vision,
+as the decomposition of lighting, materials, and geometries is highly
+ill-posed. Particularly, the decomposition becomes more difficult for
+reflective objects, as their appearances are highly view-dependent,
+and a minor error on the surface leads to a significant difference.
+Existing approaches [Li et al. 2024; Liu et al. 2023] have shown
+impressive relighting quality for reflective objects by leveraging
+the neural radiance field (NeRF) and the signed distance field (SDF).
+Unfortunately, these methods require a long training and rendering
+time. They also struggle to capture sharp geometry details. In this
+paper, we aim at reflective object relighting and reconstruction given
+multi-view images, achieving high-quality relighting and detailed
+reconstruction with short training/rendering time costs. In Figure 1,
+we present some representative results from our method, including
+the relighting results and mesh visualizations.
+Most recently, Kerbl et al. [2023] proposed 3D Gaussian Splatting
+(3DGS), boosting the rendering speed significantly and achieving
+more detailed appearance modeling. A concurrent work [Ye et al.
+2024] has introduced deferred Gaussian splatting for reflective ob-
+jects, improving the novel view synthesis (NVS) quality. Despite
+the impressive NVS quality, relighting and geometry reconstruction
+with 3DGS become problematic due to the Gaussians’ discontinuity
+and high flexibility, especially for reflective objects. Extensive efforts
+have been made to improve the relighting quality by regularizing
+the geometry in terms of the normal and depth [Gao et al. 2024;
+Jiang et al. 2024; Liang et al. 2024]. However, they still suffer from
+erroneous surfaces and floater artifacts for reflective objects.
+Some prior works (e.g., NeuSG [Chen et al. 2023], GSDF [Yu et al.
+2024a]) couple SDF with GS for surface reconstruction. While their
+work has shown impressive reconstructed quality for diffuse objects,
+they require extensive training time, due to the rendering of SDF
+and the existence of two representations. Our method focuses on
+both relighting and reconstruction, thus raising more difficulties.
+Specifically, evaluating the rendering equation increases the training
+time. These issues become more severe when modeling reflective ob-
+jects, as the specular highlight is sensitive to the reflective direction,
+which needs more Gaussians to provide detailed normal. Therefore,
+introducing SDF into GS for our task is not straightforward, which
+raises the demand for a more efficient framework.
+In this paper, we propose a bidirectional guidance of GS and
+SDF in a complementary manner, including an SDF-aided Gaussian
+splatting for efficient optimization of the relighting model and a
+GS-guided SDF enhancement for high-quality geometry reconstruc-
+tion. Specifically, the SDF-aided Gaussian splatting utilizes the SDF
+to constrain the Gaussians with minimal computational increase.
+For this, we propose to supervise the deferred Gaussians and a
+low-resolution SDF mutually in our framework, so-called mutual su-
+pervision, which allows constraining deferred Gaussians with SDFs
+while avoiding SDF rendering. This way, the learned deferred Gaus-
+sians are better constrained. However, we still notice that Gaussians
+have floater artifacts occasionally, as the deferred Gaussians (with
+alpha blending) rather than individual Gaussians are constrained
+by SDF. Therefore, we introduce an SDF-aware pruning strategy to
+remove Gaussian outliers to avoid this floater issue. Therefore, our
+method provides reasonable shading normal and enables realistic
+relighting for reflective objects in the GS framework. Due to the
+inconsistency between the normal and depth from blended Gaus-
+sians, the meshes of TSDF fusion from depth are still problematic.
+Meanwhile, SDF is underfitted and only learns the coarse structure
+of geometry. To solve this, we further design a GS-guided SDF en-
+hancement, which utilizes the learned normal from fixed Gaussians
+to finetune the upsampled SDF. This way, we avoid optimizing a
+full-resolution SDF and GS jointly, leading to an efficient refinement.
+SDF benefits from the detailed expressive ability of GS and learns
+more fine-grained geometry details. Equipped with this design, our
+method achieves high-quality geometry reconstruction for reflec-
+tive objects from SDF with only 17% extra overhead of training time.
+Consequently, our method outperforms the existing Gaussian-based
+inverse rendering methods in terms of relighting and mesh quality.
+Meanwhile, it exhibits competitive relighting/mesh quality com-
+pared to NeRF-based methods with at most 25%/33% of training
+time. It also allows real-time rendering with 200+ frames per second
+on an RTX4090. To summarize, our main contributions include
+• a GS-ROR2 framework for reflective objects, achieving high-
+quality relighting and geometry reconstruction while main-
+taining short training time and allowing real-time rendering,
+• an SDF-aided GS, including a mutual supervision between
+deferred Gaussians and the SDF with an SDF-aware Gaussian
+pruning strategy, producing robust geometry and avoiding
+local minima with minimal computational increase, and
+• a GS-guided SDF enhancement via blended normal from Gaus-
+sians, enabling high-quality geometry reconstruction.
+2
+RELATED WORK
+2.1
+Neural representations for multi-view stereo
+Since the presence of NeRF [Mildenhall et al. 2020], numerous neu-
+ral implicit representations [Barron et al. 2022; Chen et al. 2022;
+Fridovich-Keil et al. 2022; Müller et al. 2022] have been proposed and
+gained remarkable progress in the field of multi-view stereo. These
+NeRF-based models adopt Multi-Layer Perceptrons (MLPs) [Bar-
+ron et al. 2021, 2022; Verbin et al. 2022] or grid-like representa-
+tions [Chen et al. 2022; Fridovich-Keil et al. 2022; Müller et al. 2022]
+ACM Trans. Graph., Vol. 1, No. 1, Article 1. Publication date: January 2025.
+
+GS-ROR2: Bidirectional-guided 3DGS and SDF for Reflective Object Relighting and Reconstruction
+•
+1:3
+to represent geometry and view-dependent appearance, optimized
+via volume rendering. Subsequently, NeuS [Wang et al. 2021] links
+the SDF with the density in NeRF and enables the optimization of
+surfaces with volume rendering. With extra regularization, these
+SDF-based models [Li et al. 2023; Rosu and Behnke 2023; Wang et al.
+2023] achieve detailed surface reconstruction from RGB images.
+Owing to carefully designed architectures and specific optimization,
+some methods [Fridovich-Keil et al. 2022; Müller et al. 2022] enable
+fast training and real-time radiance field rendering.
+3DGS [2023] sheds light on the multi-view stereo in the rasteriza-
+tion framework, providing impressive real-time NVS results. 3DGS
+utilizes the discrete explicit 3D Gaussian primitive and projects
+these primitives onto the image plane to obtain the pixel color via
+alpha blending, which avoids the consuming sampling operation.
+However, 3DGS imposes no geometry constraint while optimiz-
+ing, leading to noisy depth and normal, which hinders the usage
+of 3DGS in many downstream tasks. To resolve this issue, existing
+methods construct different constraints on Gaussians by introducing
+2D Gaussian [Huang et al. 2024] or Gaussian Surfel [Dai et al. 2024].
+SuGaR [Guédon and Lepetit 2024] extracts meshes from the Gaus-
+sians and binds the flattened Gaussians to the surface to optimize
+further. These new primitives and regularization could improve the
+geometry quality, potentially benefiting the relighting task.
+Several previous works introduce SDF into 3DGS. NeuSG intro-
+duces SDF into 3DGS to improve the details of surface reconstruction
+by optimizing NeuS and 3DGS jointly. Despite the high quality of the
+reconstructed surface, the training time is tens of times longer than
+3DGS. GSDF utilizes the depth from Gaussian to guide sampling for
+SDF, but they still need to render color in the SDF branch, leading
+to higher efficiency. While our method also incorporates the SDF
+and Gaussians, the key difference is that it drops SDF rendering,
+improving the geometry quality with a low time cost.
+2.2
+Inverse rendering
+Inverse rendering aims to decompose geometry, material, and light
+from multi-view RGB images. Most existing methods adopt the
+geometry formulation from NeRF in either density or SDF man-
+ner, namely NeRF-based method. In terms of material modeling,
+most methods utilize the Disney Principled BRDF model [McAuley
+et al. 2013], while NeRFactor [Zhang et al. 2021b] pretrains a BRDF
+MLP with a measured BRDF dataset. Considering the light mod-
+eling, early works [Bi et al. 2020; Boss et al. 2021a,b; Zhang et al.
+2022a, 2021a] consider direct light only, and recent works [Jin et al.
+2023; Srinivasan et al. 2021; Sun et al. 2023; Yang et al. 2023; Zhang
+et al. 2023, 2022b] model indirect lighting and visibility, leading to
+a higher-quality decomposition. NeRF Emitter [Ling et al. 2024]
+incorporates NeRF as a non-distant emitter and uses importance
+sampling of NeRF to reduce rendering variance. Neural-PBIR [Sun
+et al. 2023] introduces the differentiable path tracing to model com-
+plex inter-reflection. However, these NeRF-based methods suffer
+from slow rendering speed.
+More recently, Gaussian-based inverse rendering methods have
+begun to emerge. These methods regularize Gaussians to obtain
+better geometry in various ways. GShader [Jiang et al. 2024] and
+GIR [Shi et al. 2025] link the shortest axis of Gaussian with the
+normal. The GShader, R3DG [Gao et al. 2024], and GS-IR [Liang
+et al. 2024] supervise the Gaussian normal with the depth normal.
+To model the indirect illumination, R3DG, GIR, and GS-IR compute
+the visibility via one-step ray tracing and represent the indirect
+illumination with SH coefficients. These early Gaussian-based re-
+lighting methods cannot relight reflective objects, while our method
+enables such scenarios.
+2.3
+Reflective objects NVS and relighting
+As a special and challenging case, NVS and relighting of reflective
+objects have drawn much attention. Ref-NeRF [Verbin et al. 2022] re-
+places the outgoing radiance with the incoming radiance and models
+the shading explicitly with an integrated direction encoding (IDE) to
+improve the quality of reflective materials. MS-NeRF [Yin et al. 2023]
+designs a multi-space neural representation to model the reflection
+of mirror-like planes. Spec-NeRF [Ma et al. 2024] introduces a learn-
+able Gaussian directional encoding to better model view-dependent
+effects. Spec-Gaussian [Yang et al. 2024] uses anisotropic spheri-
+cal Gaussian to model view-dependent highlights. 3DGS-DR [Ye
+et al. 2024], as a concurrent work, introduces deferred shading into
+3DGS. We also utilize a deferred framework, but for relighting, and
+together with other key components.
+Another group of methods enables relighting for reflective mate-
+rials. NeRO [Liu et al. 2023] proposes a novel light representation
+consisting of two MLPs for direct and indirect light, respectively.
+With explicit incorporation of the rendering equation, NeRO recon-
+structs reflective objects of high quality. Wang et al. [2024] represent
+the indirect light with a 5-dimensional function, so-called the 5D
+neural plenoptic function. Thanks to material-aware integral po-
+sitional encoding, their method reduces the light sample per pixel
+during training and provides more accurate material decomposition.
+TensoSDF [Li et al. 2024] designs roughness-aware incorporation
+between the radiance and reflectance field for robust geometry re-
+construction and proposes a novel tensorial representation with
+SDF, enabling fast SDF query. Although their representation is faster
+than the original SDF, it still needs hours of training time and cannot
+achieve real-time rendering. Recently some Gaussian-based meth-
+ods enable reflective object relighting with the help of pretrained
+models. DeferredGS [Wu et al. 2025] utilizes the idea of deferred
+shading to improve the quality of the reflective-object relighting
+in the Gaussian framework. However, their method needs to distill
+reasonable geometry from a pretrained SDF, taking more than 3
+hours on an RTX 4090 and thus losing the efficiency in training.
+GlossyGS [Lai et al. 2025] introduces the segmentation prior for a
+reasonable material estimation, while the segmentation model (i.e.,
+DINOv2 [Oquab et al. 2024]) needs more than 3 days on 4 RTX A100
+to finetune with custom data. Our method takes a further step in the
+reflective object relighting with 3D Gaussians and provides high-
+quality relighting results without any pretrained model, keeping
+highly efficient training and rendering. Furthermore, our method
+can provide high-quality mesh with efficient finetuning, while the
+existing Gaussian-based methods fail to provide high-quality meshes
+for reflective objects.
+ACM Trans. Graph., Vol. 1, No. 1, Article 1. Publication date: January 2025.
+
+1:4
+•
+Zuo-Liang Zhu, Beibei Wang†, and Jian Yang†
+w/o SDF Priors
+w/ SDF Priors
+Fig. 2. The geometry from Gaussian is under-constrained and thus erro-
+neous, while it is much better after utilizing the priors from the SDF.
+3
+PRELIMINARIES AND MOTIVATION
+In this section, we briefly review two ways for 3D scene representa-
+tions and then discuss our motivation.
+3D Gaussian Splatting. 3DGS represents a scene with a set of 3D
+Gaussians whose distribution is defined as
+𝐺(𝑥) = 𝑒−1
+2 (𝑥−𝜇)𝑇Σ−1 (𝑥−𝜇),
+(1)
+where 𝑥is a position in the scene, 𝜇is the mean of the Gaussian,
+and Σ denotes the covariance matrix of the 3D Gaussian, which
+is factorized into a scaling matrix 𝑆and a rotation matrix 𝑅as
+Σ = 𝑅𝑆𝑆𝑇𝑅𝑇. To render an image, 3DGS projects the 3D Gaussians
+onto the image plane and employs alpha blending on the sorted 2D
+Gaussians as
+𝐶=
+𝑛
+∑︁
+𝑖=0
+𝑐𝑖𝛼𝑖
+𝑖−1
+Ö
+𝑗=1
+(1 −𝛼𝑗),
+(2)
+where𝑐𝑖is the color of each Gaussian, and 𝛼𝑖is given by evaluating a
+projected 2D Gaussian with covariance Σ′ multiplied with a learned
+per-point opacity.
+TensoSDF. An SDF expresses a scene by encoding the distance
+from the surface of an object, which can be expressed implicitly by
+an MLP [Wang et al. 2021] or in a hybrid way by combining explicit
+grids with a tiny MLP [Li et al. 2024], which allows more efficient
+training and rendering. Depth and normal are two significant at-
+tributes of geometry. In SDF, the point-wise depth 𝐷𝑖is defined
+as the distance from the camera to the sample, and the point-wise
+normal n𝑖is the gradient of SDF ∇𝑥w.r.t. position 𝑥[Zhang et al.
+2021a]. Given 𝑛points along the ray 𝑝𝑖= o + 𝑡v where o is the
+camera origin and v is the view direction, we can aggregate these
+point-wise attributes to obtain the attributes (i.e., depth, normal) of
+the hit point of the surface as:
+𝐷sdf =
+𝑛
+∑︁
+𝑖=0
+𝑤𝑖𝐷𝑖, nsdf =
+𝑛
+∑︁
+𝑖=0
+𝑤𝑖n𝑖
+(3)
+where 𝑤𝑖is the weight of the 𝑖-th point derived from the SDF value.
+SDF and NeRF can be unified by NeuS and VolSDF [Wang et al.
+2021; Yariv et al. 2021], which maps an SDF value to a density
+distribution. The distribution in NeuS is defined as:
+𝜙𝑠(𝑠) = 𝛾𝑒−𝛾𝑠/(1 + 𝑒−𝛾𝑠)2,
+(4)
+where 𝑠is the SDF value and 𝛾is the inverse of standard deviation.
+Note that 𝛾is a trainable parameter, and 1/𝛾approaches zero as the
+network training converges.
+Among the SDF-based methods, TensoSDF utilizes a tensorial
+representation for SDF, consisting of a tensorial encoder and MLP
+decoder, which is formulated as follows:
+𝑉𝑝= 𝑣𝑋
+𝑘◦𝑀𝑌𝑍
+𝑘
+⊕𝑣𝑌
+𝑘◦𝑀𝑋𝑍
+𝑘
+⊕𝑣𝑍
+𝑘◦𝑀𝑋𝑌
+𝑘
+,𝑠= Θ(𝑉𝑝, 𝑝),
+(5)
+where 𝑣𝑚
+𝑘and 𝑀e
+𝑚
+𝑘represent the 𝑘-th vector and matrix factors of
+their corresponding spatial axes 𝑚, and e
+𝑚denotes the two axes
+orthogonal to 𝑚e.g., e𝑋= 𝑌𝑍. ◦and ⊕represent the element-wise
+multiplication and concatenation operations. 𝑉𝑝is the latent vector
+from the tensorial encoder and then is decoded with the position 𝑝
+by a tiny MLP Θ to get the SDF value 𝑠. The TensoSDF backbone
+enables faster convergence speed and low-cost SDF queries. Besides,
+the capacity of TensoSDF can be modulated efficiently through the
+interpolation of the tensorial grid.
+Motivation. The above two representations can both express a
+3D scene, where the Gaussian representation is explicit and discon-
+tinuous, and the SDF is implicit (or hybrid) and continuous. These
+two representations lead to different rendering methods: splatting
+or rasterization for Gaussians and sphere tracing for SDF. While the
+Gaussian representation significantly boosts the rendering speed to
+a real-time level, it has difficulties constraining geometries, leading
+to inferior geometries, as shown in Figure 2. A straightforward idea
+is to incorporate these two representations by leveraging the SDF as
+a prior. However, rendering SDF is time-consuming, which hinders
+the benefits of 3DGS. Therefore, the essential problem is an elegant
+incorporation between the Gaussians and the SDF.
+4
+METHOD
+This section presents our bidirectional-guided GS and SDF for re-
+flective object relighting and reconstruction, named GS-ROR2. First,
+we present an SDF-aided GS for relighting, including a deferred
+GS pipeline (Section 4.1), an SDF prior of mutual supervision for
+geometry regularization (Section 4.2), and an SDF-aware pruning
+to refine the Gaussian distribution (Section 4.3). Finally, we present
+a GS-guided SDF enhancement for high-quality geometry recon-
+struction (Section 4.4). In Figure 3, we show a brief overview of our
+method.
+4.1
+Deferred Gaussian splatting for relighting
+Starting from GS-IR [Liang et al. 2024], we first construct a for-
+ward Gaussian splatting baseline for relighting, using the Disney
+Principled BDRF model [McAuley et al. 2013] and environment
+map to model the material and light. We drop the occlusion for
+efficiency and modify the normal formulation following Gaussian
+Shader [Jiang et al. 2024] as the combination of the shortest axis
+direction 𝑢and an offset 𝑛𝛿as n = 𝑢+ 𝑛𝛿. The radiance from view
+v for each Gaussian is computed by the split-sum approximation,
+following previous work [Jiang et al. 2024; Liang et al. 2024], and
+then aggregated by alpha blending. With multi-view images as in-
+puts, the reflectance parameters at each Gaussian can be learned,
+besides the opacity and the environment map, enabling relighting
+under a novel environment map.
+However, this simple Gaussian-based relighting baseline produces
+blurry relighting results for the reflective surface. The main reason
+behind this phenomenon is the alpha blending of Gaussians. As
+ACM Trans. Graph., Vol. 1, No. 1, Article 1. Publication date: January 2025.
+
+GS-ROR2: Bidirectional-guided 3DGS and SDF for Reflective Object Relighting and Reconstruction
+•
+1:5
+∇𝑥
+SDF
+pos
+Aggregation
+𝐷sdf
+𝒏sdf
+Render
+𝐶gs
+𝐶gt
+SDF-aware Pruning (Sec. 4.3)
+Differentiable Env. Map
+SDF Query
+Mutual Supervision (Sec. 4.2)
+MLP 
+Decoder
+Tensorial Encoder
+TensoSDF
+𝐷gs
+𝒏gs
+𝒂, 𝒓, 𝒎
+Aggregation
+Deferred Gaussian Splatting 
+Pipeline (Sec. 4.1)
+𝒎𝑖, 𝒓𝑖, 𝒂𝑖
+𝜇𝑖, Σ𝑖
+Gaussian Attributes
+Fig. 3. Overview of our SDF-aided Gaussian Splatting. The architecture of our proposed method consists of two geometry representations (i.e., Gaussian
+primitive and TensoSDF). In the deferred Gaussian pipeline, the shading parameters (i.e., albedo a, roughness r and metallicity m), normal and depth are
+projected to the image plane and alpha blended. The pixel color 𝐶gs is calculated using the split-sum approximation and supervised by ground truth color 𝐶gt.
+In the TensoSDF, we sample rays originated from camera center o and view direction v and query the SDF value and gradient for each point 𝑝along the ray
+o + 𝑡v. The normal nsdf and depth 𝐷sdf are obtained via volume rendering, which is supervised mutually with the normal ngs the depth 𝐷gs from Gaussians.
+Note no color network is used in the SDF part, and only the geometry attributes are volume rendered.
+Fig. 4. Two Gaussians with a minor normal difference are overlapped to
+model an opaque surface. In the forward rendering, the BRDF values are
+computed w.r.t. to their own normal and are then alpha-blended to form
+the final rendering, which is equivalent to a broader BRDF lobe, leading
+to a blurry rendering, eventually. In contrast, in the deferred shading, the
+BRDF is computed w.r.t. the deferred normal, maintaining the sharpness of
+reflective objects.
+shown in Figure 4, the Gaussians are overlapped to model an opaque
+surface with slightly different normals. While this difference among
+Gaussians causes a negligible error for rough objects, it amplifies
+the BRDF lobe for specular objects, leading to a blurry rendering.
+The key to addressing this issue is to blend the normals of Gaussians
+first and then perform shading, i.e., deferred shading.
+Specifically, we perform alpha blending on all the attributes
+(e.g., normal, albedo, roughness) onto the image plane:
+𝐹=
+𝑛
+∑︁
+𝑖=0
+𝑓𝑖𝛼𝑖
+𝑖−1
+Ö
+𝑗=1
+(1 −𝛼𝑗),
+(6)
+where 𝛼𝑖, 𝛼𝑗share the same definition as in Equation. (2), and 𝑓𝑖is a
+attribute of the 𝑖-th Gaussian. Then, we use split-sum approximation
+to compute the pixel-wise color.
+The Gaussians are learned with the following loss function:
+Lgs = Lc + 𝜆ndLnd + 𝜆smLsm + 𝜆mLm + 𝜆𝛿nL𝛿n,
+(7)
+where Lc is the color supervision between the rendered image
+and ground truth as in 3DGS, Lnd is the supervision between the
+normal from Gaussian and from the estimated depth proposed in
+Gaussian Shader [Jiang et al. 2024], Lsm is the smoothness loss
+for BRDF parameters, Lm is the mask loss, and L𝛿n is the delta
+normal regularization in Gaussian Shader. More details are shown
+in Section 5.
+4.2
+An rendering-free mutual supervision
+Thanks to the deferred Gaussian splatting, the blurry issue for reflec-
+tive object relighting has been addressed. However, the geometry
+established by Gaussians exhibits erroneous surfaces and floaters,
+as it tends to overfit the appearance under training light conditions.
+Hence, more constraints on the geometry are needed. Inspired by
+NeRO and TensoSDF, we introduce SDF into our framework, as
+it has been shown to be a good prior for geometry regularization.
+The key is leveraging the capability of SDF while avoiding the ex-
+pensive rendering. For this, we first choose a performance-friendly
+backbone for SDF – TensoSDF. Then, we propose geometry-only
+supervision between Gaussians and SDF, or so-called mutual su-
+pervision, together with the color supervision between Gaussian
+renderings and the input images, without any SDF rendering. On
+the one hand, as Gaussians build the link between rendered images
+and input images, they can supervise the training of SDF. On the
+other hand, the SDF can also constrain the Gaussians.
+Mutual supervision. Even with a performance-friendly SDF back-
+bone, TensoSDF rendering is still expensive, due to the complex
+ACM Trans. Graph., Vol. 1, No. 1, Article 1. Publication date: January 2025.
+
+1:6
+•
+Zuo-Liang Zhu, Beibei Wang†, and Jian Yang†
+color network required to faithfully represent the specular high-
+lights. Therefore, we propose to remove the SDF rendering and
+connect the SDF and Gaussians with geometry attributes.
+Specifically, we pose supervision on the depth and normal of the
+SDF (Equation. (3)) from Gaussians (Equation. (2)):
+Lgs2sdf = |sg[𝐷gs] −𝐷sdf | + (1−< sg[ngs], nsdf >),
+(8)
+where 𝐷gs and 𝐷sdf are the depth from Gaussians and SDF, respec-
+tively, ngs and nsdf are normals from Gaussians and SDF respectively,
+and sg[·] is the stop-gradient operation.
+Besides the above loss, we also utilize the Eikonal loss Leik, Hes-
+sian loss Lhes, mask loss Lm, and total variance loss Ltv to regularize
+the training of SDF, following common practice [Gropp et al. 2020;
+Li et al. 2024; Zhang et al. 2022c]. The final loss for SDF is
+Lsdf = 𝜆gs2sdfLgs2sdf + 𝜆eikLeik + 𝜆hesLhes + 𝜆mLm + 𝜆tvLtv, (9)
+where the 𝜆[·] is the corresponding coefficient to adjust the strength
+of regularization. Among these losses, our proposed Lgs2sdf enables
+the optimization of SDF via the geometry of Gaussians, and the
+Leik, Lhes, Lm, Ltv regularize the SDF to obtain smooth and reason-
+able geometry.
+Then, we design another loss to update Gaussians with SDF priors:
+Lsdf2gs = |𝐷gs −sg[𝐷sdf]| + (1−< ngs, sg[nsdf] >).
+(10)
+Finally, we obtain the mutual supervision Lgs2sdf and Lsdf2gs, which
+bridges the SDF and Gaussian. Note that the stop-gradient operator
+is used to differ the strength of the supervision of both sides.
+Discussion. In general, SDF is optimized via color supervision
+between volume-rendered images and input images. However, our
+loss Lgs2sdf can optimize the SDF via depth and normal without
+color supervision, as the depth and the normal are derived from
+SDF, and thus the gradient from Lgs2sdf can optimize the SDF. In
+this way, we can drop the heavy color rendering and optimize the
+SDF with only geometry attributes (i.e., depth and normal). With
+other widely used regularizations for SDF (e.g., Eikonal loss), we
+can obtain a smooth and reasonable geometry from SDF. The loss
+Lsdf2gs regularizes the geometry of Gaussians in turn, so we can
+obtain a better decomposition between geometry and material from
+the Gaussians.
+4.3
+SDF-aware pruning
+With the deferred Gaussians supervised by SDF priors, the geometry
+becomes smoother. However, we observe some artifacts caused by
+the overfitting on specular highlights of reflective objects in training
+views, which leads to Gaussian outliers distant from the surface.
+These overfitted Gaussians are in the mask region of all training
+views, so applying the mask loss cannot remove such outliers in
+training, and we still observe the floaters in the test view, as shown
+in Figure 5. Besides, all the above losses supervise the alpha-blended
+results and lack constraints on individual Gaussians to handle the
+outliers. Therefore, we propose a Gaussian pruning strategy to
+enforce the Gaussians close to the zero-level set of SDF. Specifically,
+for each Gaussian, we check the SDF value at its center and discard
+the Gaussian if the SDF value is larger than a threshold 𝑠𝜀, as shown
+in the Figure 6. Since it is laborious to adjust the threshold per scene,
+we link it with the probability density function 𝜙𝑠(𝑠) in Equation. (4),
+Training View
+Testing View
+Floaters
+Object Mask
+Fig. 5. In this example, the floaters can still be shown in the testing view,
+even if the mask loss was applied during training. The main reason is that
+although the floaters are shown outside the mask region in the testing view,
+they are within the mask region in the training views. Therefore, they can
+not be masked out by the mask loss.
+Pruning Threshold: 
+Zero-level Set
+Pruning Threshold: 
+Pruned
+Fig. 6. The illustration of SDF-aware pruning. We define a narrowing thresh-
+old, which is adjusted automatically around the zero-level set. The Gaussians
+out of the threshold will be pruned. This pruning operation ensures all Gaus-
+sians are near the surface and avoids the floaters.
+and the threshold 𝑠𝜀can be defined as 𝜙𝑠(𝑠𝜀) = 𝑝𝑡(𝑠𝜀> 0) in the
+closed form:
+𝑠𝜀= 𝛾log (2𝑝𝑡) −𝛾log
+
+𝛾−1 −2𝑝𝑡−
+√︁
+𝛾−2 −4𝑝𝑡𝛾−1
+
+,
+(11)
+where 𝑝𝑡is an empirical hyperparameter and set to 0.01. In this
+way, the threshold is determined automatically and narrowed with
+the SDF in the optimization, so we avoid posing a constant too strict
+when the surface is under-reconstructed and prune the Gaussians
+too far away from the surface in the end.
+4.4
+GS-guided SDF enhancement
+Due to the inconsistency between the normal and depth from blended
+Gaussians, as shown in Figure 7, the meshes of TSDF fusion from
+depth can be problematic, even though the normal is well optimized
+in the GS framework. Lots of works [Chen et al. 2025; Moenne-
+Loccoz et al. 2024; Radl et al. 2024; Yu et al. 2024b] try to alleviate
+this inconsistency, while these solutions complicate the rendering
+pipeline and thus reduce the GS efficiency in training and rendering.
+ACM Trans. Graph., Vol. 1, No. 1, Article 1. Publication date: January 2025.
+
+GS-ROR2: Bidirectional-guided 3DGS and SDF for Reflective Object Relighting and Reconstruction
+•
+1:7
+TSDF Fusion Mesh
+Blended Normal
+Fig. 7. Although the relighting framework ensures smooth blended normal
+to render realistic glossy highlight, the blended depth is inconsistent with the
+normal, and thus the mesh of TSDF fusion from depth can be problematic.
+Tensorial Grid Upsampling
+Deferred Gaussian Splatting Pipeline
+Fixed
+MLP Decoder
+400×400
+512×512
+Fig. 8. The overview of GS-guided SDF enhancement. The TensoSDF learned
+from the first step is upsampled and refined by the blended normal from
+fixed Gaussians.
+Since our framework has the TensoSDF as an extra geometry
+representation, we can directly extract mesh from it, without com-
+plicating the GS pipeline. Therefore, we propose the GS-guided
+SDF enhancement, which utilizes the normal from well-optimized
+Gaussians to enable extracting high-quality meshes from TensoSDF.
+Specifically, we first upsample the TensoSDF to capture the fine-
+grained details, which keeps a low resolution for efficiency in the
+first step. Then, the upsampled TensoSDF is finetuned efficiently
+via the learned normal from fixed Gaussians, as shown in Figure 8.
+The loss for finetuning Lft is
+Lft = (1−< sg[ngs], nsdf >) + 𝜆hesLhes + 𝜆𝑚Lm + 𝜆tvLtv,
+(12)
+where all losses L[·] share the same definition as in Equation. (9).
+This way, the TensoSDF learns geometry details from the well-
+optimized Gaussians. Therefore, our method achieves high-quality
+geometry reconstruction for reflective objects, which beats the Ten-
+soSDF optimized via ray marching and uses only 33% training time
+of it. Compared to optimizing a full-resolution SDF and Gaussians
+jointly as in GSDF, we modulate the resolution of TensoSDF adap-
+tively, leading to a more efficient framework. Consequently, our
+framework maintains the highly efficient training/rendering from
+Gaussian splatting and meanwhile benefits from the robustness of
+the TensoSDF representation for geometry reconstruction.
+5
+IMPLEMENTATION DETAILS
+This section presents the network structures and the training details.
+Network structures. The TensoSDF has a resolution of 400 × 400
+with feature channels set as 36, which upsamples to 512 × 512
+further. The MLP decoder is a two-layer MLP whose width is 128.
+The Gaussian starts with 100K randomly initialized points.
+Table 1. Losses used in our paper.
+Name
+Apply on
+Description
+𝐿c
+GS
+Color supervision for 3DGS
+𝐿nd
+GS
+Normal Consistency loss from GShader.
+𝐿sm
+GS
+BRDF smoothness loss from R3DG.
+𝐿𝛿n
+GS
+Normal regularization for GShader.
+𝐿sdf2gs
+GS
+The proposed depth/normal supervision for GS.
+𝐿gs2sdf
+SDF
+The proposed depth/normal supervision for SDF.
+𝐿eik
+SDF
+Eikonal loss from Gropp et al. [2020].
+𝐿hes
+SDF
+Hession Loss from Zhang et al. [2022c].
+𝐿tv
+SDF
+Total variance loss from TensoRF.
+𝐿m
+GS/SDF
+Mask loss for both 3DGS and SDF.
+Optimization details. The training of our framework includes
+three steps. Firstly, the deferred Gaussian splatting without SDF
+supervision is trained separately for 1K iterations with Equation. (7)
+to obtain a coarse geometry. Then, we freeze the Gaussians and
+warm up the TensoSDF via the depth and normal from Gaussians
+Equation. (9) for 3K iterations. Finally, we train the entire framework
+with a joint loss for 24K iterations:
+Ljoint = Lgs + 𝜆sdf2gsLsdf2gs.
+(13)
+We provide a table of loss functions (see Table 1) for better under-
+standing and more details are in the supplementary material.
+We train our model on an NVIDIA RTX 4090 and optimize it
+with Adam optimizer [Kingma and Ba 2017]. The learning rate for
+the TensoSDF [Li et al. 2024] grid and the MLP decoder is 1𝑒−2
+and 1𝑒−3, respectively. The learning rate of Gaussian components
+follows the setting in 3DGS [Kerbl et al. 2023], and all attributes not
+in vanilla 3DGS have a learning rate of 2𝑒−3. The initial resolution of
+TensoSDF is set to 128 and increases to the final resolution 400×400,
+which uses only 60% capacity of the original TensoSDF, whose final
+resolution is 512 × 512. The optimization procedure takes about
+1.5 hours in total. After training, only Gaussians will be used for
+relighting. To extract high-quality meshes from TensoSDF, a 15-
+minute finetuning is needed, using the Adam optimizer and a cosine
+learning rate schedule. The learning rate for the TensoSDF [Li et al.
+2024] grid and the MLP decoder starts with 1𝑒−2 and 1𝑒−3, which
+decays to 5𝑒−4 and 5𝑒−5 finally.
+6
+RESULTS
+In this section, we describe the evaluation setup (Section 6.1), and
+evaluate our relighting and NVS results (Section 6.2). Then, we
+conduct ablation studies on several main components (Section 6.3)
+and discuss limitations (Section 6.4). More results and comparison
+can be found in the supplementary file and the demo video.
+6.1
+Evaluation setup
+Dataset. We evaluate our method on three synthetic datasets
+and one real-scene dataset. We utilize the TensoIR [Jin et al. 2023]
+synthetic and Glossy Blender dataset [Liu et al. 2023] to evaluate the
+performance of diffuse and specular materials, respectively. Besides,
+we use the Shiny Blender dataset to show the generalization ability
+of our method for diverse materials. For real scenes, we select some
+specular objects from the NeILF++[Zhang et al. 2023] and some
+ACM Trans. Graph., Vol. 1, No. 1, Article 1. Publication date: January 2025.
+
+1:8
+•
+Zuo-Liang Zhu, Beibei Wang†, and Jian Yang†
+Table 2. Relighting quality in terms of PSNR↑and SSIM↑on the Glossy Blender dataset. Numbers in red indicate the best performance, orange numbers
+indicate the second best, and numbers in yellow indicate the third best. Our method outperforms existing Gaussian-based methods. Note that although our
+quantitative metrics are lower than some NeRF-based methods, our training time is much shorter (25% of TensoSDF, 13% of NeRO).
+NeRF-based
+Gaussian-based
+MII
+TensoIR
+TensoSDF
+NeRO
+GShader
+GS-IR
+R3DG
+Ours
+PSNR/SSIM
+PSNR/SSIM
+PSNR/SSIM
+PSNR/SSIM
+PSNR/SSIM
+PSNR/SSIM
+PSNR/SSIM
+PSNR/SSIM
+Angel
+16.24/.8236
+10.24/.2238
+20.40/.8969
+16.21/.7819
+17.49/.8336
+15.64/.6126
+16.65/.8013
+20.81/.8775
+Bell
+17.41/.8594
+10.11/.1018
+29.91/.9767
+31.19/.9794
+19.01/.8804
+12.61/.2807
+16.15/.8391
+24.49/.9267
+Cat
+17.68/.8521
+9.10/.1644
+26.12/.9354
+28.42/.9579
+16.00/.8642
+18.04/.7907
+17.49/.8503
+26.28/.9421
+Horse
+20.98/.8997
+10.42/.1931
+27.18/.9567
+25.56/.9437
+22.49/.9262
+17.40/.7270
+20.63/.8832
+23.31/.9376
+Luyu
+17.89/.8050
+8.27/.2375
+19.91/.8825
+26.22/.9092
+15.62/.8254
+19.00/.7727
+17.47/.8168
+22.61/.8995
+Potion
+17.13/.8094
+6.21/.0846
+27.71/.9422
+30.14/.9561
+12.33/.7575
+16.37/.7051
+14.99/.7799
+25.67/.9175
+Tbell
+16.54/.8262
+7.47/.1609
+23.33/.9404
+25.45/.9607
+14.42/.8007
+14.35/.5419
+15.99/.7965
+22.80/.9180
+Teapot
+16.71/.8546
+9.96/.2093
+25.16/.9482
+29.87/.9755
+18.21/.8560
+16.63/.7646
+17.36/.8389
+21.17/.8932
+Mean
+17.57/.8413
+8.97/.1719
+24.97/.9349
+26.63/.9331
+16.95/.8430
+16.26/.6494
+17.09/.8258
+23.39/.9140
+Training Time
+4h
+5h
+6h
+12h
+0.5h
+0.5h
+1h
+1.5h
+Ren. Time (FPS)
+1/30
+1/60
+1/4
+1/4
+50
+214
+1.5
+208
+representative ones from the Stanford-ORB dataset [Kuang et al.
+2023] in the supplementary materials.
+Methods for comparison. We select 7 representative methods for
+comparison. We choose MII [Zhang et al. 2022b], TensoIR [Jin et al.
+2023], TensoSDF [Li et al. 2024], and NeRO [Liu et al. 2023] for
+NeRF-based methods and GShader [Jiang et al. 2024], GS-IR [Liang
+et al. 2024], and R3DG [Gao et al. 2024] for Gaussian-based meth-
+ods. While evaluating the surface quality, we also select some non-
+relightable Gaussian-based reconstruction methods, including 2DGS,
+GOF [Yu et al. 2024b], and PGSR [Chen et al. 2025]. We trained these
+models based on their public codes and configurations. Note that we
+add the mask loss to train all the compared methods, for stabilizing
+training and fair comparison.
+Metrics. We use the peak signal-to-noise ratio (PSNR) and struc-
+tural similarity index (SSIM) [Wang et al. 2004] to measure the
+relighting quality of results for the comparison and ablation study
+in the main paper. We present the learned perceptual image patch
+similarity (LPIPS) [Zhang et al. 2018] in the supplementary materi-
+als. Due to the ambiguity between albedo and light, we normalize
+the relighting images to match the average colors of ground-truth
+images before computing the metrics, following NeRO. When the
+ground truth albedo is available, we rescale the relighting images
+based on the ground truth albedo and predicted albedo, following
+TensoIR. We use the mean angular error (MAE) and the Chamber
+distance (CD) to measure the quality of geometry reconstruction.
+We record the mean training time and the frame per second (FPS)1
+in the evaluation. All the FPS and training time are tested on an
+RTX 4090 unless otherwise specified.
+1NeRO and TensoSDF use the Cycles Render Engine in Blender to provide relighting
+results, so the FPS depends on samples per pixel, which is 1024 following the NeRO
+setting.
+6.2
+Comparison with previous works
+Relighting of reflective objects. We evaluate the relighting perfor-
+mance of specular materials on the Glossy Blender dataset. The
+quantitative measurements are shown in Table 2, and the relight-
+ing visualizations are placed in Figure 9. Our method outperforms
+other Gaussian-based methods and achieves competitive results of
+the NeRF-based methods. We also show the decomposed maps in
+Figure 10, Figure 11, and Figure 12. Due to the SDF priors and the
+deferred Gaussian splatting pipeline, our method can produce a
+smooth surface without losing details and predict reasonable BRDF
+parameters.
+Relighting of diffuse objects. Although our design focuses on re-
+flective surfaces, it can also show benefits for diffuse objects. We
+validate our method on the TensoIR dataset. The quantitative mea-
+surements are shown in Table 3. The comparisons with NeRF-based
+methods and relighting visualizations are in the supplementary ma-
+terial. Our methods can outperform the existing Gaussian-based
+methods and some NeRF-based methods on the TensoIR dataset,
+which reveals the robustness under diverse materials.
+Relighting on real data. For real scenes, we select some objects
+with specular highlights from NeILF++ [Zhang et al. 2023], and
+the results are shown in Figure 13. As there is no available ground
+truth, we only show the reference training views and some results
+under novel light conditions. Our method produces reasonable re-
+lighting results under novel lighting. Besides, our method achieves
+a balance between quality and training speed, enabling reflective
+surface modeling with only 25% training time of TensoSDF and 13%
+of NeRO. Our method supports real-time rendering with 200+ FPS,
+much faster than all NeRF-based and some Gaussian-based methods.
+NVS. We also present the NVS results on the Glossy Blender
+dataset and the Shiny Blender Dataset. The quantitative evaluation
+in terms of PSNR and SSIM is presented in Tables 4 and 5. Our
+ACM Trans. Graph., Vol. 1, No. 1, Article 1. Publication date: January 2025.

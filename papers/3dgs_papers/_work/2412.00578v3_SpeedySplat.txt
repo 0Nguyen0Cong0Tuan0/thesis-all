@@ -1,0 +1,1067 @@
+Speedy-Splat: Fast 3D Gaussian Splatting with
+Sparse Pixels and Sparse Primitives
+Alex Hanson
+Allen Tu
+Geng Lin
+Vasu Singla
+Matthias Zwicker
+Tom Goldstein
+University of Maryland, College Park
+https://speedysplat.github.io
+2.6M Gaussians  25.39 PSNR  184.87 FPS
+GT
+3DGS
+Ours
+0.26M Gaussians  25.34 PSNR 1148.77 FPS
+Figure 1. We reduce the number of Gaussians by over 90%, only marginally decrease PSNR, and accelerate rendering speed by 6.2× in
+the Tanks & Temples truck scene when compared to 3D Gaussian Splatting (3D-GS). Additionally, we speed up training time by 1.38×.
+Abstract
+3D Gaussian Splatting (3D-GS) is a recent 3D scene re-
+construction technique that enables real-time rendering of
+novel views by modeling scenes as parametric point clouds
+of differentiable 3D Gaussians.
+However, its rendering
+speed and model size still present bottlenecks, especially
+in resource-constrained settings. In this paper, we iden-
+tify and address two key inefficiencies in 3D-GS to substan-
+tially improve rendering speed. These improvements also
+yield the ancillary benefits of reduced model size and train-
+ing time. First, we optimize the rendering pipeline to pre-
+cisely localize Gaussians in the scene, boosting rendering
+speed without altering visual fidelity. Second, we introduce
+a novel pruning technique and integrate it into the train-
+ing pipeline, significantly reducing model size and training
+time while further raising rendering speed. Our Speedy-
+Splat approach combines these techniques to accelerate av-
+erage rendering speed by a drastic 6.71× across scenes
+from the Mip-NeRF 360, Tanks & Temples, and Deep Blend-
+ing datasets.
+1. Introduction
+Fast rendering of photorealistic novel views has been a
+long-standing goal in computer vision and graphics. Neural
+Radiance Fields (NeRF) [23] and its variants have made sig-
+nificant strides in photorealistic 3D scene reconstruction by
+representing scenes as continuous neural volumetric models
+that encode scene density and color at spatial coordinates.
+However, despite recent efforts [4, 24, 29], fast rendering
+in NeRF remains challenging because the volumetric sam-
+pling used in ray-marching is computationally expensive.
+Recently, 3D Gaussian Splatting (3D-GS) [14] has emerged
+as a promising alternative that enables real-time rendering
+by modeling scenes as parametric point clouds of differ-
+entiable 3D Gaussians. Nevertheless, its rendering speed
+is still limited by high parameter counts and certain algo-
+rithmic inefficiencies. Efficient rendering is essential in ap-
+plications such as virtual reality, networked systems, and
+multi-view streaming.
+Real-time rendering on resource-
+constrained edge devices, such as mobile phones, has yet
+to be achieved [19].
+Although recent works on compressing 3D-GS models
+[6, 7, 11, 25] achieve some speed-ups by reducing the num-
+ber of parameters, few approaches directly target rendering
+speed [8, 19]. In this paper, we specifically address this gap
+by demonstrating that the rendering speed of 3D-GS models
+can be drastically increased while maintaining competitive
+image quality. Additionally, we show that our methods re-
+duce training time and substantially decrease model size.
+We begin by observing that the cost of 3D-GS rendering
+1
+arXiv:2412.00578v3  [cs.CV]  14 Aug 2025
+
+is proportional to both the number of Gaussians in the scene
+and the number of pixels processed per Gaussian. Our ap-
+proach optimizes both factors. First, we reduce the number
+of pixels that are processed for each Gaussian by efficiently
+and accurately localizing it in the rendered image.
+Sec-
+ond, we reduce the total number of Gaussians in the model
+through a novel approach that maintains rendering quality.
+3D-GS implements tile rendering to localize Gaussians
+in the image plane by assigning each Gaussian to the tiles
+that it intersects. We find the existing algorithm to be overly
+conservative; in Section 4.1.1, we address this by intro-
+ducing our SnugBox algorithm to precisely localize Gaus-
+sians by computing a tight bounding box around their ex-
+tent.
+Then, in Section
+4.1.2, we extend SnugBox with
+our AccuTile algorithm to identify exact tile intersections.
+Both approaches are plug-and-play, lead to respective infer-
+ence speed-ups of 1.82× and 1.99× on average, and do not
+change the 3D-GS renderings.
+To reduce the total number of Gaussians while pre-
+serving visual fidelity, we extend an existing pruning
+method [11] by reducing its memory requirement by 36×
+and incorporating it into the 3D-GS training pipeline. Dur-
+ing the densification stage of 3D-GS training, Gaussians are
+regularly replicated and pruned. In Section 4.2.2, we aug-
+ment the densification stage with our Soft Pruning method
+to prune 80% of Gaussians at regular intervals. After the
+densification stage, our Hard Pruning method, described in
+Section 4.2.3, prunes an additional 30% of Gaussians at set
+intervals.
+Our Speedy-Splat approach integrates both techniques
+into the 3D-GS training pipeline. On average, rendering
+speed is accelerated by 6.71×, model size is reduced by
+10.6×, and training speed is improved by 1.4× across all
+evaluated scenes while maintaining high image quality.
+In summary, we propose the following contributions:
+1. SnugBox: A precise algorithm for computing Gaussian-
+tile bounding box intersections.
+2. AccuTile: An extension of SnugBox for computing ex-
+act Gaussian-tile intersections.
+3. Soft Pruning: An augmentation for pruning Gaussians
+during densification.
+4. Hard Pruning: An augmentation for pruning Gaussians
+post-densification.
+2. Related work
+The real-time rendering speed of 3D-GS [14] on desktop
+GPUs has inspired research focused on further accelerating
+both its training and inference in resource-constrained en-
+vironments. In this section, we review related works that
+specifically target these performance improvements.
+2.1. Pruning
+A large portion of Gaussians in vanilla 3D-GS mod-
+els are redundant [6, 7, 25], motivating a recent line of
+work focused on pruning Gaussians from 3D-GS models to
+boost rendering speed with minimal loss of visual fidelity
+[1, 2, 6, 7, 10, 11, 18, 19, 25]. Nearly all approaches assign
+a significance score to each Gaussian that is used to rank
+and prune them.
+Several works compute the aggregated
+ray contribution for each Gaussian across all input images
+[6, 7, 18, 25], while others combine opacity with additional
+information, such as gradients per Gaussian, to calculate
+their pruning criterion [1, 2, 20]. Papantonakis et al. [26]
+use resolution and scale-aware redundancy metrics, EA-
+GLES [10] calculates the total transmittance per Gaussian,
+and Lin et al. [19] accelerate inference speed through an
+efficiency-aware strategy and foveated rendering.
+PUP 3D-GS [11] introduces a more principled approach
+by deriving a Hessian for each Gaussian that represents its
+sensitivity to the reconstruction error. While PUP 3D-GS
+achieves state-of-the-art post-hoc pruning results, comput-
+ing its sensitivity score incurs considerable storage require-
+ments that limit its viability for use during training. Our
+pruning approach directly extends PUP 3D-GS by improv-
+ing its memory efficiency by 36×.
+2.2. Other Methods
+In addition to pruning, several other strategies have been
+explored to enhance the rendering and training speed of 3D-
+GS. Mini-Splatting [7] modifies its densification strategies
+and adds a simplification stage to constrain the number of
+Gaussians. 3DGS-MCMC [15] models training dynamics
+as an MCMC process. Revisiting Densification [30] intro-
+duces an error-based densification strategy. 3DGS-LM [13]
+replaces Adam [16] with a tailored Levenberg-Marquardt
+optimizer [9]. Taming 3DGS [22] proposes a constructive
+optimization process that limits the number of Gaussians to
+a pre-defined threshold set by the user. DISTWAR [5] dives
+into the low-level implementation of GPU thread schedul-
+ing and optimizes atomic processing with a novel primi-
+tive. StopThePop [27] introduces a precise tile intersection
+method, but we find that our approach is notably faster in
+Appendix A.4. FlashGS [8] implements a tile intersection
+method similar to StopThePop. Several works reduce train-
+ing time and memory requirements by enforcing geometric
+constraints [21, 28, 31, 32]. Most of these approaches are
+orthogonal to ours and can be applied alongside it.
+3. Background
+3.1. 3D Gaussian Splatting Overview
+3D Gaussian Splatting (3D-GS) [14] models scenes as
+parametric, point-based representations that use differen-
+tiable 3D Gaussians as primitives. Given a set of ground
+2
+
+Table 1. Average execution time (milliseconds) of each function across all scenes in Section 5.1. The operation in each row is applied
+cumulatively to all of the following rows. For each model, accurate measurements are collected by averaging execution times across three
+runs that each render the test set 20 times to reduce variance. The fastest and second fastest times are color coded.
+Method
+Preprocess
+Inclusive Sum
+Duplicate with Keys
+Radix Sort
+Identify Tile Ranges
+Render
+Overall
+Baseline
+0.665
+0.045
+0.570
+1.551
+0.082
+4.483
+7.478
++SnugBox
+0.656
+0.046
+0.208 (2.738×)
+0.729 (2.126×)
+0.041 (1.980×)
+2.344 (1.913×)
+4.102 (1.823×)
++AccuTile
+0.668
+0.046
+0.221 (2.575×)
+0.612 (2.533×)
+0.035 (2.326×)
+2.062 (2.175×)
+3.748 (1.995×)
++Soft Pruning
+0.370 (1.798×)
+0.030 (1.494×)
+0.146 (3.906×)
+0.404 (3.843×)
+0.024 (3.422×)
+1.337 (3.354×)
+2.381 (3.141×)
++Hard Pruning
+0.091 (7.293×)
+0.016 (2.769×)
+0.090 (6.325×)
+0.215 (7.217×)
+0.013 (6.537×)
+0.619 (7.247×)
+1.114 (6.712×)
+truth training images Igt = {Ii ∈RH×W }K
+i=1, the scene is
+initialized by using Structure from Motion (SfM) to produce
+a sparse point cloud that serves as the initial means for the
+3D Gaussians. The estimated camera poses Pgt = {ϕi ∈
+R3×4}K
+i=1 are paired with their corresponding images and
+are used to optimize the scene.
+Each 3D Gaussian primitive Gi is parameterized by three
+geometry parameters – mean µi ∈R3, scale si ∈R3,
+and rotation ri ∈R4 – and two color parameters – view-
+dependent spherical harmonics hi ∈R16×3 and opacity
+σi ∈R. The set of all parameters can be described as:
+  \Se t  {G}  = \{\ Set  {G}_
+i = \{\mu _i, s_i, r_i, h_i, \sigma _i\}\}_{i=1}^N, 
+(1)
+where N is the number of Gaussians in the model.
+Given camera pose ϕ, the scene is rendered by projecting
+all Gaussians to image space and applying alpha blending
+to each pixel. Models are optimized via stochastic gradient
+descent on image reconstruction losses:
+  L(\S et { G } | \ph i  , I_{ g t} ) = ||I_{\S et {G}}(\phi )-I_{gt}||_1 + L_{\text {D-SSIM}}(I_\Set {G}(\phi ),I_{gt}), \label {eq:gs_loss} (2)
+where IG(ϕ) is the rendered image for pose ϕ.
+During optimization, the scene is periodically densified
+by cloning and splitting uncertain Gaussians and pruned by
+removing large and transparent Gaussians. The opacities of
+the Gaussians are also periodically reset.
+3.2. 3D Gaussian Splatting Rendering Specifics
+3D-GS uses a tile-based rendering strategy that divides
+the rendered image into 16×16 pixel tiles. Each Gaussian is
+projected into image space, where its intersection with these
+tiles is computed. Then, these Gaussian-to-tile mappings
+are sorted to collect and order the Gaussians by depth for
+pixel-wise rendering.
+Rendering runtime is dominated by six key functions.
+Table 1 empirically analyzes the execution time of each
+function and highlights the improvements achieved by our
+methods. Descriptions of each function are provided in the
+following sections.
+3.2.1. Preprocessing
+The preprocess kernel is parallelized such that each
+thread processes a single Gaussian Gi. It computes a 2D
+projection of Gi to image space and obtains a count of tiles
+that it intersects.
+The mean µi is projected to image space using a view-
+ing transform W and a perspective projection, yielding 2D
+mean µi2D and depth that are stored for later processing.
+The scale si and rotation ri parameters are converted to the
+diagonal scale Si and rotation Ri matrices. The 3D covari-
+ance is then defined as:
+  \M a t {\Si
+g ma
+ }_{i_{3D}} = \Mat {R}_i\Mat {S}_i\Mat {S}_i^T\Mat {R}_i^T, 
+(3)
+which is projected via:
+  \Ma t  { \hat { \S igma }_{i_{3D}}} = \Mat {J} \Mat {W} \Mat {\Sigma _{i_{3D}}} \Mat {W}^T \Mat {J}^T, 
+(4)
+where J is the Jacobian of the first order approximation
+of the perspective projection. Dropping the last row and col-
+umn of ˆΣi3D gives Σi2D [14, 33]. The largest eigenvalue
+of Σi2D is used to compute the count of tiles intersected by
+this Gaussian Gi as shown in Figure 2a. Σi2D
+−1 is com-
+puted, along with a view-dependent color ci, derived from
+W and hi. All three values are stored for later processing.
+3.2.2. Sorting
+After preprocessing, four functions process the Gaus-
+sians for pixel-wise rendering:
+• InclusiveSum: A CUDA primitive that computes the
+prefix sum over all Gaussian-tile counts to allocate key
+and value arrays for Gaussian-to-tile mapping.
+• duplicateWithKeys:
+A Gaussian-parallel kernel
+that recomputes Gaussian-tile intersections to generate a
+key for each intersecting tile, consisting of the tile index
+and Gaussian depth.
+• RadixSort: A CUDA primitive that sorts the key array,
+ordering Gaussian indices by tile and then depth.
+• identifyTileRanges: A kernel parallelized across
+the key array to post-process keys before pixel rendering.
+3.2.3. Rendering
+The render kernel is parallelized across pixels. For
+each pixel p, all Gaussians within its corresponding tile
+are loaded and processed in depth order as determined by
+RadixSort. An alpha value:
+  \al p ha _i(p) = \sigma _i g_i(p) \label {eq:render_alpha} 
+(5)
+3
+
+is computed for each Gaussian Gi, where gi is the value
+of the projected 2D Gaussian at pixel p:
+  g _i= e ^ q,
+ q =  -\frac {
+1}{2 }  (p - \mu _{i_{2D}}) \Mat {\Sigma _{i_{2D}}}^{-1} (p - \mu _{i_{2D}})^T. \label {eq:2d_gaussian_scalar} 
+(6)
+If αi >
+1
+255, then the Gaussian is included in the alpha
+compositing of the pixel color C, given by:
+  C( p
+)
+=\s
+um _{i\
+in 
+\
+Set
+ { N }} c_i \alpha _i(p) \prod _{j=1}^{i-1}(1 - \alpha _j(p)). \label {contribution} 
+(7)
+4. Methods
+Our Speedy-Splat methods are motivated by two key
+insights into inefficiencies within the 3D-GS rendering
+pipeline. First, Gaussian Splatting grossly overestimates the
+extent of Gaussians in the image. Second, as demonstrated
+by [11] and other recent pruning works, 3D-GS models are
+heavily overparameterized.
+4.1. Precise Tile Intersect
+Gaussian Splatting identifies tiles intersected by Gaus-
+sian Gi by calculating the maximum eigenvalue λmax of its
+projected 2D covariance Σi2D, then selecting all tiles that
+intersect the square inscribing the circle defined by center
+µi2D and radius:
+  
+r
+ 
+=
+ \le
+f
+t \lceil 3 \sqrt {\lambda _{\max }} \right \rceil . \label {eq:radius} 
+(8)
+This approach neglects opacity σi in its calculation and
+generally overestimates the Gaussian extent, as illustrated
+by Figure 2a. The actual extent of Gaussian Gi, shown in
+Figure 2b, is given by the threshold placed on its alpha value
+αi. Specifically, Gi does not contribute to the rendering of
+pixel p if αi <
+1
+255 for p. By applying the actual extent in
+tile intersection calculations, we arrive at a far more concise
+set of intersected tiles.
+We now show the derivation of this extent. The furthest
+pixel extent of Gaussian Gi can be determined by directly
+substituting this threshold into Equation 5.
+Rearranging
+terms gives:
+  2 \log (2 5 5 \ sigma _i)
+ = ( p  - \mu  _{i_{2D}}) \Mat {\Sigma _{i_{2D}}}^{-1} (p - \mu _{i_{2D}})^T. 
+(9)
+We can rewrite:
+  
+p =
+ \
+b
+e gin {
+pma
+tr
+i
+x } p_
+x \
+\ 
+p
+_
+y
+ 
+\end {pmatrix}, \mu _{i_{2D}} = \begin {pmatrix} \mu _x \\ \mu _y \end {pmatrix}, \Mat {\Sigma _{i_{2D}}}^{-1} = \begin {pmatrix} a & b \\ b & c \end {pmatrix}. 
+(10)
+Specifying threshold t and centered coordinates xd and yd:
+ t  = 2\log (255\sigma _i), \\ x_d = p_x - \mu _x, \\ y_d = p_y - \mu _y,
+(13)
+gives the pixel extent with coordinates xd and yd that satisfy
+the ellipse equation:
+  t =
+ a  x_d^2  + 2
+ b x_d y_d + c y_d^2. \label {eq:simplified_ellipse} 
+(14)
+Our approach uses this pixel extent to reduce the number
+of tiles contained in the Gaussian-to-tile mappings for each
+Gaussian. We propose two methods for computing precise
+tile intersections. First, our SnugBox algorithm produces
+a tight bounding box around each Gaussian. Second, our
+AccuTile algorithm extends it to identify the exact set of
+tiles intersected by the Gaussian.
+4.1.1. SnugBox
+Our SnugBox method uses this elliptical extent to com-
+pute an axis-aligned bounding box that more precisely iden-
+tifies tiles intersected by Gaussian Gi. To derive this bound-
+ing box, we rearrange Equation 14 to solve for yd:
+  y _d =  
+\
+fra c  {-b 
+x _ d 
+\
+pm \sqrt {(b^2 - a c) x_d^2 + t c}}{c}. \label {eq:ellipse_intersect} 
+(15)
+To find the y-coordinate bounding box edges ymin and
+ymax, we identify the values of xd where ∂yd/∂xd = 0.
+We refer to these xd values as xdargs to specify that they
+are the arg min yd and arg max yd values. Differentiating
+Equation 15 and solving for xdargs gives:
+  x_{d _ {
+a
+rgs}
+} =  \pm \sqrt {\frac {-b^2 t }{(b^2 - ac) a}}. \label {eq:bbox_args} 
+(16)
+Substituting xdargs into Equation 15 and adding µy gives
+ymin and ymax. Due to the symmetry of Equation 14, we can
+find the x-coordinate bounding box edges xmin and xmax
+by swapping yd and xd and constants a and c to rewrite
+Equations 15 and 16 in terms of xd and ydargs.
+After the bounding box edges are identified, our method
+follows 3D-GS and converts these edges to tile indices by
+dividing by tile size, rounding, and clipping to the image
+boundary. As depicted in Figure 2, Snugbox can produce a
+significantly tighter bounding box than 3D-GS. Meanwhile,
+its computational overhead is small as it performs a constant
+number of operations and is only called twice in the render-
+ing pipeline – once to count the Gaussians intersecting tiles
+in preprocess and once to populate the Gaussian-to-tile
+arrays in duplicateWithkeys.
+Table 1 reports that
+SnugBox improves the efficiency of all downstream func-
+tions and produces an average overall speed-up of 1.82×.
+4.1.2. AccuTile
+Our AccuTile method, outlined in Algorithm 1, extends
+SnugBox to identify the exact tiles intersected by the Gaus-
+sian. It takes as input the tight bounding box produced by
+Snugbox and its rectangular tile extent – depicted as the
+4
+
+(a) 3D Gaussian Splatting
+(b) SnugBox
+A
+B
+C
+D
+(c) AccuTile
+Figure 2. Gaussian tile allocation by method. (a) 3D Gaussian Splatting allocates a Gaussian to a tile when that tile intersects the square
+inscribing the circle with radius ⌈3√λmax⌉defined in Equation 8. (b) Our SnugBox method allocates a Gaussian to a tile when that tile
+intersects the tight bounding box defined by the axis-aligned minima and maxima of the ellipse given by Equation 14. (c) Our AccuTile
+method allocates a Gaussian to a tile only if that tile intersects the ellipse via Algorithm 1, which computes the minimum and maximum
+tiles by iterating over the shorter side of the rectangular tile extent given by SnugBox. In this example, our AccuTile algorithm iterates
+over the tile rows; the only points that are processed are xmin, xmax, A, B, C, and D.
+blue box and yellow tiles, respectively, in Figure 2b. De-
+pending on which dimension is smaller, AccuTile then pro-
+cesses either the rows or columns of this tile extent to deter-
+mine the exact tiles that intersect the Gaussian. Specifically,
+we identify the minimum and maximum extent of the ellipse
+within a given row or column, then convert those points to
+the corresponding touched tiles. All tiles between the mini-
+mum and maximum tiles intersect the ellipse.
+AccuTile’s key insight is that calculating the minimum
+and maximum extent of the ellipse within each row or col-
+umn requires computing only two points per iteration. The
+only possible inflection points of the elliptical curve are the
+bounding box minimum and maximum points identified by
+Snugbox. If one or both of these points lie within the tile
+row or column, then they represent the minimum or max-
+imum extent of the ellipse there. If neither point is within
+the row or column, then the points along that boundary side
+are monotonically decreasing or increasing – the minimum
+or maximum point must lie on one of the boundary lines of
+that row or column. Since the boundary of the last row or
+column is shared with the next one, we only need to com-
+pute the intersection of the ellipse with the next boundary
+line in each iteration. Thus, our AccuTile algorithm counts
+tiles in time proportional to the shorter side of the tile extent
+and processes tiles in time proportional to the tile count.
+Figure 2 illustrates how Accutile restricts the tight
+bounding box produced by SnugBox to the exact tiles that
+the Gaussian touches. The tile extent rows from Snugbox,
+shown in Figure 2b, are processed starting from the bottom.
+The lower tile row boundary falls below the bounding box,
+so no initial intersection is computed. The upper bound-
+ary lies below the top of the bounding box, so intersection
+points A and B are calculated using Equation 15. xmin is
+assigned as this row’s minimum ellipse extent emin because
+it lies within it, and B is assigned as its maximum ellipse
+extent emax because it is the maximal point. Consequently,
+this row’s tile extent is from the tile containing xmin to the
+tile containing B. For the next row, we keep points A and B
+and compute upper boundary points C and D. A and xmax
+are assigned as the row’s emin and emax, and the tiles con-
+taining them are its tile extent. Finally, for the last row, C
+and D are kept; no additional points are computed because
+the row’s upper boundary is above the bounding box. Thus,
+the tile extent of this row is between C and D.
+The number of tiles is further reduced from Figure 2b
+to Figure 2c, much less than the original 3D-GS method in
+Figure 2a. In Table 1, we report that AccuTile further accel-
+erates all downstream functions, culminating in an average
+overall speed-up of 1.99×.
+4.2. Efficient Pruning
+PUP 3D-GS [11] is a pruning method that quantifies the
+sensitivity of each Gaussian to training views, removing a
+set percentage with the lowest sensitivities. Sensitivity is
+computed by approximating the Hessian of the L2 loss:
+  H 
+= \ n
+a
+bla _
+{\Set {G}}^2 L_ 2 = \sum _{\phi \in \Set {P}_{gt}} \nabla _{\Set {G}} I_{\Set {G}}(\phi ) \nabla _{\Set {G}} I_{\Set {G}}(\phi )^T, 
+(17)
+where ∇GIG(ϕ) is the gradient over all Gaussian parame-
+ters on the rendered image IG for pose ϕ. H is shown to be
+exact when the L1 residual error vanishes [11].
+A per-Gaussian sensitivity can be derived by splitting
+H into the block diagonal elements that only capture inter-
+5
+
+Algorithm 1 The AccuTile Algorithm. For simplicity, the
+algorithm outlined here is applied to the rows of the Snug-
+Box tile extent bounding box, matching the example in Fig-
+ure 2c. In practice, it is applied along the smaller side of
+the tile extent. The subscripts t, b, l, and r represent the
+top, bottom, left, and right sides, respectively. A proof of
+correctness sketch is presented in Appendix A.1.
+Require: Ellipse E
+▷Eq. 14
+Require: SnugBox Bounding Box B
+Require: SnugBox Tile Extent Rectangle R
+Initialize: Tile count C ←0
+linemin ←Rb
+if linemin ≥Bb then
+imin ←Intersections( linemin , E )
+▷Eq. 15
+end if
+for row r in R do
+linemax ←rt
+if linemax ≤Bt then
+imax ←Intersections( linemax , E )
+▷Eq. 15
+end if
+emin ←Bl if Bl in r else min( imin , imax )
+emax ←Br if Br in r else max( imin , imax )
+tilemin , tilemax ←Convert( emin , emax )
+C ←C + ( tilemax - tilemin )
+Process( tilemin , tilemax )
+imin ←imax
+end for
+return C
+Gaussian parameter relationships:
+  H
+_
+i = \
+sum _{\phi \in \S et {P}_{gt}} \nabla _{\Set {G}_i} I_{\Set {G}}(\phi ) \nabla _{\Set {G}_i} I_{\Set {G}}(\phi )^T, 
+(18)
+where ∇Gi is the gradient with respect to only Gi. This mea-
+sures the sensitivity of the L2 loss with respect to Gaussian
+Gi, assuming all other Gaussians are held constant.
+Hi is again approximated by only using the six mean
+µi and scale si parameters to specifically capture geomet-
+ric sensitivity. The log determinant is taken to provide a
+representative scalar score Ui:
+  U _i = \log | \nabla _
+{ \mu _i,s_i} I_{\Set {G}} \nabla _{\mu _i,s_i} I_{\Set {G}}^T |. \label {eq:pup_score} 
+(19)
+Using this score, up to 90% of Gaussians can be robustly
+pruned from the model while retaining high visual quality.
+Although PUP 3D-GS touts high compression ratios and
+rendering speeds, we identify two key drawbacks in its for-
+mulation.
+First, computing the Hessian requires storage
+proportional to N × 36, where N is the number of Gaus-
+sians. In comparison, the 3D-GS model has a memory foot-
+print proportional to N × 59 because it stores 59 parame-
+ters per Gaussian. While this score is effective for post-hoc
+pruning, using it during training is impractical.
+Second, computing the Hessian requires the pixel-wise
+gradients of µ and s. Since these are 3D parameters of
+the Gaussian primitives, obtaining their gradients requires
+back-propagating through the render kernel parallelized
+per pixel, then back-propagating each Gaussian contribut-
+ing to that pixel in its thread. This breaks the efficient flow
+of gradients in 3D-GS, where the per-pixel gradients from
+the render kernel are parallelized and aggregated to the
+2D µ2D and Σ2D parameters, which are then parallelized
+across Gaussians to compute gradients for µ and s.
+Our approach builds on PUP 3D-GS by introducing an
+efficient pruning score that we incorporate into the 3D-
+GS training pipeline. We also define two distinct pruning
+modalities: Soft Pruning, which takes place during den-
+sification in the first 15000 iterations, and Hard Pruning,
+which is applied after densification is completed after itera-
+tion 15000.
+4.2.1. Efficient Pruning Score
+Our insight is that both drawbacks can be alleviated by
+reparameterizing the Hessian. Concretely, we express the
+influence of all spatial parameters of Gaussian Gi by com-
+puting the Hessian approximation with respect to the 2D
+projected value of Gi at pixel p, given by gi(p) in Equa-
+tion 6. In doing so, the pruning score Ui from Equation 19
+can be expressed as:
+  \ t ild e {U}_i = \
+l og | \nabla _{g_i} I_{\Set {G}} \nabla _{g_i} I_{\Set {G}}^T |. 
+(20)
+Since gi is a scalar and log is monotonically increasing, we
+can rewrite this score as:
+  \ t ilde {U}_i = (\nabla _{g_i} I_{\Set {G}})^2. 
+(21)
+Gradient ∇giIG is already computed in the backward
+pass of render and can be efficiently squared and aggre-
+gated across all pixels. Moreover, the maximum space re-
+quirement for this score is proportional to the number of
+Gaussians N, reducing the storage requirement by 36× and
+allowing this score to be used during training.
+4.2.2. Soft Pruning
+To maintain a robust Hessian approximation, we observe
+that the L1 loss becomes quite small by iteration 6000 and
+remains low except after an opacity reset is performed. As
+such, we augment the densification pipeline to include our
+Soft Pruning method, where the model is pruned imme-
+diately before the three opacity resets at 6000, 9000, and
+12000 iterations. Surprisingly, we find that we can set ex-
+tremely high Soft Pruning ratios – in our experiments, vi-
+sual fidelity is preserved at 80% pruning.
+6
+
+GT
+3D-GS
+PUP
+Ours
+2.5M Gaussians   172.15 FPS
+3.4M Gaussians   125.97 FPS
+4.5M Gaussians   141.47 FPS
+0.45M Gaussians   261.67 FPS
+0.34M Gaussians   413.30 FPS
+0.32M Gaussians   1121.97 FPS
+0.46M Gaussians   723.79 FPS
+0.25M Gaussians  463.83 FPS
+0.22M Gaussians   1277.20 FPS
+Figure 3. Visual comparison of 3D-GS, PUP 3D-GS, and our method. Notice that, while reaching similar compression ratios to PUP
+3D-GS, our Speedy-Splat method delivers vastly faster rendering speeds. Top: playroom from the Deep Blending dataset. Middle: bicycle
+from the Mip-NeRF 360 dataset. Bottom: drjohnson from the Deep Blending dataset.
+4.2.3. Hard Pruning
+We also observe that the model’s performance after den-
+sification closely matches that of the fully-trained model.
+The iterations after the densification stage essentially fine-
+tune the model and can be used to further “refine” it after
+pruning, similar to PUP 3D-GS [11] and LightGaussian [6].
+In practice, our Hard Pruning method prunes the model by
+a constant ratio every 3000 iterations starting at iteration
+15000. We Hard Prune 30% of Gaussians in each interval,
+which, when paired with Soft Pruning, empirically reduces
+the total number of Gaussians across scenes by 10.6×.
+5. Experiments
+5.1. Datasets
+Our evaluation uses the same set of challenging real-
+world scenes as 3D-GS [14]. This includes nine Mip-Nerf
+360 scenes [3] – four indoor and five outdoor – that each
+feature a complex central object or area with a detailed
+background. We also include the outdoor train and truck
+scenes from the Tanks & Temples dataset [17] and the in-
+door drjohnson and playroom scenes from the Deep Blend-
+ing dataset [12]. For consistency across experiments, we
+use the COLMAP pose estimates and sparse point clouds
+provided by the dataset authors.
+Table 2. Average Gaussian count, FPS, and training time across all
+scenes in Section 5.1. Ratios for model size compression, render-
+ing speed-up, and training speed-up are reported in (parentheses).
+The operation in each row is applied cumulatively to all of the
+following rows. The best and second best value for each metric
+are color coded.
+Method
+# Gaussians ↓
+FPS ↑
+Training Time ↓
+Baseline
+2.93M
+134
+23.2
++SnugBox
+2.97M
+244 (1.82×)
+21.2 (1.09×)
++AccuTile
+2.97M
+267 (1.99×)
+21.0 (1.10×)
++Soft Pruning
+1.64M (1.79×)
+420 (3.14×)
+17.5 (1.32×)
++Hard Pruning
+0.28M (10.6×)
+898 (6.71×)
+15.7 (1.47×)
+5.2. Implementation Details
+Our code builds on the differentiable renderer provided
+by 3D-GS [14] and modifies the Python training pipeline
+for pruning schedules and execution. To ensure consistent
+and precise timing, all times in Table 1 and FPS values in
+Tables 2 and 3 are measured using CUDA events at the start
+and end of the forward rendering procedure. All experi-
+ments are conducted on an Nvidia RTXA5000 GPU, and the
+reported Speedy-Splat results represent the average metrics
+across three independent runs for each scene.
+7
+
+Table 3. Average reported metrics for each pruning method across
+all scenes in the Mip-NeRF 360 dataset. The Comp column re-
+ports model size compression in terms of Gaussian count, FPS re-
+ports rendering speed-up, and Train reports training time speed-up,
+all with respect to the baseline 3D-GS model. PSNR, SSIM, and
+LPIPS are also recorded. For a fair comparison, we report the pub-
+lished results of each method and use ‘-’ to denote missing metrics.
+The best and second best value for each metric are color coded;
+lossless methods are underlined. Results for the Tanks & Temples
+and Deep Blending datasets are reported in Appendix A.3.
+Method
+Comp ↑
+FPS ↑
+Train ↑
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+3D-GS [14]
+1.00×
+1.00×
+1.00×
+27.55
+0.814
+0.222
+Trimming [2]
+4.00×
+-
+-
+27.13
+0.798
+0.248
+Compact [18]
+2.28×
+1.07×
+0.73×
+27.08
+0.798
+0.247
+EAGLES [10]
+3.68×
+1.51×
+1.37×
+26.94
+0.800
+0.250
+Reducing [26]
+2.33×
+1.60×
+1.23×
+27.10
+0.809
+0.226
+Light [6]
+2.94×
+1.76×
+-
+27.28
+0.805
+0.243
+ELMGS [1]
+5.00×
+2.69×
+-
+27.00
+0.779
+0.286
+PUP [11]
+8.65×
+2.55×
+-
+26.83
+0.792
+0.268
+Mini-Splat [7]
+6.84×
+3.20×
+1.26×
+27.34
+0.822
+0.217
++SnugBox
+0.99×
+1.81×
+1.08×
+27.55
+0.814
+0.221
++AccuTile
+0.99×
+1.99×
+1.10×
+27.57
+0.814
+0.221
++Soft Pruning
+1.79×
+3.14×
+1.30×
+27.32
+0.807
+0.246
++Hard Pruning
+10.6×
+6.51×
+1.45×
+26.94
+0.782
+0.296
+5.3. Results
+5.3.1. Additive method performance
+The efficacy of Speedy-Splat is demonstrated by Ta-
+ble 1, where we record the average execution times of
+each function across all scenes when additively applying
+our methods. SnugBox and AccuTile each introduce min-
+imal additional computation time to preprocess and
+InclusiveSum. However, limiting the number of tiles
+touched accelerates all downstream functions, culminating
+in an overall speed-up of 1.82× by SnugBox that is raised to
+1.99× by AccuTile. Applying soft pruning reduces the run-
+time of all functions by reducing the number of Gaussians,
+leading to a 3.14× overall speed-up. Finally, performing
+hard pruning improves overall speed by a whopping 6.71×
+over the baseline 3D-GS model.
+5.3.2. Overall Performance
+In Figures 1 and 3, we report qualitative results on two
+outdoor and two indoor scenes from all three datasets. The
+magnified regions highlight that our method preserves the
+fine details in the baseline 3D-GS scene and closely models
+the ground truth view. Despite touting similar compression
+ratios and rendering nearly identical images, Speedy-Splat
+achieves over double the FPS of PUP 3D-GS.
+Table 3 compares our methods against other methods
+that reduce the number of Gaussians and increase inference
+speed using the mean of each metric across all scenes in the
+Mip-NeRF 360 dataset. The underlined methods are “loss-
+less”, meaning that they avoid degrading visual fidelity at
+all. SnugBox and AccuTile, our lossless methods, improve
+Table 4. Average metrics across all scenes in Section 5.1 when
+using the Speedy-Splat and PUP 3D-GS pruning scores to prune
+88.44% of Gaussians using the PUP 3D-GS pipeline. Two rounds
+of prune-refine are performed on each baseline 3D-GS model,
+pruning 66% of Gaussians and then fine-tuning for 5, 000 itera-
+tions in each one. The best value for each metric is color coded.
+Method
+# Gaussians ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+FPS ↑
+Baseline
+2.92M
+27.1503
+0.8296
+0.2238
+107.53
+PUP [11]
+0.34M
+26.2136
+0.8044
+0.2731
+378.57
+Ours
+0.34M
+26.8658
+0.8022
+0.2840
+345.52
+rendering and training speed while leaving image quality
+metrics essentially unchanged or slightly better. Our full
+pipeline, labeled as “+Hard Pruning” boasts the highest
+compression ratios, rendering speeds, and training speed-
+ups across all datasets. Furthermore, its image quality met-
+rics are competitive with the other methods.
+5.4. Pruning Score Comparison
+Although the primary focus of our work is rendering
+speed, we find that our efficient pruning score, described in
+Section 4.2, also performs well when applied in other com-
+pression pipelines. In Table 4, we ablate our efficient prun-
+ing score with the PUP 3D-GS sensitivity score across all
+scenes in their post-hoc pruning pipeline. Notably, Speedy-
+Splat’s efficient pruning score outperforms PUP 3D-GS on
+PSNR and is competitive across the other metrics.
+6. Limitations
+A limitation of Speedy-Splat is that it produces slightly
+lower image quality than 3D-GS. However, this degradation
+is expected at high compression ratios and is also observed
+in comparable techniques. Additionally, a direct compari-
+son of our efficient pruning score to the PUP 3D-GS prun-
+ing score illuminates a slight, yet noticeable, gap in perfor-
+mance. Future work could explore the possibility of another
+efficient pruning score that delivers higher performance.
+7. Conclusion
+In this work, we present Speedy-Splat: a new 3D-GS
+technique that accurately localizes Gaussians during ren-
+dering and significantly improves inference speed, model
+size, and training time. Enhanced localization is achieved
+by our SnugBox and AccuTile methods, while model size
+reduction is accomplished by our Soft and Hard Pruning
+approaches. Together, our Speedy-Splat methods acceler-
+ate rendering speed by an average of 6.71×, reduce model
+size by 10.6×, and improve training time by 1.47× across
+all scenes from the Mip-NeRF 360, Tanks & Temples, and
+Deep Blending datasets.
+8
+
+8. Acknowledgements
+This work was made possible by the IARPA WRIVA
+Program, the ONR MURI program, and DAPRA TIAMAT.
+Commercial support was provided by Capital One Bank,
+the Amazon Research Award program, and Open Philan-
+thropy. Further support was provided by the National Sci-
+ence Foundation (IIS-2212182), and by the NSF TRAILS
+Institute (2229885). Zwicker was additionally supported by
+the National Science Foundation (IIS-2126407).
+References
+[1] Muhammad
+Salman
+Ali,
+Sung-Ho
+Bae,
+and
+Enzo
+Tartaglione.
+Elmgs:
+Enhancing memory and compu-
+tation scalability through compression for 3d gaussian
+splatting. arXiv preprint arXiv:2410.23213, 2024. 2, 8, 12
+[2] Muhammad Salman Ali, Maryam Qamar, Sung-Ho Bae, and
+Enzo Tartaglione.
+Trimming the fat: Efficient compres-
+sion of 3d gaussian splats through pruning. arXiv preprint
+arXiv:2406.18214, 2024. 2, 8, 12
+[3] Jonathan T Barron, Ben Mildenhall, Dor Verbin, Pratul P
+Srinivasan, and Peter Hedman. Mip-nerf 360: Unbounded
+anti-aliased neural radiance fields.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 5470–5479, 2022. 7
+[4] Anpei Chen, Zexiang Xu, Andreas Geiger, Jingyi Yu, and
+Hao Su. Tensorf: Tensorial radiance fields. In European
+Conference on Computer Vision (ECCV), 2022. 1
+[5] Sankeerth Durvasula, Adrian Zhao, Fan Chen, Ruofan
+Liang, Pawan Kumar Sanjaya, and Nandita Vijaykumar.
+Distwar: Fast differentiable rendering on raster-based ren-
+dering pipelines. arXiv preprint arXiv:2401.05345, 2023. 2
+[6] Zhiwen Fan, Kevin Wang, Kairun Wen, Zehao Zhu, De-
+jia Xu, and Zhangyang Wang. Lightgaussian: Unbounded
+3d gaussian compression with 15x reduction and 200+ fps.
+arXiv preprint arXiv:2311.17245, 2023. 1, 2, 7, 8, 12
+[7] Guangchi Fang and Bing Wang. Mini-splatting: Represent-
+ing scenes with a constrained number of gaussians. arXiv
+preprint arXiv:2403.14166, 2024. 1, 2, 8, 12
+[8] Guofeng Feng, Siyan Chen, Rong Fu, Zimu Liao, Yi
+Wang, Tao Liu, Zhilin Pei, Hengjie Li, Xingcheng Zhang,
+and Bo Dai.
+Flashgs: Efficient 3d gaussian splatting for
+large-scale and high-resolution rendering.
+arXiv preprint
+arXiv:2408.07967, 2024. 1, 2
+[9] Henri P. Gavin. The levenberg-marquardt method for non-
+linear least squares curve-fitting problems c ©. 2013. 2
+[10] Sharath Girish, Kamal Gupta, and Abhinav Shrivastava. Ea-
+gles: Efficient accelerated 3d gaussians with lightweight en-
+codings. arXiv preprint arXiv:2312.04564, 2023. 2, 8, 12
+[11] Alex Hanson, Allen Tu, Vasu Singla, Mayuka Jayawardhana,
+Matthias Zwicker, and Tom Goldstein. Pup 3d-gs: Principled
+uncertainty pruning for 3d gaussian splatting. arXiv preprint
+arXiv:2406.10219, 2024. 1, 2, 4, 5, 7, 8, 12
+[12] Peter Hedman, Julien Philip, True Price, Jan-Michael Frahm,
+George Drettakis, and Gabriel Brostow. Deep blending for
+free-viewpoint image-based rendering. ACM Transactions
+on Graphics, 37(6):1–15, 2018. 7
+[13] Lukas H¨ollein,
+Aljaˇz Boˇziˇc,
+Michael Zollh¨ofer,
+and
+Matthias Nießner.
+3dgs-lm:
+Faster gaussian-splatting
+optimization with levenberg-marquardt.
+arXiv preprint
+arXiv:2409.12892, 2024. 2
+[14] Bernhard Kerbl, Georgios Kopanas, Thomas Leimk¨uhler,
+and George Drettakis.
+3d gaussian splatting for real-time
+radiance field rendering. ACM Transactions on Graphics, 42
+(4):1–14, 2023. 1, 2, 3, 7, 8, 12, 13
+[15] Shakiba Kheradmand, Daniel Rebain, Gopal Sharma, Wei-
+wei Sun, Yang-Che Tseng, Hossam Isack, Abhishek Kar,
+Andrea Tagliasacchi, and Kwang Moo Yi. 3d gaussian splat-
+ting as markov chain monte carlo. In Advances in Neural
+Information Processing Systems (NeurIPS), 2024. Spotlight
+Presentation. 2
+[16] Diederik P. Kingma and Jimmy Ba. Adam: A method for
+stochastic optimization. CoRR, abs/1412.6980, 2014. 2
+[17] Arno Knapitsch, Jaesik Park, Qian-Yi Zhou, and Vladlen
+Koltun. Tanks and temples: Benchmarking large-scale scene
+reconstruction. ACM Transactions on Graphics, 36(4):1–13,
+2017. 7
+[18] Joo Chan Lee, Daniel Rho, Xiangyu Sun, Jong Hwan Ko,
+and Eunbyung Park. Compact 3d gaussian representation for
+radiance field. arXiv preprint arXiv:2311.13681, 2023. 2, 8,
+12
+[19] Weikai Lin, Yu Feng, and Yuhao Zhu. Rtgs: Enabling real-
+time gaussian splatting on mobile devices using efficiency-
+guided pruning and foveated rendering.
+arXiv preprint
+arXiv:2407.00435, 2024. 1, 2
+[20] Xiangrui Liu, Xinju Wu, Pingping Zhang, Shiqi Wang, Zhu
+Li, and Sam Kwong.
+Compgs: Efficient 3d scene repre-
+sentation via compressed gaussian splatting. arXiv preprint
+arXiv:2404.09458, 2024. 2
+[21] Tao Lu, Mulin Yu, Linning Xu, Yuanbo Xiangli, Limin
+Wang, Dahua Lin, and Bo Dai. Scaffold-gs: Structured 3d
+gaussians for view-adaptive rendering.
+In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 20654–20664, 2024. 2
+[22] Saswat Subhajyoti Mallick, Rahul Goel, Bernhard Kerbl,
+Markus Steinberger, Francisco Vicente Carrasco, and Fer-
+nando De La Torre.
+Taming 3dgs: High-quality radiance
+fields with limited resources. In SIGGRAPH Asia 2024 Con-
+ference Papers, New York, NY, USA, 2024. Association for
+Computing Machinery. 2
+[23] Ben Mildenhall, Pratul P Srinivasan, Matthew Tancik,
+Jonathan T Barron, Ravi Ramamoorthi, and Ren Ng. Nerf:
+Representing scenes as neural radiance fields for view syn-
+thesis. Communications of the ACM, 65(1):99–106, 2021.
+1
+[24] Thomas M¨uller, Alex Evans, Christoph Schied, and Alexan-
+der Keller. Instant neural graphics primitives with a multires-
+olution hash encoding. ACM Trans. Graph., 41(4):102:1–
+102:15, 2022. 1
+[25] Michael Niemeyer, Fabian Manhardt, Marie-Julie Rakoto-
+saona, Michael Oechsle, Daniel Duckworth, Rama Gosula,
+Keisuke Tateno, John Bates, Dominik Kaeser, and Federico
+Tombari. Radsplat: Radiance field-informed gaussian splat-
+ting for robust real-time rendering with 900+ fps.
+arXiv
+preprint arXiv:2403.13806, 2024. 1, 2
+9

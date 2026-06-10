@@ -1,0 +1,1086 @@
+VoD-3DGS: View-opacity-Dependent 3D Gaussian Splatting
+Mateusz Nowak
+Wojciech Jarosz
+Peter Chin
+Dartmouth College
+Hanover, New Hampshire, USA
+{mateusz.m.nowak.th,wojciech.k.jarosz,Peter.Chin}@dartmouth.edu
+Abstract
+Reconstructing a 3D scene from images is challenging due
+to the different ways light interacts with surfaces depend-
+ing on the viewer’s position and the surface’s material. In
+classical computer graphics, materials can be classified as
+diffuse or specular, interacting with light differently. The
+standard 3D Gaussian Splatting model struggles to repre-
+sent view-dependent content, since it cannot differentiate
+an object within the scene from the light interacting with
+its specular surfaces, which produce highlights or reflec-
+tions. In this paper, we propose to extend the 3D Gaus-
+sian Splatting model by introducing an additional symmet-
+ric matrix to enhance the opacity representation of each 3D
+Gaussian. This improvement allows certain Gaussians to be
+suppressed based on the viewer’s perspective, resulting in a
+more accurate representation of view-dependent reflections
+and specular highlights without compromising the scene’s
+integrity. By allowing the opacity to be view dependent,
+our enhanced model achieves state-of-the-art performance
+on Mip-Nerf, Tanks&Temples, Deep Blending, and Nerf-
+Synthetic datasets without a significant loss in rendering
+speed, achieving > 60FPS, and only incurring a minimal
+increase in memory used.
+1. Introduction
+3D reconstruction describes recovering the 3D structure
+from a set of images for a particular scene. It is an essential
+task in computer vision; given a reconstructed 3D scene,
+the user can generate novel, unseen views, which can fur-
+ther areas like robotics, autonomous driving, content gen-
+eration, and Augmented Reality. As an early advancement,
+Structure-from-Motion [16] enabled a seamless transition
+from 2D images to 3D worlds. Nevertheless, these methods
+struggled with novel view synthesis and achieving a bet-
+ter understanding of complex scenes. With the rise of deep
+learning, NeRFs [13] offered a direct mapping from 3D po-
+sitions to colors and density, allowing a compact and contin-
+uous representation that enables novel view synthesis with
+photorealism and detail. However, even with significant im-
+provements to the standard approach [1, 2], NeRFs still re-
+quire a substantial amount of computing power to learn and
+render this 3D representation.
+In recent years, 3D Gaussian Splatting [9] has offered a
+new approach to 3D reconstruction by providing a quick
+and efficient representation that allows for real-time ren-
+dering. As NeRF represents the scene through an implicit
+function, 3D Gaussian Splatting represents the scene explic-
+itly through a collection of 3D anisotropic Gaussians, where
+each Gaussian is parameterized by its color, scale, rotation,
+opacity, and position in space. However, since 3D Gaussian
+Splatting uses rasterization to visualize the scene, it strug-
+gles with the photorealistic representation of various light
+interactions.
+A plethora of solutions have appeared to extend the 3D
+Gaussian model through various improvements, from an
+improved shading function [8], novel shape representation
+[3, 7], and ray tracing [14] to the introduction of a machine
+learning model that enhances the capabilities of 3D Gaus-
+sians [18]. Nevertheless, these models either struggle with
+efficient rendering and fail to provide a simple and compact
+3D representation, or they do not enhance the photorealism
+of the scene regarding light interactions.
+In this paper, we present a straightforward yet effective
+enhancement to standard 3D Gaussian Splatting. Specifi-
+cally, we extend the traditional scalar opacity model to a
+view-dependent function, which allows for a more effective
+representation of specular highlights, dynamic lighting, and
+other light interactions without sacrificing rendering speed,
+extending the photorealism of the scene. We validate our
+method across multiple datasets and demonstrate state-of-
+the-art results that achieve > 60 FPS on complex real-life
+scenes.
+2. Related Work
+In recent years, novel view synthesis has seen notable
+advancement from implicit models like Neural Radiance
+arXiv:2501.17978v2  [cs.CV]  31 Jan 2025
+
+(a) Ground Truth
+(b) 3DGS
+(c) VoD-3DGS (Our method)
+Figure 1. [Top] The visualization of the effect of our method in comparison to the standard 3D Gaussian Splatting. We can suppress
+or boost the impact of Gaussians responsible for modeling specular highlights and reflections for certain views by extending the opacity
+component of each 3D Gaussian with a symmetric matrix, acting as a learnable view-dependent factor. [Bottom] Qualitative results of our
+proposed method in comparison to standard 3DGS. When multiplied with the view vector, the symmetric matrix allows us to represent
+reflections, specular highlights, and even changing lights.
+Fields (NeRF) [13], where the scene is parametrized by a
+multi-layer perceptron (MLP) to represent geometry and
+view-dependent appearance, to explicit 3D Gaussian Splat-
+ting (3DGS) [9], where geometry is represented by thou-
+sands or millions of anisotropic 3D Gaussians, whose ap-
+pearances are directly stored in their representation via
+learnable per-Gaussian opacity and Spherical Harmonics
+coefficients.
+2.1. Neural Radiance Fields (NeRF)
+Both models have undergone further improvements, lead-
+ing to reduced training times and improved quality. Instant-
+NGP [15] introduced a novel feature-grid-based learnable
+scene representation that increases the expressive power
+while decreasing the training time of NeRFs. Models such
+as Mip-NeRF [1] and Zip-NeRF [2] reduce aliasing arti-
+facts by reasoning about sub-volumes along a cone. Ad-
+ditionally, to improve the visual quality of reflections and
+specular highlights, methods like Ref-NeRF [17] extend the
+NeRF model by reparameterizing the view-dependent out-
+going radiance, showing the inherent lack of understanding
+of specular light interactions within the scene by standard
+NeRFs.
+2.2. Modifying the material model of 3DGS
+Various extensions have been proposed in the 3D Gaussian
+Splatting literature to modify the underlying material pa-
+rameters. These extensions not only enhanced the photore-
+alism of the scene but improved the representation of spec-
+ular materials, better capturing the specular highlights and
+reflections. Jiang et al. [8] provided a novel normal estima-
+tion with a simplified shading function on 3D Gaussians to
+enhance the neural rendering in scenes with reflective sur-
+faces. Yang et al. [18] introduced a new 3D Gaussian rep-
+resentation that utilizes an anisotropic spherical Gaussian
+(ASG) appearance field with an MLP to model the appear-
+ance of each 3D Gaussian.
+We propose tackling the specular representation prob-
+lem in the 3D Gaussian Splatting model without a machine
+learning model or an extended shading function that might
+negatively influence the rendering and training speed.
+2.3. Modifying the shape of 3DGS
+The Gaussian model was also enhanced in terms of its ge-
+ometric representation. Huang et al. [7] flattened the 3D
+Gaussian model into anisotropic 2D Gaussian discs to bet-
+ter capture the underlying 3D geometry surface.
+Hamdi
+et al. [3] used the Generalized Exponential Function (GEF)
+
+to model 3D scenes instead of the standard 3D Gaussians.
+Yu et al. [19] proposed to extract Gaussian Opacity Fields
+(GOF), by leveraging an explicit ray-Gaussian and defining
+the opacity of any 3D point as the minimal opacity among
+all training views that observed the point. Finally, Held et al.
+[6] utilized 3D smooth convexes as primitives for modeling
+radiance fields from multi-view images.
+These methods show a simple paradigm in 3D Gaussian
+Splatting literature - we can achieve improved, more photo-
+realistic results with simple introductions to the underlying
+3DGS model. Similarly, we propose one of these simple
+modifications to extend the 3D Gaussian Splatting model
+with a view-dependent opacity.
+In this paper, we extend the 3DGS model by introduc-
+ing a learnable per-Gaussian symmetric matrix. This ma-
+trix transforms the scalar opacity into a function that varies
+with the viewing direction, allowing for improved repre-
+sentation of specular highlights and reflections without any
+neural network introduced. Notably, this enhancement does
+not result in any significant increase in rendering time or
+memory usage.
+3. Preliminaries
+3.1. 3D Gaussian Splatting (3DGS)
+Kerbl et al. [9] proposed parameterizing the scene with a
+set of learnable 3D Gaussian primitives, rendering images
+using differentiable rasterization through volume splatting.
+Each 3D Gaussian can be represented by its respective 3D
+covariance matrix Σ and the position of its center µ:
+G(x) = e−1
+2 (x−µ)T Σ−1(x−µ),
+(1)
+where the covariance matrix Σ = RSST RT is factorized
+into the corresponding learnable scaling matrix S and ro-
+tation matrix R to guarantee positive semi-definiteness of
+the matrix Σ. Then, the 3D Gaussian is transformed into
+camera coordinates, using a viewing transformation W,
+and projected onto the image plane, via the Jacobian of
+the affine approximation of the projective transformation J
+[20]:
+Σ′ = JWΣJT WT .
+(2)
+Projecting each of the 3D Gaussians onto a 2D plane,
+we obtain a 2D Gaussian representation G2D, which can be
+efficiently sorted and then rasterized using a volumetric α
+blending approach, where each color C can be defined as:
+C(p) =
+N
+X
+i=1
+ciαiG2D
+i
+(x)
+i−1
+Y
+j=1
+(1 −αjG2D
+j (x)),
+(3)
+where the N Gaussians overlapping with the pixel p are or-
+dered from front to back, ci is defined as the color of each
+Gaussian, represented as Spherical Harmonics coefficients,
+and αi is a learned per-Gaussian scalar opacity.
+To optimize all the parameters of each Gaussian, the au-
+thors use standard gradient descent with a loss L defined
+as a combination of the L1 color loss and a D-SSIM term,
+scaled with a hyperparameter λ:
+L = (1 −λ)L1 + λLD-SSIM.
+(4)
+To better reconstruct the scene, 3DGS performs an adap-
+tive density control step, cloning Gaussians in the under-
+reconstructed areas and splitting Gaussians in the over-
+reconstructed areas. Additionally, to account for potential
+floaters near the camera and to help control the increase in
+Gaussians, the opacity values are set to a value close to zero
+every few thousand iterations.
+3.2. The Symmetric GGX (SGGX) distribution
+In the context of physically based rendering of volumes, it is
+important to be able to specify angularly varying properties
+of the medium present in the scene. Heitz et al. [5] intro-
+duced an SSGX distribution that effectively represents the
+spatially varying properties of anisotropic microflake par-
+ticipating media through a symmetric 3x3 matrix.
+In the Canonical Basis, the SGGX distribution can be
+defined by a 3 × 3 symmetric positive definite matrix of six
+coefficients:
+S =
+
+
+Sxx
+Sxy
+Sxz
+Sxy
+Syy
+Syz
+Sxz
+Syz
+Szz
+
+,
+(5)
+However, the SGGX distribution can also be defined
+based on the projected area of the microflake in the
+eigenspace:
+S = (ω1, ω2, ω3)
+
+
+S11
+0
+0
+0
+S22
+0
+0
+0
+S33
+
+(ω1, ω2, ω3)T , (6)
+where S11 = σ2(ω1), S22 = σ2(ω2) and S33 = σ2(ω3) are
+positive eigenvalues that are equal to the squared projected
+areas of the ellipsoid in the directions given by the orthonor-
+mal eigenvectors. Given a matrix S and a direction ωi, the
+projected area of the ellipsoid can be computed as:
+σ(ωi) =
+Z
+Ω
+⟨ωi, ωm⟩D(ωm)dωm =
+q
+ωT
+i Sωi,
+(7)
+where D(ωm) is defined as the distribution of normals:
+D(ωm) =
+1
+π
+p
+|S|(ωTmS−1ωm)2 .
+(8)
+
+4. Method
+In our paper, we propose combining the expressive capa-
+bilities of the microflake SGGX distribution with 3D Gaus-
+sian Splatting to develop a view-dependent opacity model
+that more accurately captures specular highlights and reflec-
+tions. We will first define the new opacity model, extended
+by the symmetric S matrix from the SGGX distribution.
+Next, we will describe the new density control mechanism,
+which regulates the number of Gaussians through pruning
+and densification techniques. Then, we will propose an up-
+dated opacity rest system, responsible for minimizing the
+number of floaters, accounting for our extended model. Fi-
+nally, we will propose a regularization loss that enforces
+better view consistency of our 3D Gaussians. Please see
+Figure 1 for a high overview of the method.
+4.1. View-dependent opacity through a symmetric
+matrix
+In the standard 3DGS implementation, the opacity of a 3D
+Gaussian i is defined by a learnable per-Gaussian scalar γi,
+where the final opacity αi can be represented as:
+αi = σ(γi),
+(9)
+where σ here denotes the sigmoid function. We propose to
+extend the definition of the scalar opacity αi by introduc-
+ing a symmetric matrix ˆSi, parametrized with six learnable
+components, like the S matrix in the Canonical Basis in
+Eq. 5. To better capture the view-dependent light interac-
+tions, like specular highlights and reflections, without com-
+promising the appearance of diffuse surfaces, we propose to
+combine both the parameter γi with the newly introduced
+matrix ˆSi. The opacity function ˆαi can be defined as:
+ˆαi(ωi,j) = σ(γi,j + ωT
+i,j ˆSiωi,j),
+(10)
+where ωi,j defines the view vector between the center of the
+Gaussian i and the center of the camera j, allowing to de-
+fine a symmetric angular distribution, similar to the SSGX
+distribution [5].
+4.2. Density control in the view-dependent setting
+In the original 3DGS paper, during the density control step
+of the optimization, the Gaussians were actively pruned
+when their opacity was lower than an introduced hyperpa-
+rameter τ: α < τ.
+To allow for opacity-based pruning within our method as
+well, we propose to prune the Gaussians whose maximum
+opacity in the training set N is lower than τ:
+ˆα(ωi,j∗) < τ,
+(11)
+where j∗= arg maxj∈N ˆαi(ωi,j).
+4.3. Enhanced opacity reset
+In the original implementation of the paper, the opacity of
+the 3D Gaussians is reset to a value close to zero every
+few thousand iterations to minimize the number of Gaus-
+sians and lessen the impact of possible floaters. To facilitate
+a similar approach, we propose resetting the per-Gaussian
+matrix ˆSi by computing its eigendecomposition and calcu-
+lating a new matrix ˆS∗
+i as either
+ˆSi = Q
+
+
+λ0
+0
+0
+0
+0
+0
+0
+0
+0
+
+Q−1,
+or
+ˆSi = Q
+
+
+0
+0
+0
+0
+0
+0
+0
+0
+λ2
+
+Q−1,
+(12)
+where λ0 and λ2 are the highest and lowest eigenvalues re-
+spectively, and Q is a matrix of eigenvectors. We refer to
+these as VoD-3DGS[L] and VoD-3DGS[S] respectively in
+the Section 5. We decided to include both opacity resetting
+methods as they produce viable results in various datasets.
+4.4. View consistency regularization loss
+Finally, we propose to extend the loss function used for opti-
+mization in the standard 3DGS setting. We introduce a new
+view consistency loss Lvc that allows the same Gaussian,
+viewed from similar angles, to maintain a similar opacity.
+Given a camera view i, we stochastically sample another
+view j, where the likelihood of selecting a specific view j
+is based on the number of keypoint matches between both
+views i and j. Then, we compute our loss Lvc for all the
+Gaussians g ∈G as:
+Lvc =
+1
+|G|
+X
+g∈G
+
+max(cos(θ), 0)(ˆα(ωg,i) −ˆα(ωg,j))2
+,
+(13)
+where θ is defined as the angle between the view vector ωg,i
+and ωg,j.
+Therefore, the final optimization loss can be represented
+as:
+L = (1 −λ)L1 + λLD−SSIM + Lvc.
+(14)
+5. Implementation, Evaluation and Results
+5.1. Implementation
+We implement our VoD-3DGS upon the original codebase
+of the original 3D Gaussian Splatting paper.
+We do not modify any existing parameters, except for
+the learning rate of the γ parameter responsible for opacity
+learning. To learn the per-Gaussian symmetric matrix ˆSi,
+we set the learning rate for each of the six components and
+the γ term to 1
+4lrγ, where lrγ is the original learning rate
+used in the 3D Gaussian Splatting paper to optimize γ.
+As a preprocessing step, to create a per-view distribu-
+tion for sampling views used in our view-consistency loss
+
+Lvc, we use LightGlue [11] to compute keypoint matches
+between pairs of images.
+However, since standard 3D
+Gaussian splatting already utilizes Structure-from-Motion
+(SfM) [16], which also computes the information about key-
+point matches between images, all the necessary informa-
+tion could be collected during the SfM computation.
+We conduct all the experiments on a single 48GB
+NVIDIA L40 GPU.
+5.2. Datasets
+We evaluate the performance of our proposed algorithm on
+four datasets:
+1. MipNerf-360 [1],
+2. Tanks & Temples [10],
+3. Deep Blending [4],
+4. and NeRF-Synthetic [13].
+5.3. Evaluation
+We use the same training process for evaluation as 3DGS
+[9], using all the scenes in the MipNerf360 dataset [1], the
+Truck and Train scene from the Tanks & Temples dataset
+[10], and the Playroom and Dr. Johnson scenes from the
+Deep Blending dataset [4]. Additionally, we provide re-
+sults on all the scenes from the NeRF-Synthetic dataset [13]
+to showcase our algorithm’s performance in the synthetic
+scenarios. We compute PSNR, SSIM, and LPIPS for each
+scene on the unseen testing dataset and report the mean over
+all the scenes used per dataset. Additionally, we report per-
+dataset mean FPS count, memory used, and training time
+for the real-life datasets.
+We present our results under two names: VoD-3DGS[S]
+and VoD-3DGS[L]. The only distinction being whether we
+use the smallest or largest eigenvalue to reset the S matrix
+of each Gaussian (Eq. 12). The two names represent the
+relative memory used, where VoD-3DGS[L] has a higher
+memory footprint than VoD-3DGS[S].
+We present our findings for the three real-life datasets in
+Table1 and the synthetic dataset in Table 2. As our base-
+lines, we use the state-of-the-art NeRF approaches (Mip-
+Nerf360 [1] and Zip-Nerf [2]), 3D Gaussian Splatting [9],
+and 3D Gaussian Splatting methods that enhance the 3D
+Gaussian native model without any neural network intro-
+duced for the representation where the results are provided
+on the original parameters of the 3DGS (2DGS [7], GES
+[3], GOF [19], 3DCS [6] and GS Shader [8]). Moreover,
+we provid a separate evaluation of our approach on Spec-
+Gaussian [18] in Section 5.5.
+5.4. Results
+As can be seen in Table 1, our methods achieve state-of-the-
+art performance on all the datasets used. With the reset on
+the highest eigenvalue, VoD-3DGS[L] achieves the highest
+SSIM score in all three and the highest PSNR on the Mip-
+Nerf360 and the Deep Blending dataset. As for other met-
+rics, VoD-3DGS[L] constantly achieves the top three per-
+formance. The findings indicate that the view-dependent
+opacity can significantly enhance visual quality, with only
+slightly increased rendering time and memory used. These
+improvements are particularly noticeable in the specular
+highlights and varying lighting conditions, as demonstrated
+in Figures 2 and Figure 3.
+Our lightweight model, VoD-3DGS[S], also achieves
+competitive results. Surprisingly, it even outperforms VoD-
+3DGS[L] on the Tanks & Temples dataset regarding PSNR.
+Despite its smaller size, VoD-3DGS[S] consistently ranks
+among the top three methods, although it falls short in the
+LPIPS score. As can be seen in Table 1, this method offers
+the best overall performance and metrics compared to other
+approaches.
+As for the efficiency of our method, even with the triv-
+ial implementation, we can achieve real-time results, with
+> 60 FPS on average in all datasets, with only a slight in-
+crease in memory, significantly outperforming methods like
+3DCS [6] when it comes to visual quality and speed. How-
+ever, efficiency was not the main goal of this paper, and we
+believe there is significant room for improvement in this re-
+gard.
+On the Nerf-Synthetic datasets, our methods achieved
+top-three scores across all statistics, as can be seen in Ta-
+ble 2.
+This time, however, VoD-3DGS[S] outperformed
+VoD-3DGS[L]. We believe that the smaller size of the syn-
+thetic scenes allows VoD-3DGS[S], with its stricter regu-
+larization, to identify the optimal number of 3D Gaussians
+needed to represent the scene without overfitting. Nonethe-
+less, both methods deliver state-of-the-art performance on
+the Nerf-Synthetic datasets.
+5.5. Results in comparison to Specular Gaussian
+In this subsection, we evaluate our algorithm in comparison
+to Spec-Gaussian [18], a method that utilizes an anisotropic
+spherical Gaussian (ASG) appearance field with an MLP
+to model the appearance of each 3D Gaussian. We present
+our results in Table3 over the previously mentioned real-life
+datasets: Mip-Nerf360, Tanks&Temples and Deep Blend-
+ing.
+We recompute the results from Spec-Gaussian using the
+same parameters as previously to achieve a fair comparison.
+However, since Specular Gaussian includes the anchoring
+technique introduced in the Scaffold-GS [12] and employs
+a coarse-to-fine strategy, both of which can be effectively
+integrated into our method, we present two sets of results -
+with and without these improvements.
+As shown in Table 3, our performance is slightly lower
+than that of the full Spec-Gaussian algorithm. However,
+there is a significant gap between the original method and
+the extended Spec-Gaussian, which shows a promising fu-
+
+Table 1. A quantitative comparison of our method was computed over three datasets compared to previous work. Our method achieves
+higher-quality results for all datasets in almost all the metrics for novel view synthesis while achieving > 60 FPS rendering performance
+with reasonable memory utilization. Results marked with †have been recomputed and ‡have been adapted from [6], where other values
+have been directly adopted from the original papers. As for the training times, we report the training time with and without the keypoint
+pre-computation step, indicated by the number outside and in the brackets respectively.
+Dataset
+Mip-NeRF360 Dataset
+Tanks & Temples
+Deep Blending
+Method
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+Train
+FPS
+Mem
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+Train
+FPS
+Mem
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+Train
+FPS
+Mem
+Mip-Nerf360
+0.237
+27.69
+0.792
+48h
+0.06
+8.6MB
+0.257
+22.22
+0.759
+48h
+0.14
+8.6MB
+0.245
+29.40
+0.901
+48h
+0.09
+8.6MB
+GES
+0.250
+26.91
+0.794
+32m
+186
+377MB
+0.198
+23.35
+0.836
+21m
+210
+222MB
+0.252
+29.68
+0.901
+30m
+160
+399MB
+3DGS
+0.214
+27.21
+0.815
+42m
+134
+734MB
+0.183
+23.14
+0.841
+26m
+154
+411MB
+0.243
+29.41
+0.903
+36m
+137
+676MB
+2DGS ‡
+0.252
+27.18
+0.808
+29m
+64
+484MB
+0.212
+23.13
+0.831
+14m
+122
+200MB
+0.257
+29.50
+0.902
+28m
+76
+353MB
+3DCS
+0.207
+27.29
+0.802
+87m
+25
+666MB
+0.157
+23.95
+0.851
+60m
+33
+282MB
+0.237
+29.81
+0.902
+71m
+30
+332MB
+3DGS †
+0.215
+27.53
+0.816
+31m (32m)
+113
+649MB
+0.169
+23.75
+0.852
+19m (20m)
+155
+372MB
+0.238
+29.77
+0.907
+31m (31m)
+117
+586MB
+VoD-3DGS[S]
+0.217
+27.66
+0.817
+47m (73m)
+78
+687MB
+0.165
+24.17
+0.859
+28m (65m)
+106
+430MB
+0.244
+29.75
+0.907
+38m (70m)
+91
+559MB
+VoD-3DGS[L]
+0.213
+27.79
+0.818
+53m (83m)
+65
+849MB
+0.160
+23.91
+0.860
+31m (71m)
+84
+525MB
+0.240
+29.84
+0.908
+39m (70m)
+85
+606MB
+Table 2. A quantitative evaluation of our method compared to pre-
+vious work was computed over the Nerf-Synthethic [13] dataset.
+Results marked with †have been recomputed, where other values
+have been directly adopted from the original papers.
+Dataset - Nerf Synthethic
+Method
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+Mip-Nerf 360
+0.060
+30.34
+0.951
+Zip-Nerf
+0.031
+33.10
+0.971
+3DGS
+0.037
+33.31
+0.969
+GOF
+0.038
+33.45
+0.969
+GS Shader
+0.029
+33.38
+0.968
+3DGS †
+0.0298
+33.48
+0.970
+VoD-3DGS[S]
+0.0296
+33.79
+0.971
+VoD-3DGS[L]
+0.0297
+33.69
+0.971
+ture direction of our algorithm. In the case of the MipNerf-
+360 dataset [1], the Spec-Gaussian version without the an-
+choring mechanism could not fit into our memory, indicat-
+ing the potential limitations of the previous work and fur-
+ther showcasing the benefits of both mechanisms present in
+the full version of Spec-Gaussian that could be incorporated
+into our work.
+5.6. Ablations
+To check the validity of our approach, we conducted an ab-
+lation study on the MipNerf-360 dataset presented in Ta-
+ble 4, focusing mostly on the VoD-3DGS[S] approach from
+our paper. We begin with the standard implementation of
+3D Gaussian Splatting, as shown in the first row of the ta-
+ble, and extend it by incorporating the new view-dependent
+matrix. This involves performing an opacity reset and prun-
+ing as described in our method. However, in the second row,
+we do not regularize the 3D Gaussians based on view con-
+sistency. It is evident that even with only this new model,
+we can significantly enhance the performance compared to
+the standard 3D Gaussian Splatting.
+In the third row of the table, we introduce the proposed
+view consistency loss. Here, we sample the views used for
+the view consistency loss computation with uniform prob-
+ability. Forcing the 3D Gaussians to have a similar opac-
+ity when viewed from similar angles slightly increases the
+number of Gaussians, as evident by the lower FPS count and
+the higher memory used. However, this change further im-
+proves the reported statistics, achieving the highest reported
+LPIPS and SSIM.
+Finally, in the fourth row, we modify the sampling by
+selecting views based on the number of pairwise keypoint
+matches reported by LightGlue. This change shows that, by
+pairing the cameras with the highest visual content overlap,
+we can increase the PSNR even further without a signifi-
+cant loss to LPIPS and SSIM, removing between 10000 and
+20000 Gaussians and decreasing the memory used. Given
+the limited scene sizes in the Nerf-Syntehic dataset [13], we
+believe the decrease will be more noticeable in bigger, real-
+life scenes like Mip-Nerf360 [1].
+6. Limitations, Conclusion and Future Work
+6.1. Limitations
+In our paper, we acknowledge some limitations in our
+method. Specifically, we find that it struggles with scenes
+that contain less specular content. For instance, in the Tree-
+hill or Stump scenes from the MipNerf360 [1] dataset, our
+method yields slightly lower PSNR and SSIM values com-
+pared to the original method 3DGS. To address this, we
+could consider introducing a new regularization term aimed
+at minimizing the norm of the matrix ˆSi.
+Alternatively,
+we could explore a different formula for calculating opacity
+ˆαi(ωj) using the matrix ˆSi and the parameter γi.
+Additionally, we note a slight decrease in the FPS count
+and an increase in memory usage. Since efficiency was not
+the main focus of this paper, we believe there are plenty of
+potential enhancements from the 3D Gaussian Splatting lit-
+erature that could be implemented to increase the method’s
+speed and reduce storage requirements.
+Finally, to fully benefit from the view-dependent opac-
+
+Table 3. A qualitative comparison of our method computed over three datasets compared to Spec-Gaussian [18]. Results marked with
+†have been recomputed.
+Dataset
+Mip-NeRF360 Dataset
+Tanks & Temples
+Deep Blending
+Method
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+FPS
+Mem
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+FPS
+Mem
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+FPS
+Mem
+Spec Gaussian
+w/o anchors †
+N/A
+N/A
+N/A
+N/A
+N/A
+0.140
+23.26
+0.855
+18
+1128MB
+0.248
+27.93
+0.885
+14
+1666MB
+Spec Gaussian †
+0.190
+27.97
+0.817
+22
+776MB
+0.156
+24.53
+0.860
+45
+247MB
+0.226
+30.33
+0.906
+130
+187MB
+VoD-GS[S]
+0.217
+27.66
+0.817
+78
+687MB
+0.165
+24.17
+0.859
+106
+430MB
+0.244
+29.75
+0.907
+91
+559MB
+VoD-GS[L]
+0.213
+27.79
+0.818
+65
+849MB
+0.160
+23.91
+0.860
+84
+525MB
+0.240
+29.84
+0.908
+85
+606MB
+Table 4. An ablation study of our method computed over the Nerf-
+Synthethic [13] dataset.
+Adjustments
+Dataset - Nerf Synthethic
+Method
+Matrix
+Loss
+Keypoints
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+FPS
+Memory
+3DGS
+✗
+✗
+✗
+0.0298
+33.476
+0.9700
+561
+62MB
+✓
+✗
+✗
+0.0303
+33.513
+0.9699
+457
+64MB
+✓
+✓
+✗
+0.0295
+33.782
+0.9711
+394
+66MB
+VoD-3DGS[S]
+✓
+✓
+✓
+0.0296
+33.792
+0.9710
+396
+65MB
+VoD-3DGS[L]
+✓
+✓
+✓
+0.0297
+33.690
+0.9706
+374
+66MB
+ity, our method performs the best when the pair-wise con-
+sistency loss is computed with the camera views sampled
+based on the visual content overlap. In this paper, we im-
+plemented the visual content matching naively, but we be-
+lieve this could be seamlessly integrated with the SfM [16]
+pipeline, required for standard 3D Gaussian Splatting ap-
+proaches.
+6.2. Conclusion
+The standard 3D Gaussian Splatting faces challenges in ac-
+curately representing light interactions that depend on the
+viewer’s perspective. We propose to address this limitation
+with an enhanced 3D Gaussian Splatting model by introduc-
+ing a view-dependent opacity. By combining the standard
+scalar opacity with the square of the projected area of the
+SGGX [5], computed using a learnable symmetric matrix,
+we can more effectively capture specular highlights, reflec-
+tions, and varying lighting conditions.
+To ensure a consistent appearance across different views,
+we regularize the Gaussians through a newly introduced
+view consistency loss. As a result of these changes, we
+achieve state-of-the-art qualitative real-time performance
+across multiple datasets, with only a slight increase in mem-
+ory usage and a negligible drop in frames per second.
+However, our method comes with some limitations.
+Specifically, we noticed a slight decline in quality for pre-
+dominantly diffuse scenes. Nevertheless, we believe that
+our extensions open up a promising avenue for improve-
+ment in future work.
+6.3. Future Work
+For future work, exploring other types of extensions to the
+3D Gaussian model could lead to even greater improve-
+ments in both quality and efficiency.
+Additionally, with
+this new extended 3D Gaussian Splatting model, we can
+not only introduce classical efficiency techniques associated
+with 3D Gaussians but also develop a new method based on
+our opacity matrix. Furthermore, by further separating light
+interaction from the scene surface, we believe a new 3D
+mesh reconstruction algorithm can be introduced that elim-
+inates 3D Gaussians with highly variable opacity, leading to
+a higher reconstruction quality of the scene.
+
+References
+[1] Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P.
+Srinivasan, and Peter Hedman. Mip-nerf 360: Unbounded
+anti-aliased neural radiance fields.
+In 2022 IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 5460–5469, 2022.
+[2] Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P.
+Srinivasan, and Peter Hedman. Zip-nerf: Anti-aliased grid-
+based neural radiance fields.
+In 2023 IEEE/CVF Inter-
+national Conference on Computer Vision (ICCV), pages
+19640–19648, 2023.
+[3] Abdullah Hamdi, Luke Melas-Kyriazi, Jinjie Mai, Guocheng
+Qian, Ruoshi Liu, Carl Vondrick, Bernard Ghanem, and
+Andrea Vedaldi.
+Ges : Generalized exponential splatting
+for efficient radiance field rendering.
+In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 19812–19822, 2024.
+[4] Peter Hedman, Julien Philip, True Price, Jan-Michael Frahm,
+George Drettakis, and Gabriel Brostow. Deep blending for
+free-viewpoint image-based rendering. ACM Trans. Graph.,
+37(6), 2018.
+[5] Eric Heitz, Jonathan Dupuy, Cyril Crassin, and Carsten
+Dachsbacher. The sggx microflake distribution. ACM Trans.
+Graph., 34(4), 2015.
+[6] Jan Held, Renaud Vandeghen, Abdullah Hamdi, Adrien
+Deliege, Anthony Cioppa, Silvio Giancola, Andrea Vedaldi,
+Bernard Ghanem, and Marc Van Droogenbroeck. 3d convex
+splatting: Radiance field rendering with 3d smooth convexes,
+2024.
+[7] Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and
+Shenghua Gao. 2d gaussian splatting for geometrically accu-
+rate radiance fields. In ACM SIGGRAPH 2024 Conference
+Papers, New York, NY, USA, 2024. Association for Com-
+puting Machinery.
+[8] Yingwenqi Jiang, Jiadong Tu, Yuan Liu, Xifeng Gao, Xiaox-
+iao Long, Wenping Wang, and Yuexin Ma. Gaussianshader:
+3d gaussian splatting with shading functions for reflective
+surfaces. In 2024 IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR), pages 5322–5332, 2024.
+[9] Bernhard Kerbl, Georgios Kopanas, Thomas Leimkuehler,
+and George Drettakis.
+3d gaussian splatting for real-time
+radiance field rendering. ACM Trans. Graph., 42(4), 2023.
+[10] Arno Knapitsch, Jaesik Park, Qian-Yi Zhou, and Vladlen
+Koltun. Tanks and temples: benchmarking large-scale scene
+reconstruction. ACM Trans. Graph., 36(4), 2017.
+[11] Philipp Lindenberger, Paul-Edouard Sarlin, and Marc Polle-
+feys. Lightglue: Local feature matching at light speed. In
+2023 IEEE/CVF International Conference on Computer Vi-
+sion (ICCV), pages 17581–17592, 2023.
+[12] Tao Lu, Mulin Yu, Linning Xu, Yuanbo Xiangli, Limin
+Wang, Dahua Lin, and Bo Dai. Scaffold-gs: Structured 3d
+gaussians for view-adaptive rendering. In 2024 IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 20654–20664, 2024.
+[13] Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik,
+Jonathan T. Barron, Ravi Ramamoorthi, and Ren Ng. Nerf:
+representing scenes as neural radiance fields for view synthe-
+sis. Commun. ACM, 65(1):99–106, 2021.
+[14] Nicolas Moenne-Loccoz, Ashkan Mirzaei, Or Perel, Ric-
+cardo de Lutio, Janick Martinez Esturo, Gavriel State, Sanja
+Fidler, Nicholas Sharp, and Zan Gojcic. 3d gaussian ray trac-
+ing: Fast tracing of particle scenes. ACM Trans. Graph., 43
+(6), 2024.
+[15] Thomas M¨uller, Alex Evans, Christoph Schied, and Alexan-
+der Keller. Instant neural graphics primitives with a multires-
+olution hash encoding. ACM Trans. Graph., 41(4), 2022.
+[16] Johannes L. Sch¨onberger and Jan-Michael Frahm. Structure-
+from-motion revisited. In 2016 IEEE Conference on Com-
+puter Vision and Pattern Recognition (CVPR), pages 4104–
+4113, 2016.
+[17] Dor Verbin, Peter Hedman, Ben Mildenhall, Todd Zickler,
+Jonathan T. Barron, and Pratul P. Srinivasan. Ref-nerf: Struc-
+tured view-dependent appearance for neural radiance fields.
+In 2022 IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition (CVPR), pages 5481–5490, 2022.
+[18] Ziyi Yang, Xinyu Gao, Yangtian Sun, Yihua Huang, Xi-
+aoyang Lyu, Wen Zhou, Shaohui Jiao, Xiaojuan Qi, and
+Xiaogang Jin. Spec-gaussian: Anisotropic view-dependent
+appearance for 3d gaussian splatting.
+arXiv preprint
+arXiv:2402.15870, 2024.
+[19] Zehao Yu, Torsten Sattler, and Andreas Geiger. Gaussian
+opacity fields: Efficient adaptive surface reconstruction in
+unbounded scenes. ACM Trans. Graph., 43(6), 2024.
+[20] Matthias Zwicker, Hanspeter Pfister, Jeroen van Baar, and
+Markus Gross. Ewa volume splatting. In Proceedings of the
+Conference on Visualization ’01, page 29–36, USA, 2001.
+IEEE Computer Society.
+
+(a) Ground Truth
+(b) 3DGS
+(c) VoD-3DGS[L] (Our method)
+Figure 2. Comparison of our proposed method to standard 3DGS. Our method boosts the specular response in various scenes, which can
+be seen on the table center (Garden scene; first row), the water filter (Counter scene; fourth row), the rightmost corner of the table (Room
+scene; last row), and the left side of the base of the bonsai (Bonsai scene; third row). Our method also allows changing light conditions
+(white gravel and train tracks in the Train scene; second row).
+
+(a) Ground Truth
+(b) 3DGS
+(c) VoD-3DGS[L] (Our method)
+Figure 3. Our method boosts the reflection in the drums (Drums scene), on the hotdog plate (Hotdog scene), and the reflections of the red
+and gray spheres in the copper materials (Materials scene) of the NeRF-Synthetic [13] dataset, achieving state-of-the-art results.

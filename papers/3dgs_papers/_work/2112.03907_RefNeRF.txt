@@ -1,0 +1,1155 @@
+Ref-NeRF: Structured View-Dependent Appearance for Neural Radiance Fields
+Dor Verbin1,2
+Peter Hedman2
+Ben Mildenhall2
+Todd Zickler1
+Jonathan T. Barron2
+Pratul P. Srinivasan2
+1Harvard University
+2Google Research
+Abstract
+Neural Radiance Fields (NeRF) is a popular view syn-
+thesis technique that represents a scene as a continuous
+volumetric function, parameterized by multilayer percep-
+trons that provide the volume density and view-dependent
+emitted radiance at each location. While NeRF-based tech-
+niques excel at representing ﬁne geometric structures with
+smoothly varying view-dependent appearance, they often
+fail to accurately capture and reproduce the appearance
+of glossy surfaces. We address this limitation by introduc-
+ing Ref-NeRF, which replaces NeRF’s parameterization of
+view-dependent outgoing radiance with a representation of
+reﬂected radiance and structures this function using a col-
+lection of spatially-varying scene properties. We show that
+together with a regularizer on normal vectors, our model
+signiﬁcantly improves the realism and accuracy of specular
+reﬂections. Furthermore, we show that our model’s inter-
+nal representation of outgoing radiance is interpretable and
+useful for scene editing.
+1. Introduction
+Neural Radiance Fields (NeRF) [24] renders compelling
+photorealistic images of 3D scenes from novel viewpoints
+using a neural volumetric scene representation. Given any
+input 3D coordinate in the scene, a “spatial” multilayer per-
+ceptron (MLP) outputs the corresponding volume density
+at that point, and a “directional” MLP outputs the outgo-
+ing radiance at that point along any input viewing direc-
+tion. Although NeRF’s renderings of view-dependent ap-
+pearance may appear reasonable at ﬁrst glance, a close in-
+spection of specular highlights reveals spurious glossy ar-
+tifacts that fade in and out between rendered views (Fig-
+ure 1), rather than smoothly moving across surfaces in a
+physically-plausible manner.
+These artifacts are caused by two fundamental issues
+with NeRF (and top-performing extensions such as mip-
+NeRF [2]). First, NeRF’s parameterization of the outgoing
+radiance at each point as a function of the viewing direction
+Ground Truth
+Ours
+Mip-NeRF [2]
+Rendering/Normals
+PSNR↑/MAE↓:
+35.6dB/11.5◦
+30.3dB/59.5◦
+ Rendering Insets
+Epipolar Images
+Figure 1. Ref-NeRF signiﬁcantly improves normal vectors (top
+row) and visual realism (remaining rows) compared to mip-NeRF,
+the previous top-performing neural view synthesis model. Ref-
+NeRF’s improvements are apparent in rendered frames (Rows 2 &
+3), and even more in rendered videos (bottom row epipolar plane
+images and supplementary video), where its glossy highlights shift
+realistically across views instead of blurring and fading like mip-
+NeRF’s. Image PSNR (higher is better) and surface normal mean
+angular error (lower is better) shown as insets.
+is poorly-suited for interpolation. Figure 2 illustrates that,
+even for a simple toy setup, the scene’s true radiance func-
+tion varies quickly with view direction, especially around
+specular highlights. As a consequence, NeRF is only able
+to accurately render the appearance of scene points from
+1
+arXiv:2112.03907v1  [cs.CV]  7 Dec 2021
+
+the speciﬁc viewing directions observed in the training im-
+ages, and its interpolation of glossy appearance from novel
+viewpoints is poor. Second, NeRF tends to “fake” specular
+reﬂections using isotropic emitters inside the object instead
+of view-dependent radiance emitted by points at the surface,
+resulting in objects with semitransparent or “foggy” shells.
+Our key insight is that structuring NeRF’s representa-
+tion of view-dependent appearance can make the underly-
+ing function simpler and easier to interpolate. We present
+a model, which we call Ref-NeRF, that reparameterizes
+NeRF’s directional MLP by providing the reﬂection of the
+viewing vector about the local normal vector as input in-
+stead of the viewing vector itself. Figure 2 (left column)
+illustrates that, for a toy scene comprised of a glossy object
+under distant illumination, this reﬂected radiance function
+is constant across the scene (ignoring lighting occlusions
+and interreﬂections) because it is unaffected by changes
+in surface orientation. Consequently, since the directional
+MLP acts as an interpolation kernel, our model is better
+able to “share” observations of appearance between nearby
+points to render more realistic view-dependent effects in in-
+terpolated views. We additionally introduce an Integrated
+Directional Encoding technique, and we structure outgoing
+radiance into explicit diffuse and specular components to
+allow the reﬂected radiance function to remain smooth de-
+spite variation in material and texture over the scene.
+While these improvements crucially enable Ref-NeRF
+to accurately interpolate view-dependent appearance, they
+rely on the ability to reﬂect viewing vectors about normal
+vectors estimated from NeRF’s volumetric geometry. This
+presents a problem, as NeRF’s geometry is foggy and not
+tightly concentrated at surfaces, and its normal vectors are
+too noisy to be useful for computing reﬂection directions (as
+shown in the right column of Figure 1). We ameliorate this
+issue with a novel regularizer for volume density that signif-
+icantly improves the quality of NeRF’s normal vectors and
+encourages volume density to concentrate around surfaces,
+enabling our model to compute accurate reﬂection vectors
+and render realistic specular reﬂections, shown in Figure 1.
+To summarize, we make the following contributions:
+1. A reparameterization of NeRF’s outgoing radiance,
+based on the reﬂection of the viewing vector about the
+local normal vector (Section 3.1).
+2. An Integrated Directional Encoding (Section 3.2) that,
+when coupled with a separation of diffuse and specu-
+lar colors (Section 3.3), enables the reﬂected radiance
+function to be smoothly interpolated across scenes
+with varying materials and textures.
+3. A regularization that concentrates volume density
+around surfaces and improves the orientation of
+NeRF’s normal vectors (Section 4).
+We apply these changes on top of mip-NeRF [2], cur-
+rently the top-performing neural representation for view
+φo
+vqks3wSK4GjJ1dHRXdOygn1AO5RMmljM8mQZIQy9B/cuFDErf/jzr8xfQgqeuDC4Zx7ufeKOVMG4Q+nMLS8srqWnG9tLG5tb1T3t1rapkpQhtEcqnaEdaUM0EbhlO26miOIk4bUWjq6nfuqdKM
+yluzTilYIHgsWMYGOlZjcdsp7qlSvIDXz/BFUhctFptRp4lvgo8C8Q9Fw0QwUsUO+V37t9SbKECkM41rjodSEOVaGEU4npW6maYrJCA9ox1KBE6rDfHbtB5ZpQ9jqWwJA2fq94kcJ1qPk8h2Jtg
+M9W9vKv7ldTITn4c5E2lmqCDzRXHGoZFw+jrsM0WJ4WNLMFHM3grJECtMjA2oZEP4+hT+T5pV1ztz/Ru/UrtcxFEB+AQHAMPBKAGrkEdNABd+ABPIFnRzqPzovzOm8tOIuZfADztsn+OiPag=
+</latexit>φr
+vqks3wSK4GjJ1dHRXdOygn1AO5RMmljM8mQZIQy9B/cuFDErf/jzr8xfQgqeuDC4Zx7ufeKOVMG4Q+nMLS8srqWnG9tLG5tb1T3t1rapkpQhtEcqnaEdaUM0EbhlO26miOIk4bUWjq6nfuqdKM
+yluzTilYIHgsWMYGOlZjcdsp7qlSvIDXz/BFUhctFptRp4lvgo8C8Q9Fw0QwUsUO+V37t9SbKECkM41rjodSEOVaGEU4npW6maYrJCA9ox1KBE6rDfHbtB5ZpQ9jqWwJA2fq94kcJ1qPk8h2Jtg
+M9W9vKv7ldTITn4c5E2lmqCDzRXHGoZFw+jrsM0WJ4WNLMFHM3grJECtMjA2oZEP4+hT+T5pV1ztz/Ru/UrtcxFEB+AQHAMPBKAGrkEdNABd+ABPIFnRzqPzovzOm8tOIuZfADztsn+OiPag=
+</latexit>φr
+φo
+O
+6KblxWsA9oh5JM21sJhmSjFBK/8GNC0Xc+j/u/BszbQUVPXDhcM693HtPmHCmDUIfzsrq2vrGZm4rv72zu7dfODhsaZkqQptEcqk6IdaUM0GbhlO4miOA45bYfjq8xv31OlmRS3ZpLQIMZDwSJGsLFSq5eMWF/2C0XkXlR93/Mhcqs1
+v1LKCpVSqgCPRfNUQRLNPqF95AkjSmwhCOte56KDHBFCvDCKezfC/VNMFkjIe0a6nAMdXBdH7tDJ5aZQAjqWwJA+fq94kpjrWexKHtjLEZ6d9eJv7ldVMT1YIpE0lqCLRVHKoZEwex0OmKLE8IklmChmb4VkhBUmxgaUtyF8fQr/Jy3
+f9apu+aZcrF8u48iBY3ACzoAHzkEdXIMGaAIC7sADeALPjnQenRfndG64ixnjsAPOG+f+SPag=</latexit>φo
+ˆ!o
+g
+asjU0equ6MZlBfuAzlAyadqGZiZDkhHKMBs3/obF4q49R/c+Tdm2goqeiDkcM693HtPEHOmNEIfVmFhcWl5pbhaWlvf2Nwqb+0lEgkoU0iuJCdACvKWUSbmlO7GkOAw4bQfjy9xv31KpmIhu9CSmfoiHERswgrWReu
+V9b4R16gWC9UkNF/qiZAOcZb1ZKlXriC75rHqAqRjU6q1ZpjiItq7jmCjo2mqIA5Gr3yu9cXJAlpAnHSnUdFGs/xVIzwmlW8hJFY0zGeEi7hkY4pMpPp1dk8NAofTgQ0rxIw6n6vSPFocp3NJUh1iP128vFv7xuogdnf
+sqiONE0IrNBg4RDLWAeCewzSYnmE0MwkczsCskIS0y0CS4P4etS+D9pVW3n1Hav3Ur9Yh5HEeyBA3AEHFADdXAFGqAJCLgD+AJPFv31qP1Yr3OSgvWvGcX/ID19gnBGZl</latexit>ˆ!r
+φr
+tb1T3t1rapkpQhtEcqnaEdaUM0EbhlO26miOIk4bUWjq6nfuqdKMyluzTilYIHgsWMYGOlZjcdsp7qlSvIDXz/BFUhctFptRp4lvgo8C8Q9Fw0QwUsUO+V37t9SbKECkM41rjodSEOVaGEU4npW6maYrJCA9ox1KBE6rDfHbtB5ZpQ9jqWwJA2fq94kcJ1qPk8h2JtgM9W9vKv7ldTITn4c5E2lmqCDzRXHGoZFw+jrsM0WJ4WNLMFHM3grJECtMjA2oZEP4+hT+T5pV1ztz/Ru/UrtcxFEB+AQHAMPBKAGrkEdNABd+ABPIFnRzqPzovzOm8tOIuZfADztsn
++OiPag=</latexit>φr
+l
+5pbhaWlvf2Nwqb+0lEgkoU0iuJCdACvKWUSbmlO7GkOAw4bQfjy9xv31KpmIhu9CSmfoiHERswgrWReuV9b4R16gWC9UkNF/qiZAOcZb1ZKlXriC75rHqAqRjU6q1ZpjiItq7jmCjo2mqIA5Gr3yu9cXJAlpAnHSnUdFGs/xVIzwmlW8hJFY0zGeEi7hkY4pMpPp1dk8NAofTgQ0rxIw6n6vSPFocp3NJUh1iP128vFv7xuogdnfsqiONE0IrNBg4RDLWAeCewzSYnmE0MwkczsCskIS0y0CS4P4etS+D9pVW3n1Hav3Ur9Yh5HEeyBA3AEHFAD
+dXAFGqAJCLgD+AJPFv31qP1Yr3OSgvWvGcX/ID19gnBGZl</latexit>ˆ!r
+B
+VUjSh3VXdOygm2FJoTJdNoOnWTCzEQoRs3/obF4q49R/c+TdO2goqemCYwzn3cu89YcKoVLb9YRSWldW14rpY3Nre0dc3evI3kqMGljzri4CZEkjMakrahi5CYRBEUhI91wfJH73VsiJOXxtZokxI/QMKYDipHSUm
+AeiOkMi/krC8nkf4yj0dkiKbTgJcCs2xbZ3XdVxoW/WGW6vkxK7UKnYNOpY9Qxks0ArMd6/PcRqRWGpOw5dqL8DAlFMSPTkpdKkiA8RkPS0zRGEZF+NrtiCo+10ocDLvSLFZyp3zsyFMl8R10ZITWSv71c/MvrpWrQ8
+DMaJ6kiMZ4PGqQMKg7zSGCfCoIVm2iCsKB6V4hHSCsdHB5CF+Xwv9Jx7WculW9qpab54s4iuAHIET4IBT0ASXoAXaAIM78ACewLNxbzwaL8brvLRgLHr2wQ8Yb5/BUpl</latexit>ˆ!o
+O
+6KblxWsA9oh5JM21sJhmSjFBK/8GNC0Xc+j/u/BszbQUVPXDhcM693HtPmHCmDUIfzsrq2vrGZm4rv72zu7dfODhsaZkqQptEcqk6IdaUM0GbhlO4miOA45bYfjq8xv31OlmRS3ZpLQIMZDwSJGsLFSq5eMWF/2C0XkXlR93/Mhcqs1
+v1LKCpVSqgCPRfNUQRLNPqF95AkjSmwhCOte56KDHBFCvDCKezfC/VNMFkjIe0a6nAMdXBdH7tDJ5aZQAjqWwJA+fq94kpjrWexKHtjLEZ6d9eJv7ldVMT1YIpE0lqCLRVHKoZEwex0OmKLE8IklmChmb4VkhBUmxgaUtyF8fQr/Jy3
+f9apu+aZcrF8u48iBY3ACzoAHzkEdXIMGaAIC7sADeALPjnQenRfndG64ixnjsAPOG+f+SPag=</latexit>φo
+x
+x
+x
+x
+x
+View Direction (NeRF)
+Reflection Direction (Ours)
+ˆn
+x
+cd
+ˆn
+ˆn
+R
+HYNUY9ELx4hkUcCGzI79MLI7OxmZtZICF/gxYPGePWTvPk3DrAHBSvpFLVne6uIBFcG9f9dnJr6xubW/ntws7u3v5B8fCoqeNUMWywWMSqHVCNgktsG4EthOFNAoEtoLR7cxvPaLSPJb3ZpygH9GB5CFn1Fip/tQrltyO
+wdZJV5GSpCh1it+dfsxSyOUhgmqdcdzE+NPqDKcCZwWuqnGhLIRHWDHUkj1P5kfuiUnFmlT8JY2ZKGzNXfExMaT2OAtsZUTPUy95M/M/rpCa89idcJqlByRaLwlQE5PZ16TPFTIjxpZQpri9lbAhVZQZm03BhuAtv7xKmh
+dl7JcqVdK1ZsjycwCmcgwdXUIU7qEDGCA8wyu8OQ/Oi/PufCxac042cwx/4Hz+AOknjQU=</latexit>x
+cd
+ˆn
+x
+x
+⇢
+⇢
+Figure 2. Visualizations of outgoing radiance in NeRF and Ref-
+NeRF, using 2D position-angle slices of radiance along an x-
+parameterized surface curve on a glossy object under colored
+lights. Because NeRF (middle row) uses view angle φo as input,
+when presented with glossy reﬂectances (left) or spatially-varying
+materials (right) it must interpolate between highly complicated
+functions like the irregularly curved colored lines shown here. In
+contrast, Ref-NeRF (bottom row) parameterizes radiance using a
+normal vector ˆn and a reﬂection angle φr, and adds diffuse color
+cd and roughness ρ to its spatial MLP, which collectively makes
+radiance functions simple to model even for shiny or spatially-
+varying materials. The gray checkerboard indicates directions be-
+low the surface at position x.
+synthesis.
+Our experiments demonstrate that Ref-NeRF
+produces state-of-the-art renderings of novel viewpoints,
+and substantially improves upon the quality of previous top-
+performing view synthesis methods for highly specular or
+glossy objects. Furthermore, our structuring of outgoing ra-
+diance produces interpretable components (normal vectors,
+material roughness, diffuse texture, and specular tint) that
+enable convincing scene editing capabilities.
+2
+
+2. Related Work
+We review NeRF and related methods for photorealistic
+view synthesis, as well as techniques from computer graph-
+ics for capturing and rendering specular appearance.
+3D scene representations for view synthesis
+View syn-
+thesis, the task of using observed images of a scene to ren-
+der images from novel unobserved camera viewpoints, is
+a longstanding research problem within the ﬁelds of com-
+puter vision and graphics. In situations where it is possible
+to densely capture images of the scene, simple light ﬁeld
+interpolation techniques [12, 18] can render novel views
+with high ﬁdelity.
+However, exhaustive sampling of the
+light ﬁeld is impractical in most scenarios, so methods for
+view synthesis from sparsely-captured images reconstruct
+3D scene geometry in order to reproject observed images
+into novel viewpoints [8].
+For scenes with glossy sur-
+faces, some methods explicitly build virtual geometry to
+explain the motion of reﬂections [17, 33, 35].
+Early ap-
+proaches used triangle meshes as the geometry representa-
+tion, and rendered novel views by reprojecting and blending
+multiple captured images with either heuristic [7, 9, 42] or
+learned [13, 32] blending algorithms. Recent works have
+used volumetric representations such as voxel grids [20] or
+multiplane images [10,23,37,41,48], which are better suited
+for gradient-based optimization than meshes. While these
+discrete volumetric representations can be effective for view
+synthesis, their cubic scaling limits their ability to represent
+large or high resolution scenes.
+The recent paradigm of coordinate-based neural repre-
+sentations replaces traditional discrete representations with
+an MLP that maps from any continuous input 3D coordi-
+nate to the geometry and appearance of the scene at that
+location. NeRF [24] is an effective coordinate-based neu-
+ral representation for photorealistic view synthesis that rep-
+resents a scene as a ﬁeld of particles that block and emit
+view-dependent light. NeRF has inspired many subsequent
+works, which extend its neural volumetric scene represen-
+tation to application domains including dynamic and de-
+formable scenes [26], avatar animation [11, 27], and even
+phototourism [21]. Our work focuses on improving a core
+component of NeRF: the representation of view-dependent
+appearance. We believe that the improvements presented
+here can be used to improve rendering quality in many of
+the applications of NeRF described above.
+A key component of our approach considers the reﬂec-
+tion of camera rays off NeRF’s geometry.
+This idea is
+shared by recent works that extend NeRF to enable relight-
+ing by decomposing appearance into scene lighting and ma-
+terials [3–5,36, 45, 47]. Crucially, our model structures the
+scene into components that are not required to have pre-
+cise physical meanings, and is thus able to avoid the strong
+simplifying assumptions (such as known lighting [3, 36],
+no self-occlusions [4, 5, 45], single-material scenes [45])
+that these works need to make to recover explicit paramet-
+ric representations of lighting and material. Our work also
+focuses on improving the smoothness and quality of nor-
+mal vectors extracted from NeRF’s geometry. This goal is
+shared by recent works that combine NeRF’s neural volu-
+metric representation with neural implicit surface represen-
+tations [25,39,43]. However, these methods primarily focus
+on the quality of isosurfaces extracted from their representa-
+tion as opposed to the quality of rendered novel views, and
+as such their view synthesis performance is signiﬁcantly
+worse than top-performing NeRF-like models.
+Efﬁcient rendering of glossy appearance
+Our work
+takes inspiration from seminal approaches in computer
+graphics for representing and rendering view-dependent
+specular and reﬂective appearance, particularly techniques
+based on precomputation [29]. The reﬂected radiance func-
+tion encoded in our directional MLP is similar to preﬁltered
+environment maps [15,31], which were introduced for real-
+time rendering of specular appearance. Preﬁltered environ-
+ment maps leverage the insight that the outgoing light from
+a surface can be seen as a spherical convolution of the in-
+coming light and the (radially-symmetric) bidirectional re-
+ﬂectance distribution function (BRDF) that describes the
+material properties of the surface [30]. After storing this
+convolution result, rays intersecting the object can be ren-
+dered efﬁciently by simply indexing into the preﬁltered en-
+vironment maps with the reﬂection direction of the viewing
+vector about the normal vector.
+Instead of rendering predeﬁned 3D assets, our work
+leverages these computer graphics insights to solve a com-
+puter vision problem where we are recovering a renderable
+model of the scene from images. Furthermore, our direc-
+tional MLP’s representation of reﬂected radiance improves
+upon the preﬁltered environment map representations used
+in computer graphics in a critical way: our directional MLP
+can represent spatial variation in reﬂected radiance due to
+spatial variation in both lighting and scene properties such
+as material roughness and texture, while the techniques de-
+scribed previously require computing and storing discrete
+preﬁltered radiance maps for each possible material.
+Our work is also inspired by a long line of works in
+computer graphics that reparameterize directional functions
+such as BRDFs [31,34] and outgoing radiance [42] for im-
+proved interpolation and compression.
+2.1. NeRF Preliminaries
+NeRF [24] represents a scene as a volumetric ﬁeld of
+particles that emit and absorb light. Given any input 3D
+position x, NeRF uses a spatial MLP to output the density
+τ(x) of volumetric particles as well as a “bottleneck” vec-
+3
+
+⇤
+⇤
+=
+=
+…
+…
+…
+…
+…
+…
+…
+…
+Less Rough
+More Rough
+:
+:
+Directional Encoding (Spherical Harmonics)
+Integrated Directional Encoding
+Directional vMF  
+Distribution
+{
+{
+{
+A
+e0oWy2m3bpZhN2J0IJ/QdePCji1X/kzX/jts1BWx8MPN6bYWZekEh0HW/ncLa+sbmVnG7tLO7t39QPjxqmTjVjDdZLGPdCajhUijeRIGSdxLNaRI3g7GtzO/cS1EbF6xEnC/YgOlQgFo2ilh17WL1fcqjsHWSVeTiqQo9Evf/UGMUsjrpBJakzXcxP0M6pR
+MmnpV5qeELZmA51JFI278bH7plJxZUDCWNtSObq74mMRsZMosB2RhRHZtmbif953RTDaz8TKkmRK7ZYFKaSYExmb5OB0JyhnFhCmRb2VsJGVFOGNpySDcFbfnmVtC6q3mW1dl+r1G/yOIpwAqdwDh5cQR3uoAFNYBDCM7zCmzN2Xpx352PRWnDymWP4A+f
+zB5yjW4=</latexit>
+{
+A
+e0oWy2m3bpZhN2J0IJ/QdePCji1X/kzX/jts1BWx8MPN6bYWZekEh0HW/ncLa+sbmVnG7tLO7t39QPjxqmTjVjDdZLGPdCajhUijeRIGSdxLNaRI3g7GtzO/cS1EbF6xEnC/YgOlQgFo2ilh17WL1fcqjsHWSVeTiqQo9Evf/UGMUsjrpBJakzXcxP0M6pR
+MmnpV5qeELZmA51JFI278bH7plJxZUDCWNtSObq74mMRsZMosB2RhRHZtmbif953RTDaz8TKkmRK7ZYFKaSYExmb5OB0JyhnFhCmRb2VsJGVFOGNpySDcFbfnmVtC6q3mW1dl+r1G/yOIpwAqdwDh5cQR3uoAFNYBDCM7zCmzN2Xpx352PRWnDymWP4A+f
+zB5yjW4=</latexit>
+{
+j
+hUijeRIGSdxLNaRI3g7GtzO/cS1EbF6xEnC/YgOlQgFo2ilh17WL1fcqjsHWSVeTiqQo9Evf/UGMUsjrpBJakzXcxP0M6pRMmnpV5qeELZmA51JFI278bH7plJxZUDCWNtSObq74mMRsZMosB2RhRHZtmbif953RTDaz8TKkmRK7ZYFKaSYExmb5OB0JyhnFhCmRb2VsJGVFOGNpySDcFbfnmVtC6q3mW1dl+r1G/yOIpwAqdwDh5cQR3uoAFNYBDCM7zCmzN2Xpx352PRWnDymWP4A+fzB5yjW4=</latexit>
+{
+{
+{
+Y m
+1
+Y m
+2
+Y m
+4
+E[Y m
+8 ]
+E[Y m
+4 ]
+E[Y m
+2 ]
+E[Y m
+1 ]
+Y m
+8
+= 20
+D
+wnvZF4tfyCUKq43sjRBI8=">AB8XicbVDLSgNBEOyNrxhfUY9eFoP
+gKexKfFyEoBePEcwDkyX0TibJkNnZYWZWCEv+wosHRbz6N978GyfJHj
+SxoKGo6qa7K5ScaeN5305uZXVtfSO/Wdja3tndK+4fNHScKELrJOaxa
+oWoKWeC1g0znLakohiFnDbD0e3Ubz5RpVksHsxY0iDCgWB9RtBY6bEz
+Qinx+tzusWSV/ZmcJeJn5ESZKh1i1+dXkySiApDOGrd9j1pghSVYT
+TSaGTaCqRjHBA25YKjKgO0tnFE/fEKj23Hytbwrgz9fdEipHW4yi0nR
+GaoV70puJ/Xjsx/asgZUImhgoyX9RPuGtid/q+2OKEsPHliBRzN7qk
+iEqJMaGVLAh+IsvL5PGWdm/KFfuK6XqTRZHo7gGE7Bh0uowh3UoA4E
+BDzDK7w52nlx3p2PeWvOyWYO4Q+czx92OZAi</latexit>= 500
+Figure 3. We enable the directional MLP to represent reﬂected radiance functions for any continuously-valued roughness using our
+integrated directional encoding. Each component of the encoding is a spherical harmonic function convolved with a vMF distribution with
+concentration parameter κ, output by our spatial MLP (equivalent to the expectation of the spherical harmonic under the vMF). Less rough
+locations receive higher-frequency encodings (top), while more rough regions receive encodings with attenuated high frequencies. Our
+IDE allows lighting information to be shared between locations with different roughnesses, and lets reﬂectance be edited.
+tor b(x) which, along with the view direction ˆd, is provided
+to a second directional MLP that outputs the color c(x, ˆd)
+of light emitted by a particle at that 3D position at direc-
+tion ˆd (see Figure 4 for a visualization). Note that Milden-
+hall et al. [24] use a single-layer directional MLP in their
+work, and that prior work often describes the combination
+of NeRF’s spatial and directional MLPs as a single MLP.
+The two MLPs are queried at points xi = o + tiˆd along
+a ray originating at o with direction ˆd, and return densities
+{τi} and colors {ci}. These densities and colors are alpha
+composited using numerical quadrature [22] to obtain the
+color of the pixel corresponding to the ray:
+C(o, ˆd) =
+X
+i
+wici ,
+(1)
+where
+wi = e−P
+j<i τj(tj+1−tj) 
+1 −e−τi(ti+1−ti)
+.
+The MLP parameters are optimized to minimize the L2 dif-
+ference between each pixel’s predicted color C(o, ˆd) and
+its true color Cgt(o, ˆd) taken from the input image:
+L =
+X
+o,ˆd
+∥C(o, ˆd) −Cgt(o, ˆd)∥2 .
+(2)
+In practice, NeRF uses two sets of MLPs, one coarse and
+one ﬁne, in a hierarchical sampling fashion, where both are
+trained to minimize the loss in Equation 2.
+Prior NeRF-based models deﬁne a normal vector ﬁeld
+in the scene by either using the spatial MLP to predict unit
+vectors [3, 47] at any 3D location, or by using the gradient
+of the volume density with respect to 3D position [4,36]:
+ˆn(x) = −∇τ(x)
+∥∇τ(x)∥.
+(3)
+3. Structured View-Dependent Appearance
+In this section, we describe how Ref-NeRF structures
+the outgoing radiance at each point into (preﬁltered) incom-
+ing radiance, diffuse color, material roughness, and specular
+tint, which are better-suited for smooth interpolation across
+the scene than the function of outgoing radiance parame-
+terized by view direction. By explicitly using these com-
+ponents in our directional MLP (Figure 4), Ref-NeRF can
+accurately reproduce the appearance of specular highlights
+and reﬂections. In addition, our model’s decomposition of
+outgoing radiance enables scene editing.
+3.1. Reﬂection Direction Parameterization
+While NeRF directly uses view direction, we instead
+reparameterize outgoing radiance as a function of the re-
+ﬂection of the view direction about the local normal vector:
+ˆωr = 2(ˆωo · ˆn)ˆn −ˆωo,
+(4)
+where ˆωo = −ˆd is a unit vector pointing from a point in
+space to the camera, and ˆn is the normal vector at that point.
+As demonstrated in Figure 2, this reparameterization makes
+specular appearance better-suited for interpolation.
+For BRDFs that are rotationally-symmetric about the re-
+ﬂected view direction, i.e. ones that satisfy f(ˆωi, ˆωo) =
+p(ˆωr · ˆωi) for some lobe function p (which includes BRDFs
+such as Phong [28]), and neglecting phenomena such as in-
+terreﬂections and self-occlusions, view-dependent radiance
+is a function of the reﬂection direction ˆωr only:
+Lout(ˆωo) ∝
+Z
+Lin(ˆωi)p(ˆωr · ˆωi)dˆωi = F(ˆωr).
+(5)
+Thus, by querying the directional MLP with the reﬂection
+direction, we are effectively training it to output this integral
+as a function of ˆωr. Because more general BRDFs may
+4
+
+vary with the angle between the view direction and normal
+vector due to phenomena such as Fresnel effects [15], we
+also input ˆn · ˆωo to the directional MLP to allow the model
+to adjust the shape of the underlying BRDF.
+3.2. Integrated Directional Encoding
+In realistic scenes with spatially-varying materials, radi-
+ance cannot be represented as a function of reﬂection direc-
+tion alone. The appearance of rougher materials changes
+slowly with reﬂection direction, while the appearance of
+smoother or shinier materials changes rapidly. We intro-
+duce a technique, which we call an Integrated Directional
+Encoding (IDE), that enables the directional MLP to efﬁ-
+ciently represent the function of outgoing radiance for ma-
+terials with any continuously-valued roughness. Our IDE is
+inspired by the integrated positional encoding introduced by
+mip-NeRF [2] which enables the spatial MLP to represent
+preﬁltered volume density for anti-aliasing.
+First, instead of encoding directions with a set of sinu-
+soids, as done in NeRF, we encode directions with a set of
+spherical harmonics {Y m
+ℓ}. This encoding beneﬁts from
+being stationary on the sphere, a property which is cru-
+cial to the effectiveness of positional encoding in Euclidean
+space [24,38] (more details in our supplement).
+Next, we enable the directional MLP to reason about
+materials with different roughnesses by encoding a distri-
+bution of reﬂection vectors instead of a single vector. We
+model this distribution deﬁned on the unit sphere with a
+von Mises-Fisher (vMF) distribution (also known as a nor-
+malized spherical Gaussian), centered at reﬂection vector
+ˆωr, and with a concentration parameter κ deﬁned as inverse
+roughness κ = 1/ρ. The roughness ρ is output by the spa-
+tial MLP (using a softplus activation) and determines the
+roughness of the surface: a larger ρ value corresponds to
+a rougher surface with a wider vMF distribution. Our IDE
+encodes the distribution of reﬂection directions using the
+expected value of a set of spherical harmonics under this
+vMF distribution:
+IDE(ˆωr, κ) =
+
+Eˆω∼vMF(ˆωr,κ)[Y m
+ℓ(ˆω)]: (ℓ, m) ∈ML
+	
+,
+with
+ML = {(ℓ, m): ℓ= 1, ..., 2L, m = 0, ..., ℓ}.
+(6)
+In our supplement, we show that the expected value of
+any spherical harmonic under a vMF distribution has the
+following simple closed-form expression:
+Eˆω∼vMF(ˆωr,κ)[Y m
+ℓ(ˆω)] = Aℓ(κ)Y m
+ℓ(ˆωr),
+(7)
+and that the ℓth attenuation function Aℓ(κ) can be well-
+approximated using a simple exponential function:
+Aℓ(κ) ≈exp
+
+−ℓ(ℓ+ 1)
+2κ
+
+.
+(8)
+Figure 3 illustrates that our integrated directional encod-
+ing has an intuitive behavior; increasing the roughness of a
+Spatial
+MLP
+IDE
+(Eq. 6)
+Directional
+MLP
+Reflection
+(Eq. 4)
+Dot
+product
+Tone
+map:    
+Ours
+Mip-NeRF
+Spatial
+MLP
+Directional
+MLP
+Figure 4. A visualization of mip-NeRF’s and our architectures.
+material by lowering κ corresponds to attenuating the en-
+coding’s spherical harmonics with high orders ℓ, resulting
+in a wider interpolation kernel that limits the high frequen-
+cies in the represented view-dependent color.
+3.3. Diffuse and Specular Colors
+We further simplify the function of outgoing radiance by
+separating the diffuse and specular components, using the
+fact that diffuse color is (by deﬁnition) a function of only
+position. We modify the spatial MLP to output a diffuse
+color cd and a specular tint s, and we combine this with the
+specular color cs provided by the directional MLP to obtain
+a single color value:
+c = γ(cd + s ⊙cs),
+(9)
+where ⊙denotes elementwise multiplication, and γ is a
+ﬁxed tone mapping function that converts linear color to
+sRGB [1] and clips the output color to lie in [0, 1].
+3.4. Additional Degrees of Freedom
+Effects such as interreﬂections and self-occlusion of
+lighting cause illumination to vary spatially over a scene.
+We therefore additionally pass a bottleneck vector b, output
+by the spatial MLP, into the directional MLP so the reﬂected
+radiance can change with 3D position.
+4. Accurate Normal Vectors
+While the structuring of outgoing radiance described in
+the previous section provides a better parameterization for
+the interpolation of specularities, it relies on a good esti-
+mation of volume density for facilitating accurate reﬂection
+direction vectors. However, the volume density ﬁeld recov-
+ered by NeRF-based models suffers from two limitations:
+1) normal vectors estimated from its volume density gradi-
+ent as in Equation 3 are often extremely noisy (Figures 1
+and 5); and 2) NeRF tends to “fake” specular highlights by
+5
+
+Ground truth
+Ours
+Mip-NeRF [2]
+Rendering/Normals
+PSNR↑/MAE↓:
+47.7dB/1.6◦
+23.2dB/96.6◦
+Epipolar Plane Image
+Weights wi
+Figure 5. Prior top-performing NeRF-based approaches can fail
+catastrophically in highly-reﬂective scenes. Mip-NeRF (right col-
+umn) produces blurry renderings of reﬂections that are inconsis-
+tent over different views (see EPI), and does not correctly simu-
+late the appearance of the two different surface roughnesses. Our
+model (middle column) reconstructs the object almost perfectly.
+The accumulated normals and rendering weights wi along the cen-
+tral scanline of the image (bottom row) show that mip-NeRF mim-
+ics specularities using emitters inside the object, while Ref-NeRF
+correctly recovers a concentrated surface.
+embedding emitters inside the object and partially occlud-
+ing them with a “foggy” diffuse surface (see Figure 5). This
+is a suboptimal explanation, as it requires diffuse content
+on the surface to be semitransparent so that the embedded
+emitter can “shine through”.
+We address the ﬁrst issue by using predicted normals for
+computing reﬂection directions: for each position xi along
+a ray we output a 3-vector from the spatial MLP, which we
+then normalize to get a predicted normal ˆn′
+i. We tie these
+predicted normals to the underlying density gradient normal
+samples along each ray {ˆni} using a simple penalty:
+Rp =
+X
+i
+wi∥ˆni −ˆn′
+i∥2,
+(10)
+where wi is the weight of the ith sample along the ray, as
+deﬁned in Equation 1. These MLP-predicted normals tend
+to be smoother than gradient density normals because the
+gradient operator acts as a high-pass ﬁlter on the MLP’s ef-
+fective interpolation kernel [38].
+We address the second issue by introducing a novel
+regularization term that penalizes normals that are “back-
+facing”, i.e. oriented away from the camera, at samples
+along the ray that contribute to the ray’s rendered color:
+Ro =
+X
+i
+wi max(0, ˆn′
+i · ˆd)2.
+(11)
+This regularization acts as a penalty on “foggy” surfaces:
+samples are penalized when they are “visible” (high wi) and
+the volume density is decreasing along the ray (i.e. the dot
+product between ˆn′
+i and ray direction ˆd is positive). This
+normal orientation penalty prevents our method from ex-
+plaining specularities as emitters hidden beneath a semi-
+transparent surface, and the resulting improved normals en-
+able Ref-NeRF to compute accurate reﬂection directions for
+use in querying the directional MLP.
+Throughout the paper, we use the gradient density nor-
+mals for visualization and quantitative evaluation, as they
+directly demonstrate the quality of the underlying recovered
+scene geometry.
+5. Experiments
+We implement our model on top of mip-NeRF [2], an im-
+proved version of NeRF that reduces aliasing. We use the
+same spatial MLP architecture as mip-NeRF (8 layers, 256
+hidden units, ReLU activations), but we use a larger direc-
+tional MLP (8 layers, 256 hidden units, ReLU activations)
+than mip-NeRF to better represent high-frequency reﬂected
+radiance distributions. Please refer to our supplement for
+additional baseline implementation details.
+We use the same quantitative metrics as previous view
+synthesis works [2, 24, 45]:
+PSNR, SSIM [40], and
+LPIPS [46] are used for evaluating rendering quality, and
+mean angular error (MAE) is used for evaluating estimated
+normal vectors.
+Shiny Blender Dataset
+Though the “Blender” dataset
+used by NeRF [24] contains a variety of objects with com-
+plex geometry, it is severely limited in terms of material
+variety: most scenes are largely Lambertian.
+To probe
+more challenging material properties, we have created an
+additional “Shiny Blender” dataset with 6 different glossy
+objects rendered in Blender under conditions similar to
+NeRF’s dataset (100 training and 200 testing images per
+scene). The quantitative results in Table 1 highlight the sig-
+niﬁcant advantage of our model over mip-NeRF, the pre-
+vious top-performing technique, for rendering novel views
+of these highly specular scenes. We also include three im-
+proved versions of mip-NeRF, all of which have an 8-layer
+directional MLP and, respectively: 1) no additional com-
+ponents; 2) normal vectors appended to the view direc-
+tion in the directional MLP (as was done in IDR [44] and
+VolSDF [43]); and 3) our orientation loss applied to mip-
+NeRF’s density gradient normal vectors. Our method sig-
+niﬁcantly outperforms all of these improved variants of this
+6
+
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+MAE◦↓
+PhySG [45] (requires object masks)
+26.21
+0.921
+0.121
+8.46
+Mip-NeRF [2]
+29.76
+0.942
+0.092
+60.38
+Mip-NeRF, 8 layers
+31.59
+0.956
+0.072
+58.07
+Mip-NeRF, 8 layers, w/ normals
+31.39
+0.955
+0.074
+58.27
+Mip-NeRF, 8 layers, w/ Ro
+31.48
+0.955
+0.073
+57.37
+Ours, no reﬂection
+29.47
+0.944
+0.084
+16.19
+Ours, no Ro
+31.62
+0.954
+0.078
+52.56
+Ours, no pred. normals
+30.91
+0.936
+0.105
+30.67
+Ours, concat. viewdir
+35.42
+0.966
+0.061
+21.25
+Ours, ﬁxed lobe
+35.52
+0.965
+0.061
+26.46
+Ours, no diffuse color
+33.32
+0.962
+0.067
+26.13
+Ours, no tint
+35.45
+0.965
+0.060
+22.70
+Ours, no roughness
+33.39
+0.963
+0.065
+25.96
+Ours, PE
+35.90
+0.968
+0.058
+20.31
+Ours
+35.96
+0.967
+0.058
+18.38
+Table 1. Baseline comparisons and ablation study on our “Shiny
+Blender” dataset.
+previously top-performing neural view synthesis method,
+both in terms of novel view rendering quality and normal
+vector accuracy. Although PhySG [45] recovers more ac-
+curate normals, it requires ground-truth object masks (all
+other methods only require RGB images) and produces sig-
+niﬁcantly worse renderings. Figure 5 showcases the impact
+of our approach using one object from our dataset: while
+mip-NeRF [2] fails to recover the geometry and appear-
+ance of this simple metallic sphere with two roughnesses,
+our method produces a nearly perfect reconstruction. Fig-
+ure 9 displays another visual example from this dataset that
+showcases our model’s improvements to recovered normal
+vectors and rendered specularities.
+Table 1 also contains a quantitative ablation study of our
+model. If we use view directions instead of reﬂection direc-
+tions as the directional MLP’s input (“no reﬂection”), our
+method’s reconstruction metrics drop signiﬁcantly, show-
+ing the beneﬁts of our reﬂected radiance parameterization.
+Removing the orientation loss (“no Ro”) results in severely
+degraded normals and renderings, and applying the orien-
+tation loss directly to the density ﬁeld’s normals and using
+those to compute reﬂection directions (“no pred. normals”)
+also reduces performance. Including the view direction as
+input to the directional MLP in addition to the IDE (“con-
+cat. viewdir”) slightly decreases performance, demonstrat-
+ing the difﬁculty of parameterizing specular appearance as
+a function of viewing direction. On the other hand, not
+feeding ˆn′ · ˆωo to the directional MLP (“ﬁxed lobe”) also
+slightly reduces performance. Finally, removing our struc-
+tural components of outgoing radiance (roughness, diffuse
+color, or tint) and replacing our IDE with a non-integrated
+directional encoding or NeRF’s standard positional encod-
+ing all slightly decrease performance.
+Blender Dataset
+We also compare Ref-NeRF to recent
+neural view synthesis baseline methods on the standard
+Blender dataset from the original NeRF paper [24]. Ta-
+ble 2 shows that our method outperforms all prior work
+across all image quality metrics. Our method also yields
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+MAE◦↓
+PhySG [45] (requires object masks)
+20.60
+0.861
+0.144
+29.17
+VolSDF [43]
+27.96
+0.932
+0.096
+19.45
+NSVF [19]
+31.74
+0.953
+0.047
+–
+NeRF [24]
+32.38
+0.957
+0.046
+–
+Mip-NeRF [2]
+33.09
+0.961
+0.043
+38.30
+Ours, PE
+33.90
+0.965
+0.039
+24.16
+Ours
+33.99
+0.966
+0.038
+23.22
+Table 2. Results for our method compared to previous approaches
+on the Blender dataset [24].
+Ground truth
+Ours
+Mip-NeRF [2]
+VolSDF [43]
+PSNR↑/MAE↓
+33.6dB/34.9◦31.1dB/50.4◦22.8dB/40.3◦
+Normals
+Rendering
+Figure 6. Our model renders accurate glossy appearance and re-
+covers ﬁne geometric details.
+VolSDF [44] estimates accurate
+specularities and normal vectors but often fails to capture ﬁne-
+scale details, such as leaves. Mip-NeRF [2] is able to capture ﬁne
+structures but fails to faithfully render specular highlights (such as
+those on the pot and leaves) in novel views, and does not recover
+accurate normal vectors.
+a large (35%) improvement in the MAE of its normal vec-
+tors relative to mip-NeRF. While the hybrid surface-volume
+VolSDF representation [43] recovers slightly more accurate
+normal vectors (15% lower MAE), our PSNR is substan-
+tially higher (6dB) than theirs. Additionally, VolSDF tends
+to oversmooth geometry, which makes our results qualita-
+tively superior upon inspection (see Figure 6).
+Real Captured Scenes
+In addition to these two synthetic
+datasets, we evaluate our model on a set of 3 real captured
+scenes. We capture a “sedan” scene, and use the “garden
+spheres” and “toy car” captures from the Sparse Neural
+Radiance Grids paper [14]. Figure 8 and our supplement
+demonstrate that our rendered specular reﬂections and re-
+covered normal vectors are often much more accurate on
+these real-world scenes.
+7
+
+Diffuse color
+Specular color
+Surface normals
+Unedited output
+Diffuse color edit
+Increased roughness
+Roughness
+Tint
+Unedited output
+Increased roughness
+Decreased roughness
+Outgoing radiance
+Figure 7. Our model’s structuring of outgoing radiance decomposes scene appearance into interpretable components (top row) that enable
+editing (bottom row). Note that the recovered outgoing radiance function for a point on the chrome material ball (top right) is a plausible
+reconstruction of the actual scene lighting. We can edit the diffuse color of the car without affecting the specular reﬂections off its glossy
+paint, and we can plausibly modify the roughness of the car and material balls by manipulating the κ values used in the IDE.
+Ground Truth
+Ours
+Mip-NeRF [2]
+19.9dB
+20.8dB
+Figure 8. In this “garden spheres” scene, mip-NeRF’s foggy ge-
+ometry (see rendered normals) leads to blurred reﬂections (see in-
+set, with PSNRs), while our model is able to recover accurate nor-
+mal vectors and render more realistic reﬂections.
+Scene Editing
+Our structuring of outgoing radiance en-
+ables view-consistent editing of scenes. Although we do not
+perform a full inverse-rendering decomposition of appear-
+ance into BRDFs and lighting, our individual components
+behave intuitively and enable visually plausible scene edit-
+ing results which are not attainable from a standard NeRF.
+Figure 7 shows example edits of the scene’s components,
+and our supplementary video contains additional examples
+that demonstrate the view-consistency of our edited models.
+Ground truth
+Ours
+Mip-NeRF [2]
+Figure 9. On the “coffee” scene from our “Shiny Blender” dataset
+our method succeeds at estimating normals and interpolating spec-
+ularities, whereas mip-NeRF [2] fails at doing both (see reﬂections
+on the spoon for example).
+Limitations
+While
+Ref-NeRF
+signiﬁcantly
+improves
+upon previous top-performing neural scene representations
+for view synthesis, it requires increased computation: eval-
+uating our integrated directional encoding is slightly slower
+than computing a standard positional encoding, and back-
+propagating through the gradient of the spatial MLP to com-
+pute normal vectors makes our model roughly 25% slower
+than mip-NeRF. Our reparameterization of outgoing radi-
+ance by the reﬂection direction does not explicitly model
+interreﬂections or non-distant illumination, so our improve-
+ment upon mip-NeRF is reduced in such cases.
+6. Conclusion
+We have demonstrated that prior neural representations
+for view synthesis fail to accurately represent and render
+scenes with specularities and reﬂections. Our model, Ref-
+NeRF, introduces a new parameterization and structuring of
+view-dependent outgoing radiance, as well as a regularizer
+on normal vectors. These contributions allow Ref-NeRF
+to signiﬁcantly improve both the quality of view-dependent
+appearance and the accuracy of normal vectors in synthe-
+sized views of the scene. We believe that this work makes
+important progress towards capturing and reproducing the
+rich photorealistic appearance of objects and scenes.
+8
+
+Acknowledgements
+We would like to thank Lior Yariv
+and Kai Zhang for helping us evaluate their methods, and
+Ricardo Martin-Brualla for helpful comments on our text.
+DV is supported by the National Science Foundation un-
+der Cooperative Agreement PHY-2019786 (an NSF AI In-
+stitute, http://iaifi.org).
+References
+[1] Matthew Anderson,
+Ricardo Motta,
+Srinivasan Chan-
+drasekar, and Michael Stokes. Proposal for a standard default
+color space for the internet—sRGB. Color and imaging con-
+ference, 1996. 5
+[2] Jonathan T. Barron, Ben Mildenhall, Matthew Tancik, Pe-
+ter Hedman, Ricardo Martin-Brualla, and Pratul P. Srini-
+vasan.
+Mip-NeRF: A multiscale representation for anti-
+aliasing neural radiance ﬁelds. ICCV, 2021. 1, 2, 5, 6, 7,
+8, 13, 14
+[3] Sai Bi, Zexiang Xu, Pratul P. Srinivasan, Ben Mildenhall,
+Kalyan Sunkavalli, Milos Hasan, Yannick Hold-Geoffroy,
+David Kriegman, and Ravi Ramamoorthi. Neural reﬂectance
+ﬁelds for appearance acquisition. arXiv, 2020. 3, 4
+[4] Mark Boss, Raphael Braun, Varun Jampani, Jonathan T. Bar-
+ron, Ce Liu, and Hendrik P. A. Lensch.
+NeRD: Neural
+reﬂectance decomposition from image collections.
+ICCV,
+2021. 3, 4
+[5] Mark Boss, Varun Jampani, Raphael Braun, Ce Liu,
+Jonathan T. Barron, and Hendrik P. A. Lensch. Neural-PIL:
+Neural pre-integrated lighting for reﬂectance decomposition.
+NeurIPS, 2021. 3
+[6] James
+Bradbury,
+Roy
+Frostig,
+Peter
+Hawkins,
+Matthew James Johnson, Chris Leary, Dougal Maclau-
+rin, George Necula, Adam Paszke, Jake VanderPlas, Skye
+Wanderman-Milne,
+and Qiao Zhang.
+JAX: compos-
+able transformations of Python+NumPy programs, 2018.
+http://github.com/google/jax. 13
+[7] Chris Buehler, Michael Bosse, Leonard McMillan, Steven
+Gortler, and Michael Cohen. Unstructured lumigraph ren-
+dering. SIGGRAPH, 2001. 3
+[8] Shenchang Eric Chen and Lance Williams. View interpola-
+tion for image synthesis. SIGGRAPH, 1993. 3
+[9] Paul E. Debevec, Camillo J. Taylor, and Jitendra Malik.
+Modeling and rendering architecture from photographs: a
+hybrid geometry-and image-based approach. SIGGRAPH,
+1996. 3
+[10] John Flynn, Michael Broxton, Paul Debevec, Matthew Du-
+Vall, Graham Fyffe, Ryan Overbeck, Noah Snavely, and
+Richard Tucker.
+DeepView: View synthesis with learned
+gradient descent. CVPR, 2019. 3
+[11] Guy Gafni, Justus Thies, Michael Zollh¨ofer, and Matthias
+Nießner. Dynamic neural radiance ﬁelds for monocular 4D
+facial avatar reconstruction. CVPR, 2021. 3
+[12] Steven J. Gortler, Radek Grzeszczuk, Richard Szeliski, and
+Michael F. Cohen. The lumigraph. SIGGRAPH, 1996. 3
+[13] Peter Hedman, Julien Philip, True Price, Jan-Michael Frahm,
+George Drettakis, and Gabriel Brostow. Deep blending for
+free-viewpoint image-based rendering. ACM Transactions
+on Graphics (SIGGRAPH Asia), 2018. 3
+[14] Peter Hedman,
+Pratul P. Srinivasan,
+Ben Mildenhall,
+Jonathan T. Barron, and Paul Debevec. Baking neural ra-
+diance ﬁelds for real-time view synthesis. ICCV, 2021. 7
+[15] Jan Kautz and Michael D. McCool. Approximation of glossy
+reﬂection with preﬁltered environment maps. Graphics In-
+terface, 2000. 3, 5
+[16] Diederik P. Kingma and Jimmy Ba. Adam: A method for
+stochastic optimization. ICLR, 2015. 13
+[17] Johannes
+Kopf,
+Fabian
+Langguth,
+Daniel
+Scharstein,
+Richard Szeliski, and Michael Goesele. Image-based render-
+ing in the gradient domain. ACM Transactions on Graphics
+(SIGGRAPH Asia), 2013. 3
+[18] Marc Levoy and Pat Hanrahan. Light ﬁeld rendering. SIG-
+GRAPH, 1996. 3
+[19] Lingjie Liu, Jiatao Gu, Kyaw Zaw Lin, Tat-Seng Chua, and
+Christian Theobalt. Neural sparse voxel ﬁelds. NeurIPS,
+2020. 7, 14
+[20] Stephen Lombardi, Tomas Simon, Jason Saragih, Gabriel
+Schwartz, Andreas Lehrmann, and Yaser Sheikh. Neural vol-
+umes: Learning dynamic renderable volumes from images.
+ACM Transactions on Graphics (SIGGRAPH), 2019. 3
+[21] Ricardo Martin-Brualla, Noha Radwan, Mehdi S. M. Sajjadi,
+Jonathan T. Barron, Alexey Dosovitskiy, and Daniel Duck-
+worth. NeRF in the wild: Neural radiance ﬁelds for uncon-
+strained photo collections. CVPR, 2021. 3
+[22] Nelson Max. Optical models for direct volume rendering.
+IEEE TVCG, 1995. 4
+[23] Ben Mildenhall, Pratul P. Srinivasan, Rodrigo Ortiz-Cayon,
+Nima Khademi Kalantari, Ravi Ramamoorthi, Ren Ng, and
+Abhishek Kar. Local light ﬁeld fusion: Practical view syn-
+thesis with prescriptive sampling guidelines. ACM Transac-
+tions on Graphics (SIGGRAPH), 2019. 3
+[24] Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik,
+Jonathan T. Barron, Ravi Ramamoorthi, and Ren Ng. NeRF:
+Representing scenes as neural radiance ﬁelds for view syn-
+thesis. ECCV, 2020. 1, 3, 4, 5, 6, 7, 14
+[25] Michael Oechsle, Songyou Peng, and Andreas Geiger.
+UNISURF: Unifying neural implicit surfaces and radiance
+ﬁelds for multi-view reconstruction. ICCV, 2021. 3
+[26] Keunhong Park, Utkarsh Sinha, Jonathan T. Barron, Soﬁen
+Bouaziz, Dan B. Goldman, Steven M. Seitz, and Ricardo
+Martin-Brualla. Nerﬁes: Deformable neural radiance ﬁelds.
+ICCV, 2021. 3
+[27] Sida Peng, Junting Dong, Qianqian Wang, Shangzhan
+Zhang, Qing Shuai, Xiaowei Zhou, and Hujun Bao. Ani-
+matable neural radiance ﬁelds for modeling dynamic human
+bodies. ICCV, 2021. 3
+[28] Bui Tuong Phong. Illumination for computer generated pic-
+tures. Communications of the ACM, 1975. 4
+[29] Ravi Ramamoorthi. Precomputation-based rendering. Foun-
+dations and Trends in Computer Graphics and Vision, 2009.
+3
+[30] Ravi Ramamoorthi and Pat Hanrahan. A signal-processing
+framework for inverse rendering. SIGGRAPH, 2001. 3
+[31] Ravi Ramamoorthi and Pat Hanrahan. Frequency space en-
+vironment map rendering. SIGGRAPH, 2002. 3
+9
+
+[32] Gernot Riegler and Vladlen Koltun.
+Free view synthesis.
+ECCV, 2020. 3
+[33] Simon Rodriguez, Siddhant Prakash, Peter Hedman, and
+George Drettakis. Image-based rendering of cars using se-
+mantic labels and approximate reﬂection ﬂow. Proc. ACM
+Comput. Graph. Interact. Tech., 2020. 3
+[34] Szymon M. Rusinkiewicz. A new change of variables for ef-
+ﬁcient BRDF representation. Eurographics Rendering Work-
+shop, 1998. 3
+[35] Sudipta N. Sinha, Johannes Kopf, Michael Goesele, Daniel
+Scharstein, and Richard Szeliski.
+Image-based rendering
+for scenes with reﬂections. ACM Transactions on Graphics
+(SIGGRAPH), 2012. 3
+[36] Pratul P. Srinivasan,
+Boyang Deng,
+Xiuming Zhang,
+Matthew Tancik, Ben Mildenhall, and Jonathan T. Barron.
+NeRV: Neural reﬂectance and visibility ﬁelds for relighting
+and view synthesis. CVPR, 2021. 3, 4
+[37] Pratul P. Srinivasan, Richard Tucker Joand nathan T. Barron,
+Ravi Ramamoorthi, Ren Ng, and Noah Snavely.
+Pushing
+the boundaries of view extrapolation with multiplane images.
+CVPR, 2019. 3
+[38] Matthew Tancik, Pratul P. Srinivasan, Ben Mildenhall, Sara
+Fridovich-Keil, Nithin Raghavan, Utkarsh Singhal, Ravi Ra-
+mamoorthi, Jonathan T. Barron, and Ren Ng. Fourier fea-
+tures let networks learn high frequency functions in low di-
+mensional domains. NeurIPS, 2020. 5, 6
+[39] Peng Wang, Lingjie Liu, Yuan Liu, Christian Theobalt, Taku
+Komura, and Wenping Wang. NeuS: Learning neural im-
+plicit surfaces by volume rendering for multi-view recon-
+struction. NeurIPS, 2021. 3
+[40] Zhou Wang, Alan C. Bovik, Hamid R. Sheikh, and Eero P.
+Simoncelli. Image quality assessment: from error visibility
+to structural similarity. IEEE TIP, 2004. 6
+[41] Suttisak Wizadwongsa, Pakkapon Phongthawee, Jiraphon
+Yenphraphai, and Supasorn Suwajanakorn. NeX: Real-time
+view synthesis with neural basis expansion. CVPR, 2021. 3
+[42] Daniel Wood, Daniel Azuma, Wyvern Aldinger, Brian Cur-
+less, Tom Duchamp, David Salesin, and Werner Stuetzle.
+Surface light ﬁelds for 3D photography. SIGGRAPH, 2000.
+3
+[43] Lior Yariv, Jiatao Gu, Yoni Kasten, and Yaron Lipman. Vol-
+ume rendering of neural implicit surfaces. NeurIPS, 2021. 3,
+6, 7, 14
+[44] Lior Yariv, Yoni Kasten, Dror Moran, Meirav Galun, Matan
+Atzmon, Ronen Basri, and Yaron Lipman. Multiview neu-
+ral surface reconstruction by disentangling geometry and ap-
+pearance. NeurIPS, 2020. 6, 7
+[45] Kai Zhang, Fujun Luan, Qianqian Wang, Kavita Bala, and
+Noah Snavely.
+PhySG: Inverse rendering with spherical
+gaussians for physics-based material editing and relighting.
+CVPR, 2021. 3, 6, 7, 14
+[46] Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shecht-
+man, and Oliver Wang. The unreasonable effectiveness of
+deep features as a perceptual metric. CVPR, 2018. 6
+[47] Xiuming Zhang, Pratul P. Srinivasan, Boyang Deng, Paul
+Debevec, William T. Freeman, and Jonathan T. Barron. NeR-
+Factor: Neural factorization of shape and reﬂectance under
+an unknown illumination. ACM Transactions on Graphics
+(SIGGRAPH Asia), 2021. 3, 4
+[48] Tinghui Zhou, Richard Tucker, John Flynn, Graham Fyffe,
+and Noah Snavely.
+Stereo magniﬁcation: Learning view
+synthesis using multiplane images. ACM Transactions on
+Graphics (SIGGRAPH), 2018. 3
+10

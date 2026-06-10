@@ -1,0 +1,1412 @@
+Pixel-GS: Density Control with Pixel-aware
+Gradient for 3D Gaussian Splatting
+Zheng Zhang1
+Wenbo Hu2†
+Yixing Lao1
+Tong He3
+Hengshuang Zhao1†
+1The University of Hong Kong
+2Tencent AI Lab
+3Shanghai AI Lab
+Abstract. 3D Gaussian Splatting (3DGS) has demonstrated impressive
+novel view synthesis results while advancing real-time rendering perfor-
+mance. However, its efficacy heavily relies on the quality of the initial
+point cloud, leading to blurring and needle-like artifacts in regions with
+inadequate initializing points. This issue is mainly due to the point cloud
+growth condition, which only considers the average gradient magnitude
+of points from observable views, thereby failing to grow for large Gaus-
+sians that are observable for many viewpoints while many of them are
+only covered in the boundaries. To address this, we introduce Pixel-GS,
+a novel approach to take into account the number of pixels covered by
+the Gaussian in each view during the computation of the growth con-
+dition. We regard the covered pixel numbers as the weights to dynam-
+ically average the gradients from different views, such that the growth
+of large Gaussians can be prompted. As a result, points within the ar-
+eas with insufficient initializing points can be grown more effectively,
+leading to a more accurate and detailed reconstruction. In addition, we
+propose a simple yet effective strategy to scale the gradient field accord-
+ing to the distance to the camera, to suppress the growth of floaters near
+the camera. Extensive qualitative and quantitative experiments confirm
+that our method achieves state-of-the-art rendering quality while main-
+taining real-time speeds, outperforming on challenging datasets such as
+Mip-NeRF 360 and Tanks & Temples. Code and demo are available at:
+https://pixelgs.github.io
+Keywords: View Synthesis · Point-based Radiance Field · Read-time
+Rendering · 3D Gaussian Splatting · Adaptive Density Control
+1
+Introduction
+Novel View Synthesis (NVS) is a fundamental problem in computer vision and
+graphics. Recently, 3D Gaussian Splatting (3DGS) [21] has drawn increasing
+attention for its explicit point-based representation of 3D scenes and real-time
+rendering performance.
+3DGS represents the scene as a set of points associated with geometry (Gaus-
+sian scales) and appearance (opacities and colors) attributes. These attributes
+†Corresponding author.
+arXiv:2403.15530v1  [cs.CV]  22 Mar 2024
+
+2
+Z. Zhang et al.
+GT
+LPIPS: 0.293
+LPIPS: 0.242
+LPIPS: 0.213
+SFM
+Mem: 0.79GB
+Mem: 1.75GB
+Mem: 1.67GB
+(a) Ground Truth
+(b) 3DGS∗(original
+threshold)
+(c) 3DGS∗(lower threshold)
+(d) Pixel-GS (Ours)
+To convert b to d, adjust densification from
+P ∥g∥
+P 1
+> τpos to
+P pixel·∥g∥
+P pixel
+> τpos.
+Fig. 1: Our Pixel-GS effectively grows points in areas with insufficient initializing
+points (a), leading to a more accurate and detailed reconstruction (d). In contrast,
+3D Gaussian Splatting (3DGS) suffers from blurring and needle-like artifacts in these
+areas, even with a lower threshold of splitting and cloning to encourage more grown
+points (c). The rendering quality (in LPIPS ↓) and memory consumption are shown in
+the results. 3DGS∗is our retrained 3DGS model with better performance.
+can be effectively learned by the differentiable rendering, while the optimization
+of the point cloud’s density is challenging. 3DGS carefully initializes the point
+cloud using the sparse points produced by the Structure from Motion (SfM)
+process and presents an adaptive density control mechanism to split or clone the
+points during the optimization process. However, this mechanism relies heavily
+on the initial point cloud’s quality and cannot effectively grow points in areas
+where the initial point cloud is sparse, resulting in blurry or needle-like artifacts
+in the synthesized images. In practice, the initial point cloud from SfM unavoid-
+ably suffers from insufficient points in areas with repetitive textures and few
+observations. As shown in the first and second columns of Figure 1, the blurry
+regions in the RGB images are well aligned with the areas where few points are
+initialized, and 3DGS fails to generate enough points in these areas.
+In essence, this issue is mainly attributed to the condition of when to split or
+clone a point. 3DGS decides it by checking whether the average gradient magni-
+tude of the points in the Normalized Device Coordinates (NDC) is larger than
+a threshold. The magnitude of the gradient is equally averaged across different
+viewpoints, and the threshold is fixed. Large Gaussians are usually visible in
+many viewpoints, and the size of their projection area varies significantly across
+views, leading to the number of pixels involved in the gradient calculation varies
+significantly. According to the mathematical form of the Gaussian distribution, a
+few pixels near the center of the projected Gaussian contribute much more to the
+gradient than the pixels far away from the center. Larger Gaussians often have
+many viewpoints where the area near the projected center point is not within
+the screen space, thereby lowering the average gradient, making them difficult to
+split or clone. This issue cannot be solved by merely lowering the threshold, as
+it would more likely encourage growing points in areas with sufficient points, as
+
+Pixel-GS
+3
+shown in the third column of Figure 1, still leaving blurry artifacts in the areas
+with insufficient points.
+In this paper, we propose to consider the calculation of the mean gradient
+magnitude of points from the perspective of pixels. During the computation of
+the average gradient magnitude for a Gaussian, we take into account the number
+of pixels covered by the Gaussian in each view by replacing the averaging across
+views with the weighted average across views by the number of covered pix-
+els. The motivation behind this is to amplify the gradient contribution of large
+Gaussians while leaving the conditions for splitting or cloning small Gaussians
+unchanged, such that we can effectively grow points in the areas with large Gaus-
+sians. In the meanwhile, for small Gaussians, the weighted average only slightly
+impacts the final gradient since the variation of covered pixel numbers across
+different viewpoints is minimal. Therefore, the final number of points in areas
+with sufficient initial points would not change significantly to avoid unnecessary
+memory consumption and processing time, but importantly, points in areas with
+insufficient initial points can be effectively grown to reconstruct fine-grained de-
+tails. As shown in the last column of Figure 1, our method effectively grows
+points in areas with insufficient initial points and renders high-fidelity images,
+while directly lowering the threshold in 3DGS to maintain a similar number of fi-
+nal points fails to render blurring-free results. Besides, we observe that “floaters”
+tend to appear near the camera, which are points that are not well aligned with
+the scene geometry and are not contributing to the final rendering. To this end,
+we propose to scale the gradient field in NDC space according to the depth value
+of the points, thereby suppressing the growth of “floaters” near the camera.
+To evaluate the effectiveness of our method, we conducted extensive experi-
+ments on the challenging Mip-NeRF 360 [3] and Tanks & Temples [22] datasets.
+Experimental results validate that our method consistently outperforms the orig-
+inal 3DGS, both quantitatively (17.8% improvement in terms of LPIPS) and
+qualitatively. We also demonstrate that our method is more robust to the spar-
+sity of the initial point cloud by manually discarding a certain proportion (up
+to 99%) of the initial SfM point clouds. In summary, we make the following
+contributions:
+– We analyzed the reason for the blurry artifacts in 3DGS and propose to op-
+timize the number of points from the perspective of pixels, thereby enabling
+effectively growing points in areas with insufficient initial points.
+– We present a simple yet effective gradient scaling strategy to suppress the
+“floater” artifacts near the camera.
+– Our method achieves state-of-the-art performance on the challenging Mip-
+NeRF 360 and Tanks & Temples datasets and is more robust to the quality
+of initial points.
+2
+Related Work
+Novel view synthesis. The task of novel view synthesis refers to the process of
+generating images from perspectives different from the original input viewpoints.
+
+4
+Z. Zhang et al.
+Recently, NeRF [35] has achieved impressive results in novel view synthesis by
+using neural networks to approximate the radiance field and employing volu-
+metric rendering [10, 27, 32, 33] techniques for rendering. These approaches use
+implicit functions (such as MLPs [2,3,35], feature grid-based representations [6,
+13,29,37,46], or feature point-based representations [21,50]) to fit the scene’s ra-
+diance field and utilize a rendering formula for rendering. Due to the requirement
+to process each sampled point along a ray through an MLP to obtain its density
+and color, during the volume rendering, these works significantly suffer from low
+rendering speed. Subsequent methods [15,41,42,56,58] have refined a pre-trained
+NeRF into a sparse representation, thus achieving real-time rendering of NeRF.
+Although some advanced scene representations [2–4,6,7,13,16,25,29,37,46] have
+been proposed to improve one or more aspects of NeRF, such as training cost,
+rendering results, and rendering speed, 3D Gaussian Splatting (3DGS) [21] still
+draws increasing attention due to its explicit representation, high-fidelity results,
+and real-time rendering speed. Some subsequent works on 3DGS have further
+improved it from perspectives such as anti-aliasing [51,59], reducing memory us-
+age [12,26,30,36,38,39], replacing spherical harmonics functions to enhance the
+modeling capability of high-frequency signals based on reflective surfaces [54],
+and modeling dynamic scenes [11, 17, 20, 24, 31, 49, 53, 55]. However, 3DGS still
+tends to exhibit blurring and needle-like artifacts in areas where the initial points
+are sparse. This is because 3DGS initializes the scale of each Gaussian based on
+the distance to neighboring Gaussians, making it challenging for the point cloud
+growth mechanism of 3DGS to generate sufficient points to accurately model
+these areas.
+Point-based radiance field. Point-based representations (such as point clouds)
+commonly represent scenes using fixed-size, unstructured points, and are ren-
+dered by rasterization using GPUs [5, 43, 45]. Although this is a simple and
+convenient solution to address topological changes, it often results in holes or
+outliers, leading to artifacts during rendering. To mitigate issues of discontinu-
+ity, researchers have proposed differentiable rendering based on points, utilizing
+points to model local domains [14,18,21,28,48,50,57]. Among these approaches,
+[1,23] employs neural networks to represent point features and utilizes 2D CNNs
+for rendering. Point-NeRF [50] models 3D scenes using neural 3D points and
+presents strategies for pruning and growing points to repair common holes and
+outliers in point-based radiance fields. 3DGS [21] renders using a rasterization
+approach, which significantly speeds up the rendering process. It starts with a
+sparse point cloud initialization from SfM and fits each point’s influence area
+and color features using three-dimensional Gaussian distributions and spherical
+harmonics functions, respectively. To enhance the representational capability of
+this point-based spatial function, 3DGS introduces a density control mechanism
+based on the gradient of each point’s NDC (Normalized Device Coordinates) co-
+ordinates and opacity, managing the growth and elimination of the point cloud.
+Recent work [8] on 3DGS has improved the point cloud growth process by incor-
+porating depth and normals to enhance the fitting ability in low-texture areas.
+In contrast, our Pixel-GS does not require any additional priors or information
+
+Pixel-GS
+5
+resources, e.g. depths and normals, and can directly grow points in areas with
+insufficient initializing points, reducing blurring and needle-like artifacts.
+Floater artifacts. Most radiance field scene representation methods encounter
+floater artifacts, which predominantly appear near the camera and are more
+severe with sparse input views. Some papers [9,44] address floaters by introducing
+depth priors. NeRFshop [19] proposes an editing method to remove floaters.
+Mip-NeRF 360 [3] introduces a distortion loss by adding a prior that the density
+distribution along each ray is unimodal, effectively reducing floaters near the
+camera. NeRF in the Dark [34] suggests a variance loss of weights to decrease
+floaters. FreeNeRF [52] introduces a penalty term for the density of points close
+to the camera as a loss to reduce floaters near the camera. Most of these methods
+suppress floaters by incorporating priors through loss or editing methods, while
+“Floaters No More” [40] attempts to explore the fundamental reason for the
+occurrence of floaters and points out that floaters primarily arise because, for
+two regions of the same volume and shape, the number of pixels involved in the
+computation is proportional to the inverse square of each region’s distance from
+the camera. Under the same learning rate, areas close to the camera rapidly
+complete optimization and, after optimization, block the optimization of areas
+behind them, leading to an increased likelihood of floaters near the camera.
+Our method is inspired by this analysis and deals with floaters by a simple yet
+effective strategy, i.e., scaling the gradient field by the distance to the camera.
+3
+Method
+We first review the point cloud growth condition of “Adaptive density control”
+in 3DGS. Then, we propose a method for calculating the average gradient mag-
+nitude in the point cloud growth condition from a pixel perspective, significantly
+enhancing the reconstruction capability in areas with insufficient initial points.
+Finally, we show that by scaling the spatial gradient field that controls point
+growth, floaters near the input cameras can be significantly suppressed.
+3.1
+Preliminaries
+In 3D Gaussian Splatting, Gaussian i under viewpoint k generates a 2D covari-
+ance matrix Σi,k
+2D =
+ai,k bi,k
+bi,k ci,k
+
+, and the corresponding influence range radius
+Ri
+k can be determined by:
+ \
+l a b e
+l
+ {rad i i} R
+_
+{
+k}^{i} = 3\ti
+m
+es
+ 
+\
+left ( \ f rac {a^{
+i
+, k}+c^{i,k}}{2}+\sqrt {\left ( \frac {a^{i,k}+c^{i,k}}{2} \right ) ^2-\left ( a^{i,k}c^{i,k}-\left ( b^{i,k} \right ) ^2 \right )} \right ), 
+(1)
+which covers 99% of the probability in the Gaussian distribution. For Gaus-
+sian i, under viewpoint k, the coordinates in the camera coordinate system are
+ µi,k
+c,x, µi,k
+c,y, µi,k
+c,z
+
+, and in the pixel coordinate system, they are
+ µi,k
+p,x, µi,k
+p,y, µi,k
+p,z
+
+.
+
+6
+Z. Zhang et al.
+W
+H
+split
+clone
+P ∥gi∥
+P 1
+> τ pos
+P pi·f(∥gi∥)
+P pi
+> τ pos
+f
+depth
+gi
+gi
+Fig. 2: Pipeline of Pixel-GS. pi represents the number of pixels participating in
+the calculation for the Gaussian from this viewpoint, and gi represents the gradient
+of the Gaussian’s NDC coordinates. We changed the condition for deciding whether a
+Gaussian should split or clone from the left to the right side.
+With the image width being W pixels and the height H pixels, Gaussian i par-
+ticipates in the calculation for viewpoint k when it simultaneously satisfies the
+following six conditions:
+ 
+\
+l
+a
+b
+el
+ { pa rt_c
+al}  \beg
+in 
+{ c ase s } R_
+{k} ^ {i
+} > 0 ,  \mu
+ _{
+c , z}^ { i,k}
+>0. 2 , 
+\ \  - R_{k}^{i}-0.5<\mu _{p,x}^{i,k}<R_{k}^{i}+W-0.5, \\ -R_{k}^{i}-0.5<\mu _{p,y}^{i,k}<R_{k}^{i}+H-0.5. \end {cases} 
+(2)
+In 3D Gaussian Splatting, whether a point is split or cloned is determined by
+the average magnitude of the gradient of the NDC coordinates for the viewpoints
+in which the Gaussian participates in the calculation. Specifically, for Gaussian
+i under viewpoint k, the NDC coordinate is (µi,k
+ndc,x, µi,k
+ndc,y, µi,k
+ndc,z), and the loss
+under viewpoint k is Lk. During “Adaptive Density Control” every 100 iterations,
+Gaussian i participates in the calculation for M i viewpoints. The threshold τpos
+is set to 0.0002 in 3D Gaussian Splatting. When Gaussian satisfies
+ \ l
+abe
+l 
+{sp
+lit} 
+\frac
+ {
+\
+s
+um 
+_{k=1
+}^{M^
+i}
+{ \
+s qrt {\left ( \frac {\partial L_k}{\partial \mu _\mathrm {ndc,x}^{i,k}} \right ) ^2+\left ( \frac {\partial L_k}{\partial \mu _\mathrm {ndc,y}^{i,k}} \right ) ^2}}}{M^i}>\tau _\mathrm {pos}, 
+(3)
+it is transformed into two Gaussians.
+3.2
+Pixel-aware Gradient
+Although the current criteria used to decide whether a point should split or clone
+are sufficient for appropriately distributing Gaussians in most areas, artifacts
+tend to occur in regions where initial points are sparse. In 3DGS, the lengths of
+the three axes of the ellipsoid corresponding to Gaussian i are initialized using
+the values calculated by:
+ \ l
+ab
+el
+ 
+{r _
+i
+ni
+t
+} r
+^
+i=
+\
+sq
+r
+t {\frac {\left ( d_{1}^{i} \right ) ^2+\left ( d_{2}^{i} \right ) ^2+\left ( d_{3}^{i} \right ) ^2}{3}}, 
+(4)
+
+Pixel-GS
+7
+where di
+1, di
+2, and di
+3 are the distances to the three nearest points to Gaussian i,
+respectively. We observed that areas inadequately modeled often have very sparse
+initial SfM point clouds, leading to the initialization of Gaussians in these areas
+with ellipsoids having larger axis lengths. This results in their involvement in the
+computation from too many viewpoints. These Gaussians exhibit larger gradients
+only in viewpoints where the center point, after projection, is within or near the
+pixel space. This implies that, from these viewpoints, the large Gaussians cover a
+larger area in the pixel space after projection. This results in these points having
+a smaller average gradient size of their NDC coordinates during the “Adaptive
+Density Control” process every 100 iterations (Eq. 3), because they participate
+in the computation from too many viewpoints and only have significant gradient
+sizes in individual viewpoints. Consequently, it is difficult for these points to
+split or clone, leading to poor modeling in these areas.
+Below, we analyze through equations why the Gaussians in the previously
+mentioned sparser areas can only obtain larger NDC coordinate gradients from
+viewpoints with sufficient coverage, whereas for viewpoints that only affect the
+edge areas, the NDC coordinate gradients are smaller. The contribution of a
+pixel under viewpoint k to the NDC coordinate gradient of Gaussian i can be
+computed as:
+ 
+\
+lab
+el {d
+L_dnd
+c_i
+_k} \
+left 
+(
+ \
+be
+g
+i
+n {ar
+r
+a
+y}{
+c
+}
+ \fr
+ac {\
+p
+a
+rtial
+ 
+L_k
+}{\pa
+r
+t
+i
+a
+l \
+mu _\
+mathr
+m {nd
+c,x
+}^{i,
+k}} \
+\ \fr
+a
+c
+ 
+{
+\
+partial L_k}{\partial \mu _\mathrm {ndc,y}^{i,k}} \\ \end {array} \right ) =\sum _{pix=1}^{m_{k}^{i}}{\sum _{j=1}^3{\left ( \frac {\partial L_k}{\partial c_{j}^{pix}}\times \frac {\partial c_{j}^{pix}}{\partial \alpha _{k,pix}^{i}}\times \left ( \begin {array}{c} \frac {\partial \alpha _{k,pix}^{i}}{\partial \mu _\mathrm {ndc,x}^{i,k}} \\ \frac {\partial \alpha _{k,pix}^{i}}{\partial \mu _\mathrm {ndc,y}^{i,k}} \\ \end {array} \right ) \right )}}, 
+(5)
+where both
+∂αi
+k,pix
+∂µi,k
+ndc,x and
+∂αi
+k,pix
+∂µi,k
+ndc,y contain factor αi
+k, which can be calculated as:
+ \
+label  {a l pha
+_
+i}
+ 
+\alph a  _{k
+,pi
+x}^{ i }=\s
+igm
+a ^
+i\ti
+me
+s \ exp \ l eft 
+( -
+\fra c  {1}
+{2}
+\l
+eft ( \begin {array}{c} pix_x-\mu _{p,x}^{i,k} \\ pix_y-\mu _{p,y}^{i,k} \\ \end {array} \right ) ^T\left ( \varSigma _{2D}^{i,k} \right ) ^{-1}\left ( \begin {array}{c} pix_x-\mu _{p,x}^{i,k} \\ pix_y-\mu _{p,y}^{i,k} \\ \end {array} \right ) \right ), 
+(6)
+where cpix
+j
+represents the color of the jth channel of the current pixel, and
+mi
+k represents the number of pixels involved in the calculation for Gaussian i
+under viewpoint k. αi
+k,pix as a function of the distance between the center of
+the projected Gaussian and the pixel center, exhibits exponential decay as the
+distance increases.
+This results in a few pixels close to the center position of the projected
+Gaussian making a primary contribution to the NDC coordinate gradient of this
+Gaussian. For large Gaussians, many viewpoints will only affect the edge areas,
+projecting onto pixels in these viewpoints, leading to the involvement of these
+viewpoints in the calculation but with very small NDC coordinate gradients. On
+the other hand, we observe that for these points, for a given viewpoint, when
+a large number of pixels are involved in the calculation after projection, these
+points often exhibit larger gradients of NDC coordinates in this viewpoint. This
+is easy to understand because, when a large number of pixels are involved in the
+calculation after projection, the projected center point tends to be within the
+
+8
+Z. Zhang et al.
+pixel plane, and according to previous calculations, a few pixels near the center
+point are the main contributors to the gradient of the NDC coordinates.
+To solve this problem, we assign a weight to the gradient size of the NDC co-
+ordinates for each Gaussian at every viewpoint, where the weight is the number
+of pixels involved in the computation for that Gaussian from the corresponding
+viewpoint. The advantage of this computational approach is that, for large Gaus-
+sians, the number of pixels involved in the calculations varies significantly across
+different viewpoints. According to previous derivations, these large Gaussians
+only receive larger gradients in viewpoints where a higher number of pixels are
+involved in the calculations. Weighting the magnitude of gradients by the num-
+ber of participating pixels in an average manner can more rationally promote the
+splitting or cloning of these Gaussians. Additionally, for smaller Gaussians, the
+variation in the number of pixels involved across different viewpoints is minimal.
+The current averaging method does not produce a significant change compared
+to the original conditions and does not result in excessive additional memory
+consumption. The modified equation to decide whether a Gaussian undergoes
+split or clone is given by:
+ \ l
+abe l 
+{ s
+pl
+it2
+} \fr
+ac {\
+su
+m
+ 
+_{k
+=1}^{
+M^i}{
+m_
+{k }
+^{i }\
+t
+i mes \sqrt {\left ( \frac {\partial L_k}{\partial \mu _\mathrm {ndc,x}^{i,k}} \right ) ^2+\left ( \frac {\partial L_k}{\partial \mu _\mathrm {ndc,y}^{i,k}} \right ) ^2}}}{\sum _{k=1}^{M^i}{m_{k}^{i}}}>\tau _\mathrm {pos}, 
+(7)
+where M i is the number of viewpoints in which Gaussian i participates in the
+computation during the corresponding 100 iterations of “Adaptive Density Con-
+trol”, mi
+k is the number of pixels Gaussian i participates in at viewpoint k, and
+∂Lk
+∂µi,k
+ndc,x and
+∂Lk
+∂µi,k
+ndc,y respectively represent the gradients of Gaussian i in the x
+and y directions of NDC space at viewpoint k. The conditions under which a
+Gaussian participates in the computation for a pixel is given by:
+ 
+\
+l
+a
+b
+e
+l
+ 
+{
+pi
+xel}  \beg
+in 
+{c
+a
+s
+es} \ sqrt
+ {\
+le
+f t 
+( 
+pi
+x_x
+-
+\ m u 
+_{p,x
+}
+^ {i,k}
+ \
+right  
+)
+ ^2+\left ( pix_y-\mu _{p,y}^{i,k} \right ) ^2}<R_{k}^{i}, \\ \prod _{j=1}^i{\left ( 1-\alpha _{k,pix}^{j} \right )}\geqslant 10^{-4}, \\ \alpha _{k,pix}^{i}\geqslant \frac {1}{255}, \end {cases} 
+(8)
+while the conditions under which a Gaussian participates in the computation
+from a viewpoint is given by Eq. 2.
+3.3
+Scaled Gradient Field
+While using “Pixel-aware Gradient” to decide whether a point should split or
+clone (Eq. 7) can address artifacts in modeling areas with insufficient viewpoints
+and repetitive texture, we found that this condition for point cloud growth also
+exacerbates the presence of floaters near the camera. This is mainly because
+floaters near the camera occupy a large screen space and have significant gradi-
+ents in their NDC coordinates, leading to an increasing number of floaters during
+
+Pixel-GS
+9
+the point cloud growth process. To address this issue, we scale the gradient field
+of the NDC coordinates.
+Specifically, we use the radius to determine the scale of the scene, where the
+radius is calculated by:
+ \labe l  {r a diu
+s
+}
+ 
+\
+mathrm
+ { r a
+d
+i
+u
+s}=
+1.
+1\cdot
+ 
+\
+m
+a x _i \left \{ \left \| \mathbf {C}_i-\frac {1}{N}\sum _{j=1}^N{\mathbf {C}_j} \right \| _2 \right \}. 
+(9)
+In the training set, there are N viewpoints, with Cj representing the coordinates
+of the jth viewpoint’s camera in the world coordinate system. We scale the
+gradient of the NDC coordinates for each Gaussian i under the kth viewpoint,
+with the scaling factor f (i, k) being calculated by:
+ \la be l  {sc
+a
+l
+e
+} f\
+lef
+t ( i, k  \righ
+t 
+)  = \
+m
+a thrm {clip}\left ( \left ( \frac {\mu _{c,z}^{i,k}}{\gamma _\mathrm {depth}\times \mathrm {radius}} \right ) ^2,0,1 \right ), 
+(10)
+where µi,k
+c,z is the z-coordinate of Gaussian i in the camera coordinate system un-
+der the kth viewpoint, indicating the depth of this Gaussian from the viewpoint,
+and γdepth is a hyperparameter set manually.
+The primary inspiration for using squared terms as scaling coefficients in
+Eq. 10 comes from “Floaters No More” [40]. This paper notes that floaters in
+NeRF [35] are mainly due to regions close to the camera occupying more pixels
+after projection, which leads to receiving more gradients during optimization.
+This results in these areas being optimized first, consequently obscuring the
+originally correct spatial positions from being optimized. The number of pixels
+occupied is inversely proportional to the square of the distance to the camera,
+hence the scaling of gradients by the squared distance.
+In summary, a major issue with pixel-based optimization is the imbalance
+in the spatial gradient field, leading to inconsistent optimization speeds across
+different areas. Adaptive scaling of the gradient field in different spatial regions
+can effectively address this problem. Therefore, the final calculation equation
+that determines whether a Gaussian undergoes a “split” or “clone” is given by:
+ \ l
+abe l 
+{ s p lit 3}  
+\f
+rac
+ {\su
+m _{k
+=1
+}
+^
+{M^
+i}{m_
+{k}^{
+i}
+\t i
+mes  f
+\
+l eft ( i,k \right ) \times \sqrt {\left ( \frac {\partial L_k}{\partial \mu _\mathrm {ndc,x}^{i,k}} \right ) ^2+\left ( \frac {\partial L_k}{\partial \mu _\mathrm {ndc,y}^{i,k}} \right ) ^2}}}{\sum _{k=1}^{M^i}{m_{k}^{i}}}>\tau _\mathrm {pos}. 
+(11)
+4
+Experiments
+4.1
+Experimental Setup
+Datasets and benchmarks. We evaluated our method across a total of 30
+real-world scenes, including all scenes from Mip-NeRF 360 (9 scenes) [3] and
+Tanks & Temples (21 scenes) [22], which are two most widely used datasets
+
+10
+Z. Zhang et al.
+in the field of 3D reconstruction. They contain both bounded indoor scenes
+and unbounded outdoor scenes, allowing for a comprehensive evaluation of our
+method’s performance.
+Evaluation metrics. We assess the quality of reconstruction through PSNR↑,
+SSIM↑[47], and LPIPS↓[60]. Among them, PSNR reflects pixel-aware errors but
+does not quite correspond to human visual perception as it treats all errors as
+noise without distinguishing between structural and non-structural distortions.
+SSIM accounts for structural transformations in luminance, contrast, and struc-
+ture, thus more closely mirroring human perception of image quality. LPIPS uses
+a pre-trained deep neural network to extract features and measures the high-level
+semantic differences between images, offering a similarity that is closer to human
+perceptual assessment compared to PSNR and SSIM.
+Implementation details. Our method only requires minor modifications to
+the original code of 3DGS, so it is compatible with almost all subsequent works
+on 3DGS. We use the default parameters of 3DGS to ensure consistency with
+the original implementation, including maintaining the same threshold τpos for
+splitting and cloning points as in the original 3DGS. For all scenes, we set a con-
+stant γdepth value in Eq. 10 as 0.37 which is obtained through experimentations.
+All experiments were conducted on one RTX 3090 GPU with 24GB memory.
+4.2
+Main Results
+We select several representative methods for comparison, including the NeRF
+methods, e.g., Plenoxels [13], INGP [37], and Mip-NeRF 360 [3], and the 3DGS
+method [21]. We used the official implementation for all of the compared meth-
+ods, and the same training/testing split as Mip-NeRF 360, selecting one out of
+every eight photos for testing.
+Quantitative results. The quantitative results (PSNR, SSIM, and LPIPS) on
+the Mip-NeRF 360 and Tanks & Temples datasets are presented in Tables 1
+and 2, respectively. We also provide the results of three challenging scenes for
+each dataset for more detailed information. Here, we retrained the 3DGS (noted
+as 3DGS∗) as doing so yields a better performance than the original 3DGS (noted
+as 3DGS). We can see that our method consistently outperforms all the other
+methods, especially in terms of the LPIPS metric, while maintaining real-time
+rendering speed (to be discussed later). Besides, compared to 3DGS, our method
+shows significant improvements in the three challenging scenes in both datasets
+and achieves better performance over the entire dataset. It quantitatively vali-
+dates the effectiveness of our method in improving the quality of reconstruction.
+Qualitative results. In Figures 1 and 3, we showcase the comparisons between
+our method and 3DGS∗. We can see our approach significantly reduces the blur-
+ring and needle-like artifacts, e.g. the region of the flowers in the second row
+and the blow-up region in the last row, compared against the 3DGS∗. These re-
+gions are initialized with insufficient points from SfM, and our method effectively
+grows points in these areas, leading to a more accurate and detailed reconstruc-
+tion. Please refer to the supplemental materials for the point cloud comparison.
+
+Pixel-GS
+11
+Table 1: Quantitative results on the Mip-NeRF 360 dataset. Cells are high-
+lighted as follows: best , second best , and third best . We also show the results of
+three challenging scenes. 3DGS∗is our retrained 3DGS model with better performance.
+Mip-NeRF 360 (all scenes)
+Flowers
+Bicycle
+Stump
+Method
+PSNR↑
+SSIM↑
+LPIPS↓PSNR↑SSIM↑LPIPS↓PSNR↑SSIM↑LPIPS↓PSNR↑SSIM↑LPIPS↓
+Plenoxels [13]
+23.08
+0.625
+0.463
+20.10
+0.431
+0.521
+21.91
+0.496
+0.506
+20.66
+0.523
+0.503
+INGP-Base [37]
+25.30
+0.671
+0.371
+20.35
+0.450
+0.481
+22.19
+0.491
+0.487
+23.63
+0.574
+0.450
+INGP-Big [37]
+25.59
+0.699
+0.331
+20.65
+0.486
+0.441
+22.17
+0.512
+0.446
+23.47
+0.594
+0.421
+Mip-NeRF 360 [3]
+27.69
+0.792
+0.237
+21.73
+0.583
+0.344
+24.37
+0.685
+0.301
+26.40
+0.744
+0.261
+3DGS [21]
+27.21
+0.815
+0.214
+21.52
+0.605
+0.336
+25.25
+0.771
+0.205
+26.55
+0.775
+0.210
+3DGS∗[21]
+27.71
+0.826
+0.202
+21.89
+0.622
+0.328
+25.63
+0.778
+0.204
+26.90
+0.785
+0.207
+Pixel-GS (Ours)
+27.88
+0.834
+0.176
+21.94
+0.652
+0.251
+25.74
+0.793
+0.173
+27.11
+0.796
+0.181
+Table 2: Quantitative results on the Tanks & Temples dataset. We also show
+the results of three challenging scenes. ∗indicates retraining for better performance.
+Tanks & Temples (all scenes)
+Train
+Barn
+Caterpillar
+Method
+PSNR↑
+SSIM↑
+LPIPS↓PSNR↑SSIM↑LPIPS↓PSNR↑SSIM↑LPIPS↓PSNR↑SSIM↑LPIPS↓
+3DGS∗[21]
+24.19
+0.844
+0.194
+22.02
+0.812
+0.209
+28.46
+0.869
+0.182
+23.79
+0.809
+0.211
+Pixel-GS (Ours)
+24.38
+0.850
+0.178
+22.13
+0.823
+0.180
+29.00
+0.888
+0.144
+24.08
+0.832
+0.173
+These examples clearly validate that our method is more robust to the quality
+of initialization point clouds and can reconstruct high-fidelity details.
+4.3
+Ablation Studies
+To evaluate the effectiveness of individual components of our method, i.e. the
+pixel-aware gradient and the scaled gradient field, we conducted ablation stud-
+ies on the Mip-NeRF 360 and Tanks & Temples datasets. The quantitative and
+qualitative results are presented in Table 3 and Figure 4, respectively. We can see
+that both the pixel-aware gradient and the scaled gradient field contribute to the
+improvement of the reconstruction quality in the Mip-NeRF 360 dataset. How-
+ever, the pixel-aware gradient strategy reduces the reconstruction quality in the
+Tanks & Temples dataset. This is mainly due to floaters that tend to appear near
+the camera in some large scenes in Tanks & Temples and the pixel-aware gra-
+dient encourages more Gaussians, as shown in column (b) of Figure 4. Notably,
+this phenomenon also exists for the 3DGS when the threshold τpos is lowered,
+which also promots more Gaussians, as shown in Table 4. But importantly, the
+combination of both proposed strategies achieves the best performance in the
+Tanks & Temples dataset, as shown in Table 3, since the scaled gradient field
+can suppress the growth of floaters near the camera. In summary, the ablation
+studies demonstrate the effectiveness of our proposed individual components and
+the necessity of combining them to achieve the best performance.
+4.4
+Analysis
+The impact of lowering the threshold τpos. As the blurring and needle-like
+artifacts in 3DGS mainly occur in areas with insufficient initializing points, one
+straightforward solution would be to lower the threshold τpos to encourage the
+
+12
+Z. Zhang et al.
+(a) Ground Truth
+(b) Pixel-GS (Ours)
+(c) 3DGS∗[21]
+Fig. 3: Qualitative comparison between Pixel-GS (Ours) and 3DGS∗. The
+first three scenes are from the Mip-NeRF 360 dataset (Bicycle, Flowers, and Treehill),
+while the last four scenes are from the Tanks & Temples dataset (Barn, Caterpillar,
+Playground, and Train). The blow-up regions or arrows highlight the parts with distinct
+differences in quality. 3DGS∗is our retrained 3DGS model with better performance.
+
+Pixel-GS
+13
+22.69dB
+8.20dB
+23.88dB
+24.29dB
+25.61dB
+20.35dB
+26.42dB
+28.25dB
+20.35dB
+15.05dB
+20.35dB
+11.28dB
+20.35dB
+20.53dB
+20.35dB
+22.16dB
+19.37dB
+13.09dB
+20.09dB
+21.93dB
+(a) 3DGS∗
+(b) Pixel-aware Gradient
+(c) Scaled Gradient Field
+(d) Complete Model
+Fig. 4: Qualitative results of the ablation study. The PSNR↑results are shown
+on the corresponding images.
+Table 3: Ablation study. The metrics are derived from the average values across all
+scenes of the Mip-NeRF 360 and Tanks & Temples datasets, respectively.
+Mip-NeRF 360
+Tanks & Temples
+Method
+PSNR↑SSIM↑LPIPS↓PSNR↑SSIM↑LPIPS↓
+3DGS∗[21]
+27.71
+0.826
+0.202
+24.23
+0.844
+0.194
+Pixel-aware Gradient
+27.74
+0.833
+0.176
+21.80
+0.791
+0.239
+Scaled Gradient Field
+27.72
+0.825
+0.202
+24.34
+0.843
+0.198
+Complete Model
+27.88
+0.834
+0.176
+24.38
+0.850
+0.178
+Table 4: Impact of lowering τpos. We show the corresponding quality and efficiency
+metrics when lowering the threshold τpos of point growth for 3DGS∗and our method.
+Dataset
+Strategy
+PSNR↑SSIM↑LPIPS↓Train FPS Memory
+Mip-NeRF 360
+3DGS∗(τpos = 2e −4)
+27.71
+0.826
+0.202
+25m40s 126 0.72GB
+3DGS∗(τpos = 1.28e −4)
+27.83
+0.833
+0.181
+43m23s 90
+1.4GB
+Ours (τpos = 2e −4)
+27.88
+0.834
+0.176
+41m25s 89
+1.2GB
+Tanks & Temples
+3DGS∗(τpos = 2e −4)
+24.19
+0.844
+0.194
+16m3s 135 0.41GB
+3DGS∗(τpos = 1e −4)
+23.86
+0.842
+0.187
+27m59s 87
+0.94GB
+Ours (τpos = 2e −4)
+24.38
+0.850
+0.178
+26m36s 92
+0.84GB
+growth of more points. To verify this, we experimented on the Mip-NeRF 360
+and Tanks & Temples datasets by lowering the threshold τpos from 2e −4 to
+1.28e −4 for 3DGS to make the final optimized number of points comparable to
+ours. From Table 4, we can see that lowering the threshold τpos for 3DGS signif-
+icantly increases the memory consumption and decreases the rendering speed,
+while still falling behind ours in terms of reconstruction quality. As can be seen
+from the qualitative comparison in Figure 1, this is because the point cloud
+
+14
+Z. Zhang et al.
+0.0
+0.5
+1.0
+27.0
+27.5
+PSNR vs. Drop Rate
+Ours
+3DGS
+0.0
+0.5
+1.0
+0.80
+0.82
+SSIM vs. Drop Rate
+Ours
+3DGS
+0.0
+0.5
+1.0
+0.20
+0.25
+LPIPS vs. Drop Rate
+Ours
+3DGS
+Fig. 5: Reconstruction quality (PSNR↑, SSIM↑, and LPIPS↓) vs. Dropping
+rate of initializing points. Here, the dropping rate refers to the percentage of points
+dropped from the original SfM point clouds for initializing Gaussians. The results are
+obtained on the Mip-NeRF 360 dataset.
+growth mechanism of 3DGS struggles to generate points in areas with insuffi-
+cient initializing points and only yields unnecessary points in areas where the
+initial SfM point cloud is already dense. In contrast, although our method also
+results in additional memory consumption, our method’s point cloud distribution
+is more uniform, enabling effectively growing points in areas with insufficient ini-
+tializing points, thereby leading to a more accurate and detailed reconstruction
+while still maintaining real-time rendering speed.
+Robustness to the quality of initialization point clouds. Finally, SfM al-
+gorithms often fail to produce high-quality point clouds in some areas, e.g., too
+few observations, repetitive textures, or low textures. The point cloud produced
+by SfM is usually the necessary input for 3DGS and our method. Therefore, we
+explored the robustness of our method to the quality of initialization point clouds
+by randomly dropping points from the SfM point clouds used for initialization
+and compared the results with that of 3DGS. Figure 5 shows how the recon-
+struction quality varies with the proportion of dropped points. We can see that
+our method consistently outperforms 3DGS in terms of all the metrics (PSNR,
+SSIM, and LPIPS). And more importantly, our method is less affected by the
+dropping rate than 3DGS. Notably, even though the 99% initializing points have
+been dropped, the reconstruction quality of our method still surpasses that of
+3DGS initialized with complete SfM point clouds, in terms of LPIPS. These re-
+sults demonstrate the robustness of our method to the quality of initialization
+point clouds, which is crucial for real-world applications.
+5
+Conclusion
+The blurring and needle-like artifacts in 3DGS are mainly attributed to its in-
+ability to grow points in areas with insufficient initializing points. To address this
+issue, we propose Pixel-GS, which considers the number of pixels covered by a
+Gaussian in each view to dynamically weigh the gradient of each view during the
+computation of the growth condition. This strategy effectively grows Gaussians
+with large scales, which are more likely to exist in areas with insufficient ini-
+tializing points, such that our method can adaptively grow points in these areas
+
+Pixel-GS
+15
+while avoiding unnecessary growth in areas with enough points. We also intro-
+duce a simple yet effective strategy to deal with floaters, i.e., scaling the gradient
+field by the distance to the camera. Extensive experiments demonstrate that our
+method significantly reduces blurring and needle-like artifacts and effectively
+suppresses floaters, achieving state-of-the-art performance in terms of rendering
+quality. Meanwhile, although our method consumes slightly more memory con-
+sumption, the increased points are mainly distributed in areas with insufficient
+initializing points, which are necessary for high-quality reconstruction, and our
+method still maintains real-time rendering speed. Finally, our method is more
+robust to the number of initialization points, thanks to our effective pixel-aware
+gradient and scaled gradient field.
+A
+Additional Results
+Tables 5, 6, 7, 8, 9 and 10 break down the results of Tables 1, 2, and 3 into metrics
+for each scene. Our method consistently enhances scene modeling instructions
+in the vast majority of scenarios, especially in terms of improving the LPIPS
+index for scene modeling. Notably, LPIPS is more reflective of the human eye’s
+perception of images compared to PSNR and SSIM. Additionally, we strongly
+suggest that readers watch the videos on the project page for a more direct
+understanding of how our approach surpasses 3DGS.
+In Figure 6, we showcase the comparative results of Ground Truth, 3DGS
+with varying point cloud growth thresholds, and Pixel-GS (Ours). The top and
+bottom rows correspond respectively to the rendering results and the point
+clouds that produced these results, along with the SFM point clouds obtained
+through COLMAP. The rendering quality (in terms of LPIPS ↓) and memory
+consumption are displayed in the top right corner of the image. Through the com-
+parison of the metrics in the top-right corners of (c) and (d), Pixel-GS achieves
+better reconstruction results with fewer points and significantly enhances the
+reconstruction capability in areas with insufficient initial SFM points. It is note-
+worthy that the points grown by Pixel-GS are more uniformly distributed, while
+most of the points grown by 3DGS with a reduced threshold are still located in
+denser areas of the point cloud, which do not significantly enhance the rendering
+quality. The improvement in rendering performance for 3DGS with a reduced
+threshold, compared to 3DGS with the original threshold, often comes from ad-
+ditional points grown at the edges of dense point cloud areas. These points can
+enhance the modeling capability in the surrounding areas where the point cloud
+is sparser.
+
+16
+Z. Zhang et al.
+Table 5: Per-scene quantitative results from the Mip-NeRF 360.
+PSNR↑
+Bicycle Flowers Garden Stump Treehill Room Counter Kitchen Bonsai
+Plenoxels
+21.912 20.097 23.4947 20.661 22.248 27.594 23.624
+23.420 24.669
+INGP-Base
+22.193 20.348
+24.599 23.626 22.364 29.269 26.439
+28.548 30.337
+INGP-Big
+22.171 20.652
+25.069 23.466 22.373 29.690 26.691
+29.479 30.685
+Mip-NeRF 360
+24.37
+21.73
+26.98
+26.40
+22.87
+31.63
+29.55
+32.23
+33.46
+3DGS
+25.246 21.520
+27.410 26.550 22.490 30.632 28.700
+30.317 31.980
+3DGS∗
+25.634 21.892
+27.742 26.897 22.802 31.506 29.123
+31.561 32.184
+Pixel-GS (Ours) 25.739 21.940
+27.834 27.111 22.597 31.794 29.299
+31.956 32.697
+SSIM↑
+Bicycle Flowers Garden Stump Treehill Room Counter Kitchen Bonsai
+Plenoxels
+0.496
+0.431
+0.6063
+0.523
+0.509
+0.8417
+0.759
+0.648
+0.814
+INGP-Base
+0.491
+0.450
+0.649
+0.574
+0.518
+0.855
+0.798
+0.818
+0.890
+INGP-Big
+0.512
+0.486
+0.701
+0.594
+0.542
+0.871
+0.817
+0.858
+0.906
+Mip-NeRF360
+0.685
+0.583
+0.813
+0.744
+0.632
+0.913
+0.894
+0.920
+0.941
+3DGS
+0.771
+0.605
+0.868
+0.775
+0.638
+0.914
+0.905
+0.922
+0.938
+3DGS∗
+0.778
+0.622
+0.873
+0.785
+0.652
+0.926
+0.915
+0.933
+0.947
+Pixel-GS (Ours) 0.793
+0.652
+0.878
+0.796
+0.653
+0.930
+0.921
+0.936
+0.951
+LPIPS↓
+Bicycle Flowers Garden Stump Treehill Room Counter Kitchen Bonsai
+Plenoxels
+0.506
+0.521
+0.3864
+0.503
+0.540
+0.4186
+0.441
+0.447
+0.398
+INGP-Base
+0.487
+0.481
+0.312
+0.450
+0.489
+0.301
+0.342
+0.254
+0.227
+INGP-Big
+0.446
+0.441
+0.257
+0.421
+0.450
+0.261
+0.306
+0.195
+0.205
+Mip-NeRF360
+0.301
+0.344
+0.170
+0.261
+0.339
+0.211
+0.204
+0.127
+0.176
+3DGS
+0.205
+0.336
+0.103
+0.210
+0.317
+0.220
+0.204
+0.129
+0.205
+3DGS∗
+0.204
+0.328
+0.094
+0.207
+0.319
+0.193
+0.179
+0.113
+0.174
+Pixel-GS (Ours) 0.173
+0.251
+0.094
+0.181
+0.269
+0.183
+0.162
+0.106
+0.162
+Table 6: Per-scene quantitative results from the Tanks & Temples (Part 1).
+PSNR↑
+Auditorium Ballroom Barn Caterpillar Church Courthouse Courtroom Family Francis Horse Ignatius
+3DGS∗
+24.453
+25.263
+28.475
+23.749
+23.371
+22.426
+23.534
+25.313 27.772 24.591 22.528
+Pixel-GS (Ours)
+24.772
+25.066
+28.997
+24.079
+23.679
+22.679
+23.603
+25.491 28.580 24.552 22.347
+SSIM↑
+Auditorium Ballroom Barn Caterpillar Church Courthouse Courtroom Family Francis Horse Ignatius
+3DGS∗
+0.876
+0.860
+0.869
+0.811
+0.835
+0.789
+0.809
+0.889
+0.909
+0.897
+0.814
+Pixel-GS (Ours)
+0.882
+0.858
+0.888
+0.832
+0.833
+0.795
+0.810
+0.892
+0.916
+0.897
+0.819
+LPIPS↓
+Auditorium Ballroom Barn Caterpillar Church Courthouse Courtroom Family Francis Horse Ignatius
+3DGS∗
+0.222
+0.121
+0.182
+0.211
+0.198
+0.255
+0.191
+0.123
+0.240
+0.132
+0.165
+Pixel-GS (Ours)
+0.213
+0.120
+0.144
+0.173
+0.202
+0.246
+0.189
+0.108
+0.228
+0.117
+0.149
+Table 7: Per-scene quantitative results from the Tanks & Temples (Part 2).
+PSNR↑
+Lighthouse M60 Meetingroom Museum Palace Panther Playground Temple Train Truck
+3DGS∗
+22.107
+27.829
+25.750
+21.337
+19.675 28.485
+25.783
+17.930 22.117 25.425
+Pixel-GS (Ours)
+22.144
+27.968
+25.835
+21.252
+19.957 28.466
+26.120
+18.698 22.125 25.491
+SSIM↑
+Lighthouse M60 Meetingroom Museum Palace Panther Playground Temple Train Truck
+3DGS∗
+0.842
+0.902
+0.879
+0.794
+0.736
+0.911
+0.864
+0.754
+0.813
+0.878
+Pixel-GS (Ours)
+0.843
+0.907
+0.880
+0.789
+0.744
+0.914
+0.881
+0.767
+0.823
+0.883
+LPIPS↓
+Lighthouse M60 Meetingroom Museum Palace Panther Playground Temple Train Truck
+3DGS∗
+0.207
+0.145
+0.180
+0.191
+0.332
+0.140
+0.168
+0.307
+0.209
+0.148
+Pixel-GS (Ours)
+0.197
+0.120
+0.175
+0.194
+0.315
+0.118
+0.137
+0.286
+0.180
+0.122

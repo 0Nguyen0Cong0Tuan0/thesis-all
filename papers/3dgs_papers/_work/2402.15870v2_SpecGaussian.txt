@@ -1,0 +1,978 @@
+Spec-Gaussian: Anisotropic View-Dependent
+Appearance for 3D Gaussian Splatting
+Ziyi Yang1
+Xinyu Gao1
+Yang-Tian Sun2
+Yi-Hua Huang2
+Xiaoyang Lyu2
+Wen Zhou3
+Shaohui Jiao3
+Xiaojuan Qi2†
+Xiaogang Jin1†
+1Zhejiang University
+2The University of Hong Kong
+3 ByteDance Inc.
+Abstract
+The recent advancements in 3D Gaussian splatting (3D-GS) have not only facil-
+itated real-time rendering through modern GPU rasterization pipelines but have
+also attained state-of-the-art rendering quality. Nevertheless, despite its excep-
+tional rendering quality and performance on standard datasets, 3D-GS frequently
+encounters difficulties in accurately modeling specular and anisotropic compo-
+nents. This issue stems from the limited ability of spherical harmonics (SH) to
+represent high-frequency information. To overcome this challenge, we introduce
+Spec-Gaussian, an approach that utilizes an anisotropic spherical Gaussian (ASG)
+appearance field instead of SH for modeling the view-dependent appearance of
+each 3D Gaussian. Additionally, we have developed a coarse-to-fine training
+strategy to improve learning efficiency and eliminate floaters caused by overfit-
+ting in real-world scenes. Our experimental results demonstrate that our method
+surpasses existing approaches in terms of rendering quality. Thanks to ASG, we
+have significantly improved the ability of 3D-GS to model scenes with specular
+and anisotropic components without increasing the number of 3D Gaussians. This
+improvement extends the applicability of 3D GS to handle intricate scenarios
+with specular and anisotropic surfaces. Our codes and datasets are available at
+https://ingra14m.github.io/Spec-Gaussian-website.
+1
+Introduction
+High-quality reconstruction and photorealistic rendering from a collection of images are crucial for a
+variety of applications, such as augmented reality/virtual reality (AR/VR), 3D content production,
+and art creation. Classic methods employ primitive representations, like meshes [36] and points
+[4, 62], and take advantage of the rasterization pipeline optimized for contemporary GPUs to achieve
+real-time rendering. In contrast, neural radiance fields (NeRF) [34, 5, 35] utilize neural implicit
+representation to offer a continuous scene representation and employ volumetric rendering to produce
+rendering results. This approach allows for enhanced preservation of scene details and more effective
+reconstruction of scene geometries.
+Recently, 3D Gaussian Splatting (3D-GS) [20] has emerged as a leading technique, delivering state-
+of-the-art quality and real-time speed. This method optimizes a set of 3D Gaussians that capture the
+appearance and geometry of a 3D scene simultaneously, offering a continuous representation that
+preserves details and produces high-quality results. Besides, the CUDA-customized differentiable
+rasterization pipeline for 3D Gaussians enables real-time rendering even at high resolution.
+Despite its exceptional performance, 3D-GS struggles to model specular components within scenes
+(see Fig. 1). This issue primarily stems from the limited ability of low-order spherical harmonics (SH)
+† Corresponding Authors.
+38th Conference on Neural Information Processing Systems (NeurIPS 2024).
+
+Ours (31.60dB)
+3D-GS (25.48dB) 
+3D-GS (27.04dB)
+Scaffold (32.46dB)
+Ours (37.50dB)
+Ground Truth
+Figure 1: Our method not only achieves real-time rendering but also significantly enhances the
+capability of 3D-GS to model scenes with specular and anisotropic components. Key to this enhanced
+performance is our use of ASG appearance field to model the appearance of each 3D Gaussian, which
+results in substantial improvements in rendering quality for both complex and general scenes.
+to capture the high-frequency information in these scenarios. Consequently, this poses a challenge
+for 3D-GS to model scenes with reflections and specular components, as illustrated in Fig. 1.
+To address the issue, we introduce a novel approach called Spec-Gaussian, which combines
+anisotropic spherical Gaussian (ASG) [55] for modeling anisotropic and specular components,
+an effective training mechanism to eliminate floaters and improve learning efficiencies, and anchor-
+based 3D Gaussians for acceleration and storage reduction. Specifically, the method incorporates
+two key designs: 1) A new 3D Gaussian representation that utilizes an ASG appearance field instead
+of SH to model the appearance of each 3D Gaussian. ASG with a few orders can effectively model
+high-frequency information that low-order SH cannot. This new design enables 3D-GS to more
+effectively model anisotropic and specular components in static scenes. 2) A coarse-to-fine training
+scheme specifically tailored for 3D-GS is designed to eliminate floaters and boost learning efficiency.
+This strategy effectively shortens learning time by optimizing low-resolution rendering in the initial
+stage, preventing the need to increase the number of 3D Gaussians and regularizing the learning
+process to avoid the generation of unnecessary geometric structures that lead to floaters.
+By combining these advances, our approach can render high-quality results for specular highlights
+and anisotropy as shown in Fig. 4 while preserving the efficiency of Gaussians. Furthermore,
+comprehensive experiments reveal that our method not only endows 3D-GS with the ability to model
+specular highlights but also achieves state-of-the-art results in general benchmarks.
+In summary, the major contributions of our work are as follows:
+• A novel ASG appearance field to model the view-dependent appearance of each 3D Gaussian,
+which enables 3D-GS to effectively represent scenes with specular and anisotropic components.
+• A coarse-to-fine training scheme that effectively regularizes training to eliminate floaters and
+improve the learning efficiency of 3D-GS in real-world scenes.
+• An anisotropic dataset has also been made to assess the capability of our model in representing
+anisotropy.
+2
+Related Work
+2.1
+Implicit Neural Radiance Fields
+Neural rendering has attracted significant interest in the academic community for its unparalleled
+ability to generate photorealistic images. Methods like NeRF [34] utilize Multi-Layer Perceptrons
+(MLPs) to model the geometry and radiance fields of a scene. Leveraging the volumetric rendering
+equation and the inherent continuity and smoothness of MLPs, NeRF achieves high-quality scene
+reconstruction from a set of posed images, establishing itself as the state-of-the-art (SOTA) method for
+novel view synthesis. Subsequent research has extended the utility of NeRF to various applications,
+including mesh reconstruction [48, 24, 53, 31], inverse rendering [44, 66, 28, 57], optimization of
+camera parameters [26, 50, 49, 38], few-shot learning [11, 56, 52], and anti-aliasing [2, 1, 3].
+However, this stream of methods relies on ray casting rather than rasterization to determine the color
+of each pixel. Consequently, every sampling point along the ray necessitates querying the MLPs,
+leading to significantly slow rendering speed and prolonged training convergence. This limitation
+substantially impedes their application in large-scene modeling and real-time rendering.
+2
+
+SfM Points
+3D Gaussian Densification
+View-dependent Appearance Modeling
+…
+∑
+SH
+…
+Ψ
+ASG
+Figure 2: Pipeline of Spec-Gaussian. The optimization process begins with SfM points derived from
+COLMAP or generated randomly, serving as the initial state for the 3D Gaussians. To address the
+limitations of low-order SH and pure MLP in modeling high-frequency information, we additionally
+employ ASG in conjunction with a feature decoupling MLP to model the view-dependent appearance
+of each 3D Gaussian. Then, 3D Gaussians with opacity σ > 0 are rendered through a differentiable
+Gaussian rasterization pipeline, effectively capturing specular highlights and anisotropy in the scene.
+To reduce the training time of MLP-based NeRF methods and improve rendering speed, subsequent
+work has enhanced NeRF’s efficiency in various ways. Structure-based techniques [63, 12, 40, 15, 7]
+have sought to improve inference or training efficiency by caching or distilling the implicit neural
+representation into more efficient data structures. Hybrid methods [27, 45] increase efficiency by
+incorporating explicit voxel-based data structures. Factorization methods [5, 16, 8, 14] apply a low-
+rank tensor assumption to decompose the scene into low-dimensional planes or vectors, achieving
+better geometric consistency. Compared to continuous implicit representations, the convergence
+of individual voxels in the grid is independent, significantly reducing training time. Additionally,
+Instant-NGP [35] utilizes a hash grid with a corresponding CUDA implementation for faster feature
+querying, enabling rapid training and interactive rendering of neural radiance fields. Spec-NeRF [32]
+achieves high-quality specular reflection modeling by introducing Gaussian directional encoding.
+Despite achieving higher quality and faster rendering, these methods have not fundamentally over-
+come the substantial query overhead associated with ray casting. As a result, a notable gap remains
+before achieving real-time rendering. In this work, we build upon the recent 3D-GS [20], a point-
+based rendering method that leverages rasterization. Compared to ray casting-based methods, it
+significantly enhances both training and rendering speed.
+2.2
+Point-based Neural Radiance Fields
+Point-based representations, similar to triangle mesh-based methods, can exploit the highly efficient
+rasterization pipeline of modern GPUs to achieve real-time rendering. Although these methods offer
+breakneck rendering speeds and are well-suited for editing tasks, they often suffer from holes and
+outliers, leading to artifacts in the rendered images. This issue arises from the discrete nature of point
+clouds, which can create gaps in the primitives and, consequently, in the rendered image.
+To address these discontinuity issues, differentiable point-based rendering [62, 13, 21, 22] has been
+extensively explored for fitting complex geometric shapes. Notably, Zhang et al. [65] employ
+differentiable surface splatting and utilize a radial basis function (RBF) kernel to compute the
+contribution of each point to each pixel.
+Recently, 3D-GS [20] has employed anisotropic 3D Gaussians, initialized from Structure from Motion
+(SfM), to represent 3D scenes. The innovative densification mechanism and CUDA-customized
+differentiable Gaussian rasterization pipeline of 3D-GS have not only achieved state-of-the-art
+(SOTA) rendering quality but also significantly surpassed the threshold of real-time rendering.
+Many concurrent works have rapidly extended 3D-GS to a variety of downstream applications,
+including dynamic scenes [30, 58, 59, 17, 23], text-to-3D generation [25, 46, 9, 61, 10], avatars
+[68, 67, 18, 41, 37], scene editing [54, 6], and quality enhancement [33].
+Despite achieving SOTA results on commonly used benchmark datasets, 3D-GS still struggles to
+model scenes with specular and reflective components, which limits its practical application in
+real-time rendering at the photorealistic level. In this work, by replacing spherical harmonics (SH)
+3
+
+with an anisotropic spherical Gaussian (ASG) appearance field, we have enabled 3D-GS to model
+complex specular scenes more effectively.
+3
+Method
+The overview of our method is illustrated in Fig. 2. The input to our model is a set of posed images
+of a static scene, together with a sparse point cloud obtained from SfM [42]. The core of our method
+is to use the ASG appearance field to replace SH in modeling the appearance of 3D Gaussians (Sec.
+3.2). Moreover, we introduce a simple yet effective coarse-to-fine training strategy to reduce floaters
+in real-world scenes (Sec. 3.3). To further reduce the storage overhead and rendering speed pressure
+introduced by ASG, we combine a hybrid Gaussian model that employs sparse anchor Gaussians to
+facilitate the generation of neural Gaussians (Sec. 3.4) to model the 3D scene.
+3.1
+Preliminaries
+3D Gaussian splatting.
+3D-GS [20] is a point-based method that employs anisotropic 3D Gaussians
+to represent scenes. Each 3D Gaussian is defined by a center position x, opacity σ, and a 3D
+covariance matrix Σ, which is decomposed into a quaternion r and scaling s. The view-dependent
+appearance of each 3D Gaussian is represented using the first three orders of spherical harmonics
+(SH). This method not only retains the rendering details offered by volumetric rendering but also
+achieves real-time rendering through a CUDA-customized differentiable Gaussian rasterization
+process. Following [69], the 3D Gaussians can be projected to 2D using the 2D covariance matrix Σ′,
+defined as:
+Σ′ = JV ΣV T JT ,
+(1)
+where J is the Jacobian of the affine approximation of the projective transformation, and V represents
+the view matrix, transitioning from world to camera coordinates. To facilitate learning, the 3D
+covariance matrix Σ is decomposed into two learnable components: the quaternion r, representing
+rotation, and the 3D-vector s, representing scaling. The resulting Σ is thus represented as the
+combination of a rotation matrix R and scaling matrix S as:
+Σ = RSST RT .
+(2)
+The color of each pixel on the image plane is then rendered through a point-based volumetric
+rendering (alpha blending) technique:
+C(p) =
+X
+i∈N
+Tiαici,
+αi = σie−1
+2 (p−µi)T P−1(p−µi),
+(3)
+where p denotes the pixel coordinate, Ti is the transmittance defined by Πi−1
+j=1(1 −αj), ci signifies
+the color of the sorted Gaussians associated with the queried pixel, and µi represents the coordinates
+of the 3D Gaussians when projected onto the 2D image plane.
+Anisotropic spherical Gaussian.
+Anisotropic spherical Gaussian (ASG) [55] has been designed
+in the traditional rendering pipeline to efficiently approximate lighting and shading. Different from
+spherical Gaussian (SG), ASG has been demonstrated to effectively represent anisotropic scenes
+with a small number. In addition to retaining the fundamental properties of SG, ASG also exhibits
+rotational invariance and can represent full-frequency signals. The ASG function is defined as:
+ASG(ν | [x, y, z], [λ, µ], ξ) = ξ · S(ν; z) · e−λ(ν·x)2−µ(ν·y)2,
+(4)
+where ν is the unit direction serving as the function input; x, y, and z correspond to the tangent,
+bi-tangent, and lobe axis, respectively, and are mutually orthogonal; λ ∈R1 and µ ∈R1 are the
+sharpness parameters for the x- and y-axis, satisfying λ, µ > 0; ξ ∈R2 is the lobe amplitude; S is
+the smooth term defined as S(ν; z) = max(ν · z, 0).
+Inspired by the power of ASG in modeling scenes with complex anisotropy, we propose integrating
+ASG into Gaussian splatting to join the forces of classic models with new rendering pipelines for
+higher quality. For N ASGs, we predefined orthonormal axes x, y, and z, initializing them to be
+uniformly distributed across a hemisphere. During training, we allow the remaining ASG parameters,
+λ, µ, and ξ, to be learnable. We use the reflect direction ωr as the input to query ASG for modeling
+the view-dependent specular information. Note that we use N = 32 ASGs for each 3D Gaussian.
+4
+
+Anchor-based Gaussian splatting.
+Anchor-based Gaussian splatting was first proposed by
+Scaffold-GS [29]. Unlike the attributes carried by each entity in 3D-GS, each anchor Gaussian
+carries a position coordinate Pv ∈R3, a local feature fv ∈R32, a displacement factor ηv ∈R3, and
+k learnable offsets Ov ∈Rk×3. They use the COLMAP [42] point cloud to initialize each anchor 3D
+Gaussian, serving as the voxel centers to guide the generation of neural Gaussians. The position Pv
+of the anchor Gaussian is initialized as:
+Pv =
+P
+ϵ + 0.5
+
+· ϵ,
+(5)
+where P is the point cloud position, ϵ is the voxel size, and {·} denotes removing duplicated anchors.
+Then anchor Gaussians can guide the generation of neural Gaussians, which have the same attributes
+as vanilla 3D-GS. For each visible anchor Gaussian within the viewing frustum, we spawn k neural
+Gaussians and predict their attributes. The positions x of neural Gaussians are calculated as:
+{x0, . . . , xk−1} = Pv + {O0, . . . , Ok−1} · ηv,
+(6)
+where Pv represents the position of the anchor Gaussian corresponding to k neural Gaussians. The
+opacity σ is calculated through a tiny MLP:
+{σ0, . . . , σk−1} = Fσ (fv, δcv, dcv) ,
+(7)
+where δcv denotes the distance between the anchor Gaussian and the camera, and dcv is the unit
+direction pointing from the camera to the anchor Gaussian. The rotation r and scaling s of each
+neural Gaussian are derived similarly using the corresponding tiny MLP Fr and Fs.
+3.2
+Anisotropic View-Dependent Appearance
+ASG appearance field for 3D Gaussians.
+Although SH has enabled view-dependent scene
+modeling, the low frequency of low-order SH makes it challenging to model scenes with complex
+optical phenomena such as specular highlights and anisotropic effects. Therefore, instead of using
+SH, we propose using an ASG appearance field based on Eq. (4) to model the appearance of each 3D
+Gaussian. However, the introduction of ASG increases the feature dimensions of each 3D Gaussian,
+raising the model’s storage overhead. To address this, we employ a compact learnable MLP Θ
+to predict the parameters for N ASGs, with each Gaussian carrying only additional local features
+f ∈R24 as the input to the MLP:
+Θ(f) →{λ, µ, ξ}N.
+(8)
+To better differentiate between high and low-frequency information and further assist ASG in fitting
+high-frequency specular details, we decompose color c into diffuse and specular components:
+c = cd + cs,
+(9)
+where cd represents the diffuse color, modeled using the first three orders of SH, and cs is the specular
+color calculated through ASG. We refer to this comprehensive approach to appearance modeling as
+the ASG appearance field.
+Although ASG theoretically enhance the ability of SH to model anisotropy, directly using ASG to
+represent the specular color of each 3D Gaussian still falls short in accurately modeling anisotropic
+and specular components, as demonstrated in Fig. 6. Inspired by [14], we do not use ASG directly
+to represent color but instead employ ASG to model the latent feature of each 3D Gaussian. This
+latent feature, containing anisotropic information, is then fed into a tiny feature decoding MLP Ψ to
+determine the final specular color:
+Ψ(κ, γ(d), ⟨n, −d⟩) →cs,
+κ =
+N
+M
+i=1
+ASG(ωr | [x, y, z], [λi, µi], ξi)
+(10)
+where κ is the latent feature derived from ASG, L denotes the concatenation operation, γ represents
+the positional encoding, d is the unit view direction pointing from the camera to each 3D Gaussian,
+n is the normal of each 3D Gaussian, and ωr is the unit reflect direction. This strategy significantly
+enhances the ability of 3D-GS to model scenes with complex optical phenomena, whereas neither
+pure ASG nor pure MLP can achieve anisotropic appearance modeling as effectively as our approach.
+5
+
+Table 1: Quantitative Comparison on anisotropic
+synthetic dataset.
+Dataset
+Anisotropic Synthetic
+Method
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+FPS
+Mem
+Num.(k)
+3D-GS
+33.82
+0.966
+0.062
+325
+47MB
+201
+Scaffold-GS
+35.34
+0.972
+0.052
+234
+27MB
+-
+Ours-w/ anchor
+36.76
+0.976
+0.046
+180
+25MB
+-
+Ours-light
+37.42
+0.979
+0.044
+159
+45MB
+146
+Ours
+37.70
+0.980
+0.042
+145
+57MB
+183
+Training Epoches
+Rendering
+Pipeline
+…
+w / o 
+coarse-to-fine
+w / 
+coarse-to-fine
+Figure 3: Using a coarse-to-fine strategy,
+our approach can eliminate the floaters
+without increasing the number of GS.
+Normal estimation.
+Following [19, 43], we use the shortest axis of each Gaussian as its normal.
+This approach is based on the observation that 3D Gaussians tend to flatten gradually during the
+optimization process, allowing the shortest axis to serve as a reasonable approximation for the normal.
+The reflect direction ωr can then be derived using the view direction and the local normal vector n as:
+ωr = 2(ωo · n) · n −ωo,
+(11)
+where ωo = −d is a unit view direction pointing from each 3D Gaussian in world space to the
+camera. We use the reflect direction ωr to query ASG, enabling better interpolation of latent features
+containing anisotropic information. Experimental results show that although this unsupervised normal
+estimation cannot generate physically accurate normals aligned with the real world, it is sufficient to
+produce relatively accurate reflect direction to assist ASG in fitting high-frequency information.
+3.3
+Coarse-to-fine Training
+We observed that in many real-world scenarios, 3D-GS tends to overfit the training data, leading to
+the emergence of numerous floaters when rendering images from novel viewpoints. One important
+reason is that the COLMAP point cloud is too sparse. Poor initialization makes it difficult for
+3D-GS to compensate for overly sparse areas through densification during optimization, leading to
+floaters in the rendering images. Moreover, 3D-GS accumulates gradients from each pixel to the GS:
+dL
+dx = P dL
+dpi
+dpi
+dx , and the densification occurs when the accumulated amount exceeds a threshold
+τg = 0.0002. However, having positive and negative gradients can cause GSs that should be densified
+to be ignored due to the large negative gradient.
+Thus, to mitigate the occurrence of floaters in real-world scenes, we propose a coarse-to-fine training
+mechanism. We first impose an L1 constraint on the gradients from pixels to GS: dL
+dx = P ∥dL
+dpi
+dpi
+dx ∥1,
+accumulating the numerical contribution from pixels to GS rather than gradients. This idea is similar
+to the concurrent works [60, 64]. Next, to avoid overfitting caused by excessive growth of 3D-GS
+during the early stages of optimization, we decide to train 3D-GS progressively from low to high
+resolution in real-world scenes:
+r(i) = min(⌊rs + (re −rs) · i/τ⌉, re),
+(12)
+where r(i) is the image resolution at the i-th training iteration, rs is the starting image resolution, re
+is the ending image resolution (the full resolution we aim to render), and τ is the threshold iteration,
+empirically set to 5k.
+This training method allows 3D-GS to densify correctly and prevents excessive growth of 3D-GS in
+the early stages. Additionally, due to the lower resolution training in the initial phase, this mechanism
+reduces training time by approximately 10%. In our experiments, we offer a performance version
+with τg = 0.0005 and light version with τg = 0.0006.
+3.4
+Adaption for Anchor-Based Gaussian Splatting
+While the ASG appearance field significantly improves the ability of 3D-GS to model specular and
+anisotropic features, it introduces additional computational overhead due to the additional local
+features f associated with each Gaussian. Inspired by [29], we employ anchor-based Gaussian
+splatting to reduce storage overhead and accelerate the rendering.
+Since the anisotropy modeled by ASG is continuous in space, it can be compressed into a lower-
+dimensional space. Thanks to the guidance of the anchor Gaussian, the anchor feature fv can be
+6
+
+28.83/0.061
+29.29/0.029
+33.00/0.016
+30.55/0.027
+29.75/0.034
+Tri-MipRF
+3D-GS
+Scaffold-GS
+GS-Shader
+Ours
+GT
+Figure 4: Visualization on NeRF dataset. Our method has achieved specular highlights modeling,
+which other 3D-GS-based methods fail to accomplish, while maintaining fast rendering speed.
+Dataset
+Mip-NeRF 360
+Mip-NeRF 360 Outdoor
+Mip-NeRF 360 Indoor
+Method | Metrics
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+FPS
+Mem
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+Plenoxels
+23.08
+0.626
+0.463
+6.79
+2.1GB
+21.68
+0.513
+0.491
+24.83
+0.766
+0.426
+iNGP
+25.59
+0.699
+0.331
+9.43
+48MB
+22.75
+0.567
+0.403
+29.14
+0.863
+0.242
+Mip-NeRF360
+27.69
+0.792
+0.237
+0.06
+8.6MB
+24.47
+0.691
+0.283
+31.72
+0.917
+0.180
+3D-GS
+27.79
+0.826
+0.202
+115
+748MB
+25.02
+0.742
+0.232
+31.25
+0.931
+0.164
+Scaffold-GS
+27.98
+0.824
+0.207
+96
+203MB
+25.07
+0.736
+0.243
+31.61
+0.933
+0.162
+Ours-w/ anchor
+28.14
+0.824
+0.196
+70
+260MB
+24.98
+0.735
+0.223
+32.09
+0.935
+0.161
+Ours-light
+28.07
+0.834
+0.183
+44
+684MB
+25.09
+0.752
+0.203
+31.80
+0.936
+0.158
+Ours
+28.18
+0.835
+0.176
+33
+847MB
+25.11
+0.754
+0.195
+32.01
+0.937
+0.153
+Table 2: Quantitative comparison of on real-world datasets. We report PSNR, SSIM, LPIPS
+(VGG) and color each cell as best , second best and third best . Our method has achieved the best
+rendering quality, while striking a good balance between FPS and the storage memory.
+used directly to compress N ASGs, further reducing storage pressure. To make the ASG of neural
+Gaussians position-aware, we introduce the unit view direction to decompress ASG parameters.
+Consequently, the ASG parameters prediction in Eq. (8) is revised as follows:
+Θ(fv, dcn) →{λ, µ, ξ}N,
+(13)
+where dcn denotes the unit view direction from the camera to each neural Gaussian. Additionally,
+we set the diffuse part of the neural Gaussian cd = ϕ(fv), directly predicted through an MLP ϕ, to
+ensure the smoothness of the diffuse component and reduce the difficulty of convergence.
+3.5
+Losses
+We optimize the learnable parameters and MLPs using the same loss function as 3D-GS [20]. The
+total supervision is given by:
+L = (1 −λD-SSIM)L1 + λD-SSIMLD-SSIM,
+(14)
+where the λD-SSIM = 0.2 is consistently used in our experiments.
+4
+Experiments
+In this section, we present both quantitative and qualitative results of our method. To evaluate its
+effectiveness, we compared it to several state-of-the-art methods across various datasets. We color
+each cell as best , second best and third best . Our method includes three versions, each based
+on different foundational methods with distinct hyperparameter settings. The performance version
+(Ours) is based on 3D-GS [20] with τg = 0.0005; the light version (Ours-light), also based on
+3D-GS, has τg = 0.0006; and the mini version (Ours-w/ anchor) is based on Scaffold-GS [29],
+with τg = 0.0006. Our method demonstrates superior performance in modeling complex specular
+and anisotropic features, as evidenced by comparisons on the NeRF, NSVF, and our "Anisotropic
+Synthetic" datasets. Additionally, we showcase its versatility by comparing its performance in diffuse
+scenarios, further proving the robustness of our approach.
+7
+
+Table 3: Results on NeRF synthetic dataset.
+Dataset
+NeRF Synthetic
+Method | Metrics
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+FPS
+Mem
+iNGP-Base
+33.18
+0.963
+0.045
+∼10
+13MB
+Mip-NeRF
+33.09
+0.961
+0.043
+<1
+10MB
+Tri-MipRF
+33.65
+0.963
+0.042
+∼5
+60MB
+3D-GS
+33.32
+0.969
+0.031
+315
+69MB
+GS-Shader
+33.38
+0.968
+0.030
+97
+29MB
+Scaffold-GS
+33.68
+0.967
+0.034
+240
+19MB
+Ours-w/ anchor
+33.96
+0.969
+0.032
+172
+19MB
+Ours-light
+34.08
+0.970
+0.029
+148
+58MB
+Ours
+34.19
+0.971
+0.028
+121
+72MB
+Table 4: Results on NSVF synthetic dataset.
+Dataset
+NSVF Synthetic
+Method | Metrics
+PSNR ↑
+SSIM ↑
+LPIPS ↓
+FPS
+Mem
+TensoRF
+36.52
+0.982
+0.026
+1.5
+65MB
+Tri-MipRF
+34.58
+0.973
+0.030
+∼5
+60MB
+NeuRBF
+37.80
+0.986
+0.019
+∼1
+580MB
+3D-GS
+37.07
+0.987
+0.015
+306
+71MB
+GS-Shader
+33.85
+0.981
+0.020
+68
+33MB
+Scaffold-GS
+36.43
+0.984
+0.017
+218
+17MB
+Ours-w/ anchor
+37.71
+0.987
+0.015
+152
+16MB
+Ours-light
+38.28
+0.988
+0.013
+124
+70MB
+Ours
+38.40
+0.988
+0.012
+108
+89MB
+Mip-NeRF 360
+3D-GS
+Scaffold-GS
+Ours
+GT
+Figure 5: Visualization on Mip-NeRF 360 indoor scenes. Our method achieves superior recovery
+of specular effects compared to SOTA methods.
+4.1
+Implementation Details
+We implemented our framework using PyTorch [39] and modified the differentiable Gaussian rasteri-
+zation to include depth visualization. For the ASG appearance field, the decoupling MLP Ψ consists
+of 3 layers, each with 64 hidden units, and the positional encoding for the view direction is of order
+2. Regarding coarse-to-fine training, which is applied only to real-world scenes to remove floaters,
+we start with a resolution rs that is 4x downsampled. To further accelerate rendering, we prefilter
+and allow only those Gaussians with opacity σn > 0 to pass through the ASG appearance field and
+Gaussian rasterization pipelines. All experiments were conducted on an NVIDIA RTX 3090.
+4.2
+Results and Comparisons
+Synthetic bounded scenes.
+We used the NeRF, NSVF, and our "Anisotropic Synthetic" datasets as
+the experimental datasets for synthetic scenes. Our comparisons were made with the most relevant
+state-of-the-art methods, including 3D-GS [20], Scaffold-GS [29], GaussianShader [19], and several
+NeRF-based methods such as NSVF [27], TensoRF [5], NeuRBF [8], and Tri-MipRF [16].
+As shown in Fig. 4 (with PSNR and LPIPS), and Tabs. 3- 4, our method achieved the highest
+performance with fewer Gaussians compared to vanilla 3D-GS. It also improved upon the issues that
+3D-GS faced in modeling high-frequency specular highlights and complex anisotropy as shown in
+Tab. 1 with fewer Gaussians and better metrics. See more in the supplementary materials.
+Real-world unbounded scenes.
+To verify the versatility of our method in real-world scenarios, we
+used the Mip360 [2] dataset, which contains indoor scenes with specular highlights. As shown in
+Tab. 2, our method surpasses state-of-the-art methods on Mip-NeRF 360. Furthermore, our method
+effectively balances FPS, storage, and rendering quality. It enhances rendering quality without
+increasing storage or significantly reducing FPS. As illustrated in Fig. 5 and Fig. 7, our method has
+also significantly improved the visual effect. It removes a large number of floaters in outdoor scenes
+and successfully models the high-frequency specular highlights in indoor scenes. This demonstrates
+that our approach is not only adept at modeling complex specular scenes but also effectively improves
+rendering quality in general scenarios.
+4.3
+Ablation Study
+ASG feature decoupling MLP.
+We conducted an ablation study to evaluate the key components
+of the ASG appearance field, which include ASG features, decoupling MLP, and the separation of
+8
+
+28.52/0.041
+30.66/0.035
+37.50/0.018
+33.92/0.023
+34.95/0.023
+3D-GS w/ 6-SH
+Scaffold w/ 4-layers
+Ours w/o MLP
+Ours w/o ASG
+Ours
+GT
+28.59/0.099
+29.78/0.077
+28.48/0.095
+27.99/0.102
+29.21/0.088
+Figure 6: Ablation on ASG appearance field. We show that directly using ASG to model color
+leads to the failure in modeling anisotropy and specular highlights. By decoupling the ASG features
+through MLP, we can realistically model complex optical phenomena.
+3D-GS
+Scaffold
+Ours w/o c2f
+Ours w/o L1 norm
+Ours
+GT
+0.246/4531k
+0.286/1600k
+0.265/5166k
+0.218/4512k
+0.180/4447k
+Figure 7: Ablation on coarse-to-fine training. Experimental results demonstrate that our simple yet
+effective training mechanism can effectively remove floaters without increasing the number of 3D
+Gaussians, thereby alleviating the overfitting problem prevalent in 3D-GS-based methods.
+diffuse and specular colors. As demonstrated in Fig. 6 (with PSNR and LPIPS), directly using ASG
+to output color results in the inability to model specular and anisotropic components. In contrast to
+directly using an MLP for color modeling, as in Scaffold-GS [29], separately modeling diffuse and
+specular color can enhance the fitting ability for high-frequency information. ASG can encode higher-
+frequency anisotropic features. With the help of ASG’s ability to encode high-frequency anisotropic
+features, the decoupling MLP can fit complex optical phenomena, leading to more accurate rendering
+results. We also demonstrated that higher-order SH (6-order) and more MLP layers (4-layers) do not
+help 3D-GS and Scaffold-GS achieve satisfactory results, highlighting the importance of ASG.
+Coarse-to-fine training.
+We conducted an ablation study to assess the impact of coarse-to-fine (c2f)
+training. As illustrated in Fig. 7 (with LPIPS and number of Gaussian), both 3D-GS and Scaffold-GS
+exhibit a large number of floaters in the novel view synthesis. Coarse-to-fine training effectively
+reduces the number of floaters, alleviating the overfitting issue commonly encountered by 3D-GS in
+real-world scenarios. Applying an L1 constraint to the gradients used for 3D-GS densification further
+reduced the number of floaters and Gaussians. See more in the supplementary materials.
+5
+Conclusion
+In this work, we introduce Spec-Gaussian, a novel approach to 3D Gaussian splitting that features
+an anisotropic view-dependent appearance. Leveraging the powerful capabilities of ASG, our
+method effectively overcomes the challenges encountered by vanilla 3D-GS in rendering scenes with
+specular highlights and anisotropy. Additionally, we innovatively implement a coarse-to-fine training
+mechanism to eliminate floaters in real-world scenes. Both quantitative and qualitative experiments
+demonstrate that our method not only equips 3D-GS with the ability to model specular highlights and
+anisotropy but also enhances the overall rendering quality of 3D-GS in general scenes.
+Limitations.
+Although our method enables 3D-GS to model complex specular and anisotropic
+features, it still faces challenges in handling reflections. Specular and anisotropic effects are primarily
+influenced by material properties, whereas reflections are closely related to the environment and
+geometry. Due to the lack of explicit geometry in 3D-GS, we cannot differentiate between reflections
+and materials using constraints like normals, as employed in Ref-NeRF [47] and NeRO [28]. We
+plan to explore solutions for modeling reflections with 3D-GS in future work.
+9
+
+6
+Acknowlegements
+We thank Chao Wan from Cornell University for the help during rebuttal period. This work was
+supported by the National Natural Science Foundation of China (Grant No. 62036010). Ziyi Yang
+was also supported by ByteDance MMLab.
+References
+[1] Jonathan T. Barron, Ben Mildenhall, Matthew Tancik, Peter Hedman, Ricardo Martin-Brualla, and Pratul P.
+Srinivasan. Mip-nerf: A multiscale representation for anti-aliasing neural radiance fields. ICCV, 2021.
+[2] Jonathan T Barron, Ben Mildenhall, Dor Verbin, Pratul P Srinivasan, and Peter Hedman. Mip-nerf 360:
+Unbounded anti-aliased neural radiance fields. In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 5470–5479, 2022.
+[3] Jonathan T. Barron, Ben Mildenhall, Dor Verbin, Pratul P. Srinivasan, and Peter Hedman. Zip-nerf:
+Anti-aliased grid-based neural radiance fields. ICCV, 2023.
+[4] Mario Botsch, Alexander Hornung, Matthias Zwicker, and Leif Kobbelt. High-quality surface splatting on
+today’s gpus. In Proceedings Eurographics/IEEE VGTC Symposium Point-Based Graphics, 2005., pages
+17–141. IEEE, 2005.
+[5] Anpei Chen, Zexiang Xu, Andreas Geiger, Jingyi Yu, and Hao Su. Tensorf: Tensorial radiance fields. In
+European Conference on Computer Vision, pages 333–350. Springer, 2022.
+[6] Yiwen Chen, Zilong Chen, Chi Zhang, Feng Wang, Xiaofeng Yang, Yikai Wang, Zhongang Cai, Lei Yang,
+Huaping Liu, and Guosheng Lin. Gaussianeditor: Swift and controllable 3d editing with gaussian splatting,
+2023.
+[7] Zhiqin Chen, Thomas Funkhouser, Peter Hedman, and Andrea Tagliasacchi. Mobilenerf: Exploiting the
+polygon rasterization pipeline for efficient neural field rendering on mobile architectures. arXiv preprint
+arXiv:2208.00277, 2022.
+[8] Zhang Chen, Zhong Li, Liangchen Song, Lele Chen, Jingyi Yu, Junsong Yuan, and Yi Xu. Neurbf: A neural
+fields representation with adaptive radial basis functions. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, pages 4182–4194, 2023.
+[9] Zilong Chen, Feng Wang, and Huaping Liu.
+Text-to-3d using gaussian splatting.
+arXiv preprint
+arXiv:2309.16585, 2023.
+[10] Jaeyoung Chung, Suyoung Lee, Hyeongjin Nam, Jaerin Lee, and Kyoung Mu Lee. Luciddreamer:
+Domain-free generation of 3d gaussian splatting scenes. arXiv preprint arXiv:2311.13384, 2023.
+[11] Kangle Deng, Andrew Liu, Jun-Yan Zhu, and Deva Ramanan. Depth-supervised NeRF: Fewer views and
+faster training for free. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), June 2022.
+[12] Stephan J Garbin, Marek Kowalski, Matthew Johnson, Jamie Shotton, and Julien Valentin. Fastnerf:
+High-fidelity neural rendering at 200fps. In Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 14346–14355, 2021.
+[13] Markus Gross and Hanspeter Pfister. Point-based graphics. Elsevier, 2011.
+[14] Kang Han and Wei Xiang. Multiscale tensor decomposition and rendering equation encoding for view
+synthesis. In The IEEE / CVF Computer Vision and Pattern Recognition Conference, pages 4232–4241,
+2023.
+[15] Peter Hedman, Pratul P Srinivasan, Ben Mildenhall, Jonathan T Barron, and Paul Debevec. Baking neural
+radiance fields for real-time view synthesis. In Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 5875–5884, 2021.
+[16] Wenbo Hu, Yuling Wang, Lin Ma, Bangbang Yang, Lin Gao, Xiao Liu, and Yuewen Ma. Tri-miprf:
+Tri-mip representation for efficient anti-aliasing neural radiance fields. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision, pages 19774–19783, 2023.
+[17] Yi-Hua Huang, Yang-Tian Sun, Ziyi Yang, Xiaoyang Lyu, Yan-Pei Cao, and Xiaojuan Qi. Sc-gs: Sparse-
+controlled gaussian splatting for editable dynamic scenes. pages 1–11, 2023.
+[18] Yuheng Jiang, Zhehao Shen, Penghao Wang, Zhuo Su, Yu Hong, Yingliang Zhang, Jingyi Yu, and Lan
+Xu. Hifi4g: High-fidelity human performance rendering via compact gaussian splatting. arXiv preprint
+arXiv:2312.03461, 2023.
+[19] Yingwenqi Jiang, Jiadong Tu, Yuan Liu, Xifeng Gao, Xiaoxiao Long, Wenping Wang, and Yuexin Ma.
+Gaussianshader: 3d gaussian splatting with shading functions for reflective surfaces. arXiv preprint
+arXiv:2311.17977, 2023.
+[20] Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Drettakis. 3d gaussian splatting for
+real-time radiance field rendering. ACM Transactions on Graphics, 42(4), July 2023.
+[21] Leonid Keselman and Martial Hebert. Approximate differentiable rendering with algebraic surfaces. In
+European Conference on Computer Vision, pages 596–614. Springer, 2022.
+[22] Leonid Keselman and Martial Hebert. Flexible techniques for differentiable rendering with 3d gaussians.
+arXiv preprint arXiv:2308.14737, 2023.
+[23] Zhan Li, Zhang Chen, Zhong Li, and Yi Xu. Spacetime gaussian feature splatting for real-time dynamic
+view synthesis. arXiv preprint arXiv:2312.16812, 2023.
+[24] Zhaoshuo Li, Thomas Müller, Alex Evans, Russell H Taylor, Mathias Unberath, Ming-Yu Liu, and Chen-
+Hsuan Lin. Neuralangelo: High-fidelity neural surface reconstruction. In IEEE Conference on Computer
+10
+
+Vision and Pattern Recognition (CVPR), 2023.
+[25] Yixun Liang, Xin Yang, Jiantao Lin, Haodong Li, Xiaogang Xu, and Yingcong Chen. Luciddreamer:
+Towards high-fidelity text-to-3d generation via interval score matching, 2023.
+[26] Chen-Hsuan Lin, Wei-Chiu Ma, Antonio Torralba, and Simon Lucey. Barf: Bundle-adjusting neural
+radiance fields. In IEEE International Conference on Computer Vision (ICCV), 2021.
+[27] Lingjie Liu, Jiatao Gu, Kyaw Zaw Lin, Tat-Seng Chua, and Christian Theobalt. Neural sparse voxel fields.
+Advances in Neural Information Processing Systems, 33:15651–15663, 2020.
+[28] Yuan Liu, Peng Wang, Cheng Lin, Xiaoxiao Long, Jiepeng Wang, Lingjie Liu, Taku Komura, and Wenping
+Wang. Nero: Neural geometry and brdf reconstruction of reflective objects from multiview images. In
+SIGGRAPH, 2023.
+[29] Tao Lu, Mulin Yu, Linning Xu, Yuanbo Xiangli, Limin Wang, Dahua Lin, and Bo Dai. Scaffold-gs:
+Structured 3d gaussians for view-adaptive rendering. arXiv preprint arXiv:2312.00109, 2023.
+[30] Jonathon Luiten, Georgios Kopanas, Bastian Leibe, and Deva Ramanan. Dynamic 3d gaussians: Tracking
+by persistent dynamic view synthesis. In 3DV, 2024.
+[31] Xiaoyang Lyu, Yang-Tian Sun, Yi-Hua Huang, Xiuzhe Wu, Ziyi Yang, Yilun Chen, Jiangmiao Pang,
+and Xiaojuan Qi. 3dgsr: Implicit surface reconstruction with 3d gaussian splatting. arXiv preprint
+arXiv:2404.00409, 2024.
+[32] Li Ma, Vasu Agrawal, Haithem Turki, Changil Kim, Chen Gao, Pedro Sander, Michael Zollhöfer, and
+Christian Richardt. Specnerf: Gaussian directional encoding for specular reflections. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 21188–21198, 2024.
+[33] Dawid Malarz, Weronika Smolak, Jacek Tabor, Sławomir Tadeja, and Przemysław Spurek. Gaussian
+splatting with nerf-based color and opacity.
+[34] Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik, Jonathan T. Barron, Ravi Ramamoorthi, and Ren
+Ng. Nerf: Representing scenes as neural radiance fields for view synthesis. In ECCV, 2020.
+[35] Thomas Müller, Alex Evans, Christoph Schied, and Alexander Keller. Instant neural graphics primitives
+with a multiresolution hash encoding. ACM Trans. Graph., 41(4):102:1–102:15, July 2022.
+[36] Jacob Munkberg, Jon Hasselgren, Tianchang Shen, Jun Gao, Wenzheng Chen, Alex Evans, Thomas Müller,
+and Sanja Fidler. Extracting triangular 3d models, materials, and lighting from images. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 8280–8290, 2022.
+[37] Haokai Pang, Heming Zhu, Adam Kortylewski, Christian Theobalt, and Marc Habermann. Ash: Animatable
+gaussian splats for efficient and photoreal human rendering. 2023.
+[38] Keunhong Park, Philipp Henzler, Ben Mildenhall, Jonathan T Barron, and Ricardo Martin-Brualla. Camp:
+Camera preconditioning for neural radiance fields. ACM Transactions on Graphics (TOG), 42(6):1–11,
+2023.
+[39] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen,
+Zeming Lin, Natalia Gimelshein, Luca Antiga, et al. Pytorch: An imperative style, high-performance deep
+learning library. Advances in Neural Information Processing Systems, 32, 2019.
+[40] Christian Reiser, Songyou Peng, Yiyi Liao, and Andreas Geiger. Kilonerf: Speeding up neural radiance
+fields with thousands of tiny mlps. In Proceedings of the IEEE/CVF International Conference on Computer
+Vision, pages 14335–14345, 2021.
+[41] Shunsuke Saito, Gabriel Schwartz, Tomas Simon, Junxuan Li, and Giljoo Nam. Relightable gaussian
+codec avatars. 2023.
+[42] Johannes L Schonberger and Jan-Michael Frahm. Structure-from-motion revisited. In Proceedings of the
+IEEE Conference on Computer Vision and Pattern recognition, pages 4104–4113, 2016.
+[43] Yahao Shi, Yanmin Wu, Chenming Wu, Xing Liu, Chen Zhao, Haocheng Feng, Jingtuo Liu, Liangjun
+Zhang, Jian Zhang, Bin Zhou, et al. Gir: 3d gaussian inverse rendering for relightable scene factorization.
+arXiv preprint arXiv:2312.05133, 2023.
+[44] Pratul P. Srinivasan, Boyang Deng, Xiuming Zhang, Matthew Tancik, Ben Mildenhall, and Jonathan T.
+Barron. Nerv: Neural reflectance and visibility fields for relighting and view synthesis. In CVPR, 2021.
+[45] Cheng Sun, Min Sun, and Hwann-Tzong Chen. Direct voxel grid optimization: Super-fast convergence
+for radiance fields reconstruction. In Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 5459–5469, 2022.
+[46] Jiaxiang Tang, Jiawei Ren, Hang Zhou, Ziwei Liu, and Gang Zeng. Dreamgaussian: Generative gaussian
+splatting for efficient 3d content creation. arXiv preprint arXiv:2309.16653, 2023.
+[47] Dor Verbin, Peter Hedman, Ben Mildenhall, Todd Zickler, Jonathan T. Barron, and Pratul P. Srinivasan.
+Ref-NeRF: Structured view-dependent appearance for neural radiance fields. CVPR, 2022.
+[48] Peng Wang, Lingjie Liu, Yuan Liu, Christian Theobalt, Taku Komura, and Wenping Wang. Neus: Learning
+neural implicit surfaces by volume rendering for multi-view reconstruction. NeurIPS, 2021.
+[49] Peng Wang, Lingzhe Zhao, Ruijie Ma, and Peidong Liu. BAD-NeRF: Bundle Adjusted Deblur Neural
+Radiance Fields. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 4170–4179, June 2023.
+[50] Zirui Wang, Shangzhe Wu, Weidi Xie, Min Chen, and Victor Adrian Prisacariu. NeRF−−: Neural radiance
+fields without known camera parameters. arXiv preprint arXiv:2102.07064, 2021.
+[51] Suttisak Wizadwongsa, Pakkapon Phongthawee, Jiraphon Yenphraphai, and Supasorn Suwajanakorn. Nex:
+Real-time view synthesis with neural basis expansion. In IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), 2021.
+11
+
+[52] Rundi Wu, Ben Mildenhall, Philipp Henzler, Keunhong Park, Ruiqi Gao, Daniel Watson, Pratul P. Srini-
+vasan, Dor Verbin, Jonathan T. Barron, Ben Poole, and Aleksander Holynski. Reconfusion: 3d reconstruc-
+tion with diffusion priors. arXiv, 2023.
+[53] Tong Wu, Jiaqi Wang, Xingang Pan, Xudong Xu, Christian Theobalt, Ziwei Liu, and Dahua Lin. Voxurf:
+Voxel-based efficient and accurate neural surface reconstruction. In International Conference on Learning
+Representations (ICLR), 2023.
+[54] Tianyi Xie, Zeshun Zong, Yuxing Qiu, Xuan Li, Yutao Feng, Yin Yang, and Chenfanfu Jiang. Physgaussian:
+Physics-integrated 3d gaussians for generative dynamics. arXiv preprint arXiv:2311.12198, 2023.
+[55] Kun Xu, Wei-Lun Sun, Zhao Dong, Dan-Yong Zhao, Run-Dong Wu, and Shi-Min Hu. Anisotropic
+spherical gaussians. ACM Transactions on Graphics, 32(6):209:1–209:11, 2013.
+[56] Jiawei Yang, Marco Pavone, and Yue Wang. Freenerf: Improving few-shot neural rendering with free
+frequency regularization. In Proc. IEEE Conference on Computer Vision and Pattern Recognition (CVPR),
+2023.
+[57] Ziyi Yang, Yanzhen Chen, Xinyu Gao, Yazhen Yuan, Yu Wu, Xiaowei Zhou, and Xiaogang Jin. Sire-ir:
+Inverse rendering for brdf reconstruction with shadow and illumination removal in high-illuminance scenes.
+arXiv preprint arXiv:2310.13030, 2023.
+[58] Ziyi Yang, Xinyu Gao, Wen Zhou, Shaohui Jiao, Yuqing Zhang, and Xiaogang Jin. Deformable 3d
+gaussians for high-fidelity monocular dynamic scene reconstruction. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, pages 20331–20341, 2024.
+[59] Zeyu Yang, Hongye Yang, Zijie Pan, Xiatian Zhu, and Li Zhang. Real-time photorealistic dynamic scene
+representation and rendering with 4d gaussian splatting. arXiv preprint arXiv 2310.10642, 2023.
+[60] Zongxin Ye, Wenyu Li, Sidun Liu, Peng Qiao, and Yong Dou. Absgs: Recovering fine details in 3d
+gaussian splatting. In ACM Multimedia 2024, 2024.
+[61] Taoran Yi, Jiemin Fang, Junjie Wang, Guanjun Wu, Lingxi Xie, Xiaopeng Zhang, Wenyu Liu, Qi Tian,
+and Xinggang Wang. Gaussiandreamer: Fast generation from text to 3d gaussians by bridging 2d and 3d
+diffusion models. arXiv preprint arXiv:2310.08529, 2023.
+[62] Wang Yifan, Felice Serena, Shihao Wu, Cengiz Öztireli, and Olga Sorkine-Hornung. Differentiable surface
+splatting for point-based geometry processing. ACM Transactions on Graphics (TOG), 38(6):1–14, 2019.
+[63] Alex Yu, Ruilong Li, Matthew Tancik, Hao Li, Ren Ng, and Angjoo Kanazawa. Plenoctrees for real-time
+rendering of neural radiance fields. In Proceedings of the IEEE/CVF International Conference on Computer
+Vision, pages 5752–5761, 2021.
+[64] Zehao Yu, Torsten Sattler, and Andreas Geiger. Gaussian opacity fields: Efficient and compact surface
+reconstruction in unbounded scenes. arXiv preprint arXiv:2404.10772, 2024.
+[65] Qiang Zhang, Seung-Hwan Baek, Szymon Rusinkiewicz, and Felix Heide. Differentiable point-based
+radiance fields for efficient view synthesis. arXiv preprint arXiv:2205.14330, 2022.
+[66] Xiuming Zhang, Pratul P Srinivasan, Boyang Deng, Paul Debevec, William T Freeman, and Jonathan T
+Barron. Nerfactor: Neural factorization of shape and reflectance under an unknown illumination. ACM
+Transactions on Graphics (ToG), 40(6):1–18, 2021.
+[67] Shunyuan Zheng, Boyao Zhou, Ruizhi Shao, Boning Liu, Shengping Zhang, Liqiang Nie, and Yebin Liu.
+Gps-gaussian: Generalizable pixel-wise 3d gaussian splatting for real-time human novel view synthesis.
+arXiv, 2023.
+[68] Wojciech Zielonka, Timur Bagautdinov, Shunsuke Saito, Michael Zollhöfer, Justus Thies, and Javier
+Romero. Drivable 3d gaussian avatars. 2023.
+[69] Matthias Zwicker, Hanspeter Pfister, Jeroen Van Baar, and Markus Gross. Ewa volume splatting. In
+Proceedings Visualization, 2001. VIS’01., pages 29–538. IEEE, 2001.
+12

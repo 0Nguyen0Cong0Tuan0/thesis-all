@@ -1,0 +1,1009 @@
+1
+Efficient Scene Modeling via Structure-Aware and
+Region-Prioritized 3D Gaussians
+Guangchi Fang, Bing Wang∗
+Abstract—Reconstructing 3D scenes with high fidelity and
+efficiency remains a central pursuit in computer vision and
+graphics. Recent advances in 3D Gaussian Splatting (3DGS)
+enable photorealistic rendering with Gaussian primitives, yet
+the modeling process remains governed predominantly by photo-
+metric supervision. This reliance often leads to irregular spatial
+distribution and indiscriminate primitive adjustments that largely
+ignore underlying geometric context. In this work, we rethink
+Gaussian modeling from a geometric standpoint and introduce
+Mini-Splatting2, an efficient scene modeling framework that
+couples structure-aware distribution and region-prioritized opti-
+mization, driving 3DGS into a geometry-regulated paradigm. The
+structure-aware distribution enforces spatial regularity through
+structured reorganization and representation sparsity, ensuring
+balanced structural coverage for compact organization. The
+region-prioritized optimization improves training discrimination
+through geometric saliency and computational selectivity, fos-
+tering appropriate structural emergence for fast convergence.
+These mechanisms alleviate the long-standing tension among rep-
+resentation compactness, convergence acceleration, and rendering
+fidelity. Extensive experiments demonstrate that Mini-Splatting2
+achieves up to 4× fewer Gaussians and 3× faster optimization
+while maintaining state-of-the-art visual quality, paving the way
+towards structured and efficient 3D Gaussian modeling.
+Index Terms—Gaussian Splatting, Point Clouds, Scene Repre-
+sentation, Scene Reconstruction.
+I. INTRODUCTION
+T
+HE growing demand for compact, scalable, and high-
+fidelity 3D scene modeling is driving progress across
+domains such as autonomous systems [1], [2], digital twins
+[3], [4], mixed reality [5], [6], and immersive content cre-
+ation [7], [8]. These scenarios require not only visually ac-
+curate scene representations, but also modeling frameworks
+that are memory-conscious, computationally lightweight, and
+amenable to fast training and deployment. While neural ren-
+dering approaches [9]–[11] have achieved impressive results
+under image supervision, their reliance on high-capacity dense
+representations incurs substantial computational overhead, lim-
+iting their suitability for real-time and large-scale use. This
+highlights the need for scene modeling paradigms that balance
+accuracy with efficiency, enabling expressive yet lightweight
+representations that scale across tasks and environments.
+Among recent advances, 3D Gaussian Splatting (3DGS)
+[12] has emerged as a promising alternative for novel view
+This work is jointly supported by Young Scientists Fund of the National
+Natural Science Foundation of China (42301520), Research Grants Council
+of Hong Kong (25206524).
+Guangchi Fang and Bing Wang are with The Spatial Intelligence Group,
+The Hong Kong Polytechnic University, HKSAR. Corresponding author: Bing
+Wang (bingwang@polyu.edu.hk).
+Mini-Splatting2 
+2min48s, 0.7mil, 25.2dB
+GT
+3DGS-accel
+11min47s, 4.0mil, 25.2dB
+3DGS (6.1mil, 66 FPS)
+Train: 35min, PSNR: 25.2dB
+Mini-Splatting (0.6mil, 430 FPS)
+Train: 17min, PSNR: 25.2dB
+Fig. 1.
+Gaussians in 3DGS exhibit a highly irregular spatial distribution,
+which inherently limits its representational capability. To address this, Mini-
+Splatting introduces a structure-aware distribution scheme that mitigates such
+irregularity, substantially reducing the number of Gaussians while improving
+rendering speed, training efficiency, and visual quality. Building on this
+foundation, Mini-Splatting2 incorporates a region-prioritized optimization
+scheme to further accelerate training. In a comparative evaluation on the
+bicycle scene, Mini-Splatting2 demonstrates substantial improvements over
+the latest official accelerated 3DGS implementation, referred to as 3DGS-
+accel [12], [13], requiring 5.7× fewer Gaussians and achieving a 4.2×
+speedup in optimization, while maintaining state-of-the-art visual quality.
+synthesis, representing scenes as collections of spatially an-
+chored and view-dependent Gaussians. This formulation com-
+bines the geometric interpretability of explicitly parameterized
+primitives with the representational flexibility of optimizable
+attributes, enabling parallelized rasterization and fast conver-
+gence. Despite these advantages, the scene modeling process
+still exhibits inefficiencies in both spatial distribution and
+training dynamics, particularly under multiview photometric
+supervision without explicit geometric context. These ineffi-
+ciencies hinder modeling scalability and quality, motivating a
+closer investigation into their fundamental causes.
+A key source of inefficiency lies in the absence of geometric
+principles governing how Gaussians are spatially managed. In
+standard 3DGS pipelines, the spatial distribution of Gaussians
+is adjusted through an adaptive density control strategy, which
+measures the positional gradient magnitude of Gaussians to
+trigger threshold-based split, clone, or prune operations. This
+arXiv:2411.12788v2  [cs.CV]  5 Feb 2026
+
+2
+locally gradient-driven process can adaptively refine high-
+contrast regions, often geometric edges or high-frequency
+textures, while reducing redundancy in smooth areas, such
+as plain walls and flat floors. However, without considering
+Gaussians as the essential underlying structure, this strategy
+over-concentrates on those with high positional gradients
+and under-represents structurally important yet low-contrast
+regions, as illustrated in Fig. 1. Such irregularity results in
+imbalanced scene coverage, degraded reconstruction fidelity,
+increased rasterization cost, and inflated memory consumption.
+A parallel inefficiency arises from the absence of geometric
+criteria guiding how Gaussians are dynamically optimized.
+In most existing 3DGS pipelines, the optimization process
+is driven solely by photometric consistency across views,
+typically by per-pixel loss metrics (e.g., PSNR) and structural
+similarity measures (e.g., SSIM). To maintain stability under
+such weak supervision, these pipelines adopt conservative
+progressive growth schedules, incrementally increasing the
+number of Gaussians over time, and apply uniform updates to
+all Gaussians, regardless of their visibility or contribution to
+the rendered views. However, without a geometric relevance
+assessment across Gaussians, they cannot effectively trigger
+early activation or guide targeted attribute updates of struc-
+turally informative regions. Such indiscrimination disregards
+regionally geometric priority, wastes computation on occluded
+or uninformative Gaussians, delays coherent scene structure
+emergence, and prolongs the optimization process.
+Inspired by these sources of inefficiency, we propose Mini-
+Splatting2, a rearchitected 3DGS framework that improves
+modeling performance through structure-aware distribution
+and region-prioritized optimization. Our approach is built
+on two core assumptions. First, imposing spatial regularity
+on Gaussians in regions with pronounced image gradients
+ensures balanced coverage, thereby supporting compact or-
+ganization. Second, applying training discrimination to geo-
+metrically informative areas accelerates structural emergence,
+thus promoting fast convergence. Our method introduces two
+mechanisms to jointly regulate the spatial distribution and
+training dynamics of Gaussian primitives, thereby improving
+both modeling efficiency and reconstruction fidelity.
+To mitigate the irregularity in spatial distribution, we pro-
+pose a structure-aware distribution scheme that explicitly
+regulates the spatial arrangement of Gaussians. This scheme
+comprises two synergistic modules that jointly improve rep-
+resentation efficiency. First, adaptive Gaussian organization
+improves coverage balance through blur split and depth reini-
+tialization. Blur split identifies low-contrast and blurry regions
+that lack sufficient coverage and adaptively increases their
+local density. Depth reinitialization consolidates multi-view
+depth estimates to reposition Gaussians in under-reconstructed
+regions. Second, redundant Gaussian simplification reduces
+memory overhead via intersection preserving and primitive
+sampling. Intersection preserving models ray-mesh intersec-
+tions to retain structurally critical Gaussians. Primitive sam-
+pling introduces stochastic sampling to maintain a sparse yet
+informative set of primitives. In combination, these mod-
+ules arrange Gaussians into a spatially coherent distribution,
+lowering both memory usage and rasterization cost without
+sacrificing reconstruction fidelity.
+To alleviate the indiscrimination in training dynamics, we
+propose a region-prioritized optimization scheme that steers
+the optimization process toward geometrically salient regions
+of the scene. This scheme consists of two complementary
+components that collectively accelerate convergence. First,
+aggressive model growth hastens early structure emergence
+through critical Gaussian identification and aggressive Gaus-
+sian clone. Critical Gaussian identification pinpoints primitives
+with high reconstruction significance. Aggressive Gaussian
+clone selectively duplicates them to rapidly expand scene
+coverage in the initial optimization stage. Second, occluded
+Gaussian culling reduces update overhead via visibility iden-
+tification and view-dependent culling. Visibility identification
+quantifies per-view primitive visibility derived from blended
+rendering weights, serving as a proxy for geometric relevance.
+View-dependent culling discards occluded or low-visibility
+Gaussians during rasterization, avoiding unnecessary updates.
+Working in tandem, these components reconfigure standard
+discriminative optimization into a geometry-prioritized pro-
+cess, achieving faster convergence while preserving rendering
+quality and maintaining modeling compactness.
+Our main contributions are as follows:
+• We provide a comprehensive analysis of 3D Gaussians
+from a geometric perspective and identify two key ineffi-
+ciencies, irregular spatial distribution and indiscriminate
+training dynamics, that limit modeling compactness and
+convergence. These insights motivate Mini-Splatting2,
+a unified framework for efficient scene modeling that
+improves both memory and computational efficiency.
+• We propose a structure-aware distribution scheme to
+enhance representation compactness by enforcing spatial
+regularity among Gaussians. It integrates adaptive Gaus-
+sian organization to address coverage imbalance and re-
+dundant Gaussian simplification to eliminate superfluous
+Gaussians. This design yields compact and expressive
+representations, thereby reducing memory consumption.
+• We present a region-prioritized optimization scheme to
+accelerate convergence by emphasizing geometrically dis-
+criminative regions. It combines aggressive model growth
+for rapid structural emergence and occluded Gaussian
+culling to suppress less informative updates. This scheme
+delivers a targeted and streamlined optimization process,
+thus reducing computational overhead.
+• Extensive experiments on various public benchmarks
+demonstrate that Mini-Splatting2 achieves a 4× reduction
+in Gaussian numbers and delivers a 3× acceleration
+in optimization time, while preserving rendering quality
+comparable to state-of-the-art 3DGS implementations.
+These results position it as a strong and practical baseline
+for efficient real-world scene modeling.
+A preliminary version of this work was published at ECCV
+2024 as Mini-Splatting [14]. This extended version introduces
+substantial methodological and empirical advancements be-
+yond the original. First, we provide a comprehensive analysis
+of the geometry modeling process in 3DGS, offering new
+insights into the structural capacity of Gaussians and demon-
+
+3
+strating their potential for dense point cloud reconstruction.
+Second, we propose a region-prioritized optimization scheme
+that incorporates two effective acceleration mechanisms, ag-
+gressive model growth and occluded Gaussian culling, which
+significantly enhance optimization efficiency by emphasizing
+geometrically informative regions. Third, we integrate these
+advances into a unified and rearchitected framework, Mini-
+Splatting2, which delivers a favorable trade-off among rep-
+resentation compactness, optimization speed, and rendering
+fidelity. This extension reflects a major expansion in technical
+contribution and experimental validation. Code Available.
+II. RELATED WORK
+A. Gaussian Splatting
+3D Gaussian Splatting (3DGS) [12] was originally devel-
+oped for novel view synthesis, with a strong emphasis on real-
+world immersive rendering. Early methods in this domain [9]
+employed multi-layer perceptrons to implicitly model scenes
+as neural radiance fields. More recent approaches have moved
+towards explicit representations, including voxel grids [15],
+[16], hash grids [17], and point clouds [18], [19], which
+enhance representation capacity and consequently improve
+both training efficiency and rendering quality. Expanding on
+classical 3D representations, elliptical Gaussians [20] offer ro-
+bust capabilities for modeling scene geometry and appearance
+while inherently supporting parallel rasterization [12]. This
+approach eliminates the need for ray marching required by
+previous volume rendering techniques [9], thereby accelerating
+both optimization and rendering.
+Owing to the strong scalability of Gaussian representations,
+3DGS has demonstrated promising potential across a wide
+range of applications. Studies from diverse fields, including 3D
+reconstruction, computer graphics, and robotics, have applied
+this work to downstream tasks such as surface reconstruction
+[3], [4], content generation [7], [8], and localization and
+mapping [5], [6]. While several studies have sought to improve
+3DGS from the perspectives of graphics [21], [22], image
+processing [23], and system performance [13], [24], relatively
+few have explored the fundamental characteristics of 3D
+Gaussians as a scene representation.
+Despite notable progress in novel view synthesis, existing
+approaches still depend on dense representations and superflu-
+ous optimization, which limit their practicality in real-world
+applications such as robotics, visualization, and simulation.
+As both academic and industrial demands evolve, there is an
+increasing need for lightweight Gaussian representations and
+fast Gaussian optimization to effectively meet performance
+constraints in practical deployments.
+B. Lightweight Gaussian Representation
+With recent advancements in neural radiance fields, several
+studies have focused on simplifying neural representations,
+primarily centering on feature grids and introducing voxel
+pruning [25], [26] or voxel masking [27], [28]. Similar to
+these developments, Gaussian pruning has been explored in
+recent 3DGS compression-oriented research [29]–[34]. For
+instance, C3DGS [29] proposed pruning Gaussians based on
+image gradients, while Compact-3DGS [30] and LightGaus-
+sian [31] applied pruning based on Gaussian opacity and scale.
+However, these approaches overlook the issue of irregular
+spatial distribution of Gaussians, which can lead to suboptimal
+simplification results following pruning.
+Another line of research focuses on enhancing data struc-
+tures to achieve more lightweight scene representations.
+Scaffold-GS [35] introduced structured 3D Gaussians with
+anchor points and multi-layer perceptrons, and subsequent
+studies [36], [37] have further investigated compact repre-
+sentations through advanced compression approaches. Other
+studies [38]–[40] have integrated Octree structures and Level-
+of-Detail techniques with Gaussian representations, enhancing
+their applicability to large-scale scene modeling. Nonetheless,
+these approaches generally neglect the inherent correlation
+between Gaussians and points, and thus fail to fully exploit
+geometric guidance from the underlying scene structure.
+C. Fast Gaussian Optimization
+Gaussian densification plays a crucial role in recovering
+scene geometry, directly influencing Gaussian optimization.
+The vanilla 3DGS approach [12] initializes Gaussians with
+sparse points from Structure-from-Motion (SfM) [41] and
+employs adaptive density control that first selects Gaussians
+based on image-space gradients and then clones or splits them
+according to their scale. Building on this approach, recent
+studies [13], [42]–[45] have focused on Gaussian selection
+strategies informed by image-space information and intrinsic
+Gaussian attributes. Other approaches incorporate multi-view
+constraints [46]–[48] or leverage advanced optimization tech-
+niques [49] to enhance densification. A well-designed densifi-
+cation strategy can improve optimization convergence, thereby
+accelerating the overall optimization process. However, most
+existing methods primarily aim to enhance rendering quality,
+often leading to an increased optimization budget.
+A parallel line of research [50]–[54] explores learning-based
+approaches to directly predict scene geometry in the form of
+depth maps, dense point clouds, or Gaussian attributes. These
+methods have demonstrated significant potential for 3D recon-
+struction, particularly in sparse-view scenarios and structured
+environments. However, in the general and classical multi-
+view setting, still the dominant configuration for practical 3D
+scene reconstruction, learning-based approaches remain in an
+early stage, facing challenges such as maintaining geometric
+consistency and robust multi-view alignment.
+A promising direction in the classical multi-view setting
+is the enhancement of both forward and backward rasteriza-
+tion pipelines [13], [24], [55]. For example, DISTWAR [24]
+accelerates atomic operations through warp-level reduction.
+In addition, the codebase of Taming-3DGS [13], referred to
+as 3DGS-accel, incorporates several optimization components,
+including per-splat backward rendering, fused-SSIM compu-
+tation, spherical harmonic separation, and tile-based culling
+[56], resulting in a reported 2.7× speedup in training time.
+Collectively, these works provide strong baselines for 3DGS
+and have advanced its development and applications. However,
+further improvements can be realized by incorporating geomet-
+ric criteria to guide Gaussian optimization more effectively.
+
+4
+3DGS (25.2, 6.1)
+(a)
+Random (24.8, 0.6)
+(c)
+Pruning (24.9, 0.6)
+(b)
+Grid (23.5, 1.1)
+(d)
+Density (24.7, 0.6)
+(e)
+Fig. 2. Analysis of Gaussian Representation. (a) Projected Gaussian centers in the vanilla 3DGS, along with the corresponding rendering quality (PSNR in dB)
+and total number of Gaussians (in millions). Notable issues of ‘overlapping’ and ‘under-reconstruction’ are clearly observed. (b)-(e) Visualization of Gaussian
+centers after applying different simplification strategies, including pruning, random sampling, grid sampling, and density-preserved sampling, respectively.
+Compared
+with
+concurrent
+works,
+which
+achieve
+lightweight
+representation
+and
+accelerated
+optimization
+primarily through advanced densification and optimization
+strategies,
+our
+method
+explicitly
+adopts
+a
+geometric
+perspective
+rather
+than
+relying
+solely
+on
+multi-view
+photometric
+supervision.
+In
+particular,
+our
+approach
+is
+distinguished in two ways: 1) it treats the spatial positions
+of Gaussians as an integral component of the underlying
+scene structure, thereby mitigating irregularity in spatial
+distribution; and 2) it evaluates geometric relevance across
+Gaussians
+to
+establish
+regionally
+prioritized
+geometry,
+reducing indiscrimination during training dynamics.
+III. GEOMETRIC ANALYSIS WITHIN GAUSSIAN SPLATTING
+A. Preliminaries of Gaussian Splatting
+Gaussian Representation. 3DGS [12] represents scene ge-
+ometry as a collection of 3D Gaussians, denoted as {Gi|i =
+1, · · · , N}. Each Gaussian Gi is characterized by its opac-
+ity αi ∈[0, 1], center pi ∈R3×1 and covariance matrix
+in world space Σi ∈R3×3 [20], formulated as Gi(x) =
+e−1
+2 (x−pi)T Σ−1
+i
+(x−pi). To render an image from Gaussians,
+3DGS first sorts them in an approximate depth order based
+on the distance from their centers pi to the image plane, and
+further applies alpha-blending [9] as follows:
+c(x) =
+N
+X
+i=1
+wici,
+where wi = TiαiG2D
+i
+(x).
+(1)
+In this formulation, ci denotes the view-dependent color mod-
+eled by spherical harmonic (SH) coefficients. The accumulated
+transmittance Ti is defined as Ti = Qi−1
+j=1(1 −αjG2D
+j
+(x)),
+where G2D
+i
+represents the 2D Gaussian projection of Gi,
+obtained via a local affine transformation [20].
+Adaptive Density Control. 3DGS employs an adaptive den-
+sity control strategy to recover scene geometry. Starting from
+sparse SfM points as the initial Gaussians, 3DGS dynamically
+adjusts the density of the representation by adding and re-
+moving Gaussians during optimization. Specifically, Gaussians
+exhibiting significant image-space positional gradients are
+either cloned or split, depending on their scales, to improve
+local detail. Conversely, Gaussians with low opacity or ex-
+cessive screen-space size are pruned to avoid redundancy and
+preserve efficiency. Ablation studies in [12] demonstrate that
+this densify-and-prune strategy adaptively grows the number
+of Gaussians for higher-quality scene modeling.
+B. Irregularity within Gaussian Representation
+In this section, we first analyze the irregular spatial distribu-
+tion of Gaussians resulting from the adaptive density control
+strategy. Then, we demonstrate that straightforward Gaussian
+simplification, which disregards their role as underlying ge-
+ometry, is insufficient to address this irregularity. Finally, we
+analyze the necessity of enforcing spatial regularity to achieve
+compact organization within Gaussian representation.
+Analysis of Gaussian Representation. Adaptive density con-
+trol evaluates the positional gradient magnitude of Gaussians
+to trigger threshold-based densification. Specifically, during
+the optimization process, each Gaussian accumulates posi-
+tional gradients according to the photometric optimization
+objective. During densification, Gaussians whose accumulated
+gradients exceed a predefined threshold are selected to undergo
+split or clone operations for increased density. Nevertheless,
+this threshold-based selection may introduce spatial irregular-
+ity when Gaussians are either over- or under-selected due to
+suboptimal threshold settings, as shown in Fig. 2 (a).
+In textureless regions, characterized by homogeneous ap-
+pearance and negligible image gradient magnitudes, 3DGS
+suppresses the density of Gaussians, which is beneficial for
+scene modeling. During optimization, Gaussians accumulate
+positional gradients from the photometric objective, which
+become extremely small in regions with negligible image
+gradients. During densification, adaptive density control skips
+such Gaussians, and distributes them sparsely within these
+regions, thereby reducing redundancy. Consequently, 3DGS
+avoids densifying Gaussians in color-smooth areas, such as
+
+5
+plain walls or floors, and instead employs a small number
+of large Gaussians to capture both structure and appearance.
+This strategy reduces the number of Gaussians in such regions
+without compromising rendering quality.
+In contrast, textured regions, characterized by pronounced
+image gradient magnitudes, exhibit spatial irregularity within
+Gaussian representation, reflecting both redundancy and in-
+sufficiency. For regions with high image gradients, the cor-
+responding Gaussians accumulate large positional gradients,
+prompting adaptive density control to densely select Gaus-
+sians, which leads to over-densification. Conversely, in regions
+with relatively low image gradients, this strategy tends to
+ignore Gaussians, behaving similarly to textureless regions,
+which can result in under-representation. This strategy induces
+spatial irregularity in textured regions, as illustrated in Fig. 2
+(a). The first row highlights regions of ‘overlapping’, where
+dense clustering of Gaussians occurs in areas with significant
+color variance. When alpha blending is applied for render-
+ing, these overlapping regions incur redundant computation.
+The second row depicts ‘under-reconstruction’, where regions
+with relatively low image gradients are insufficiently covered,
+leading to blurry artifacts. These observations reveal the ir-
+regular distribution of Gaussians and underscore the inherent
+redundancy and insufficiency in the scene representation.
+Gaussian Pruning and Sampling. A straightforward strat-
+egy for constructing a lightweight Gaussian representation is
+pruning and sampling. Following the importance estimation
+approach in [26], we compute an importance score for each
+Gaussian Gi by accumulating its blending weights across all
+intersecting rays as Ii = PK
+j=1 wij, where K denotes the
+total number of contributing rays. Gaussians with importance
+scores below a predefined threshold are pruned, and the
+resulting representation is further optimized until convergence.
+This approach considers only blending weights during image
+rendering as photometric guidance while ignoring the spatial
+positions of Gaussians as indicators of the underlying ge-
+ometry. Therefore, it cannot fully address spatial irregularity.
+As shown in Fig. 2 (b), this method reduces the number
+of Gaussians from 6.1 million to 0.6 million. However, it
+also leads to a degradation in rendering quality, with PSNR
+dropping from 25.2 dB to 24.9 dB, and fails to resolve the
+issues of ‘overlapping’ and ‘under-reconstruction’.
+To further investigate the impact of 3D simplification, we
+integrated pruning with several standard point cloud sampling
+strategies, including random sampling, grid sampling, and
+density-preserved sampling, as illustrated in Figs. 2 (c), (d),
+and (e), respectively. Although these methods successfully
+simplify Gaussians to varying extents, they still struggle to
+address the irregular spatial distribution.
+Spatial Regularity. In textureless regions, where image gra-
+dients are negligible, spatial regularity is not necessarily re-
+quired, as a small number of Gaussians can adequately model
+such regions. In contrast, in textured regions, which exhibit
+pronounced image gradients, enforcing spatial regularity is
+desirable to mitigate the irregular distribution of Gaussians,
+thereby ensuring a compact and expressive representation.
+In textureless regions, the image gradients are negligible,
+and when minimizing the photometric optimization objective
+(c) GT-Bicycle
+(d) Projected Gaussians
+(a) GT-Playroom
+(b) Projected Gaussians
+Fig. 3.
+Spatial irregularity. (a, c) Ground-truth images of the playroom and
+bicycle scans. (b, d) Corresponding projected Gaussian centers, colored by
+density from low (blue) to high (red).
+between the rendered and input views, they yield low posi-
+tional gradients for the associated Gaussians. These positional
+gradients rarely exceed the predefined densification threshold,
+leaving the small set of initial Gaussians. Since these regions
+are largely color-smooth, these sparse Gaussians are sufficient
+for maintaining rendering quality while remaining memory-
+compact. Therefore, spatial regularity, which promotes a bal-
+anced distribution, is not strictly necessary in this case. Figure
+3 (b) illustrates that 3DGS avoids densifying Gaussians in
+textureless regions, where a small number of large Gaussians
+adequately model these areas. This result indicates that spatial
+regularity is not necessary in textureless regions.
+In textured regions, enforcing spatial regularity is desir-
+able. Textured regions with high image gradients yield large
+positional gradients through the optimization objective. With
+these large positional gradients, Gaussians are repeatedly se-
+lected for densification, leading to clustering of Gaussians.
+Conversely, textured regions with moderately low image gra-
+dients produce relatively small positional gradients. Similar
+to textureless regions, these low gradients do not trigger
+densification, leading to insufficient coverage with sparse
+Gaussians. Such clustering introduces redundant computation,
+while insufficient coverage leads to blurry artifacts, collec-
+tively highlighting the inherent inefficiency of the represen-
+tation. Therefore, spatial regularity is necessary to mitigate
+both excessive clustering and insufficient coverage. As further
+illustrated in Fig. 3 (d), the foreground bicycle exhibits pro-
+nounced Gaussian clustering, whereas adjacent regions suffer
+from inadequate coverage, being represented by only a small
+number of Gaussians. These observations indicate that spatial
+regularity is desirable for textured regions.
+Motivated by this analysis, our approach seeks to promote
+spatial regularity in textured regions by explicitly regulat-
+ing the spatial distribution of Gaussians. This encourages a
+more balanced arrangement, reducing redundant Gaussians
+and mitigating blurry artifacts, thereby ensuring a compact
+and expressive representation. A more detailed discussion of
+spatial distribution is provided in Sec. VII.
+C. Indiscrimination within Gaussian Optimization
+In this section, we analyze the optimization progress of
+Gaussians optimized solely through photometric consistency.
+We demonstrate that this process inherently encodes latent
+geometric cues, which in turn provide regionally geometric
+priors to guide discriminative optimization.
+
+6
+(a)
+(b)
+1K iter
+2K iter
+3K iter
+5K iter
+0.5K iter
+15K iter
+Fig. 4.
+Analysis of Gaussian Optimization. (a) Gaussian centers. (b) Cor-
+responding depth points across 0.5K to 15K iterations. While the Gaussian
+centers exhibit some visual artifacts, a dense and informative point cloud can
+still be effectively extracted from the Gaussian representation.
+Analysis of Gaussian Optimization. Existing 3DGS pipelines
+primarily rely on photometric loss to drive the optimization,
+which induces indiscrimination in optimization. To ensure
+stability under weak supervision metrics such as PSNR and
+SSIM, these pipelines gradually increase the number of Gaus-
+sians while applying uniform updates across all instances.
+However, such a strategy fails to promote early activation, de-
+laying the emergence of coarse scene structures, and does not
+prioritize structurally informative regions, thereby expending
+unnecessary computation on occluded Gaussians.
+Figure 4 (a) illustrates the typical optimization progress
+in 3DGS. Starting from an initial sparse set of points (0.5K
+iterations), the number of Gaussians progressively increases
+through iterative optimization and densification, resulting in
+a coarse approximation of scene geometry with substantial
+floaters between 0.5K and 5K iterations. With further opti-
+mization, Gaussians converge toward object surfaces (up to
+15K iterations), though a subset persists as floaters to account
+for camera- or view-dependent effects. Typically, the presence
+of incomplete structures with significant floaters, particularly
+at an early stage of optimization (i.e., 1K to 3K iterations),
+indicates suboptimal reconstruction quality.
+Point Cloud Reconstruction via Gaussians. The latent ge-
+ometric cues within Gaussians can be explicitly extracted to
+mitigate training indiscrimination. In particular, point cloud
+reconstruction can be derived by leveraging geometry-related
+Gaussian attributes within a depth estimation framework.
+Building upon the image rendering formulation in Eq. (1),
+we define the reconstructed depth map d as:
+d(x) = dmid
+imax(x),
+where imax = arg max
+i
+wi.
+(2)
+Here, dmid denotes the depth derived from ray-Gaussian el-
+lipsoid intersections, and wi is the blending weight as defined
+in Eq. (1). The resulting depth maps can be reprojected into
+world coordinates to yield reconstructed point clouds.
+A key observation is that dense point clouds can be ef-
+fectively reconstructed even in the early stages of optimiza-
+tion using this approach. As shown in Fig. 4 (b), Gaussian
+representations with imperfect spatial positions (e.g., at 1K
+to 3K iterations) are still capable of producing reasonable
+geometric reconstructions, particularly for foreground objects.
+This observation reveals a latent geometric prior embedded in
+the training dynamics of Gaussians and highlights the potential
+to accelerate convergence by steering the optimization process
+toward geometrically salient regions of the scene.
+IV. STRUCTURE-AWARE DISTRIBUTION SCHEME FOR
+GAUSSIAN REPRESENTATION
+To regulate their spatial distribution, we treat Gaussians as
+an essential component of the underlying structure and intro-
+duce a structure-aware distribution scheme that comprises two
+components, adaptive Gaussian organization, which improves
+scene coverage balance, and redundant Gaussian simplifica-
+tion, which reduces memory consumption. These components
+collectively mitigate irregularity in spatial distribution.
+A. Adaptive Gaussian Organization
+In contrast to the adaptive density control strategy, which
+adjusts the number of Gaussians, our adaptive Gaussian orga-
+nization introduces two key components, blur split and depth
+initialization, that adaptively organize the spatial locations of
+Gaussians, thereby improving scene coverage balance.
+Blur Split. Our blur split component is designed to increase
+the local density of blurry regions with insufficient cover-
+age, as shown in Fig. 5 (b), thereby mitigating the ‘under-
+reconstruction’ issue discussed in Sec. III-B. The gradient-
+based adaptive density control strategy proposed in [12] may
+fail in areas with smooth color transitions, as illustrated in
+Fig. 5 (a). Consequently, the corresponding oversized Gaus-
+sians Gi tend to be retained during optimization. An intuitive
+implementation adopted in 3DGS is to prune Gaussians with
+excessively large screen-space scales based on their projected
+2D distribution G2D
+i
+. However, this pruning method does not
+effectively resolve the issue of ‘under-reconstruction’.
+As illustrated in Fig. 5 (c), we render indices of Gaus-
+sians with the maximum contribution to a pixel as imax =
+arg max
+i
+wi (i.e., the Gaussian with the maximum weight in
+alpha-blending) onto the image. The rendered indices imax(x)
+for each pixel x are mapped to random colors for visualization.
+To distinguish from the rendered indices corresponding to
+Gaussians with the maximum contribution imax(x), we denote
+the projected index of the ith Gaussian Gi as i(x). A key
+observation is that, compared to the projected index i(x) (i.e.,
+the projected area of Gaussian Gi), the blurry artifacts are
+more directly associated with the rendered index imax(x).
+This suggests that Gaussians with large maximum contribution
+areas contribute to the problem of ‘under-reconstruction’.
+Building upon this observation, we identify Gaussians with
+large blurry regions for each input image, denoted as Gblur,
+using the following criterion:
+Gblur = {Gi|Si > Tblur ∧i ∈[1, N]},
+Tblur = θblur · H · W.
+(3)
+Here, Si
+= P(H,W )
+x=(1,1) δ(i(x) = imax(x)) represents the
+maximum contribution area of Gaussian Gi, where δ is the
+indicator function, and (H, W) denotes the image resolution.
+The value of Si can be efficiently computed during the forward
+pass of rasterization. The hyperparameter θblur is empirically
+
+7
+GT
+(a)
+Rendered (3DGS)
+(b)
+Idx (3DGS)
+(c)
+Idx (Blur Split)
+(e)
+Rendered (Blur Split)
+(d)
+Fig. 5. Visual analysis of the blur split component. (a) Ground truth image. (b) Image rendered using the original 3DGS [12]. (c) Gaussian indices corresponding
+to the maximum contribution for each pixel. (d) Image rendered after applying blur split. (e) Gaussian indices after applying blur split.
+Depth Points (Mid)
+(d)
+Depth Points (Center)
+(c)
+Blending Depth
+(a)
+Depth Points (Blending)
+(b)
+1
+2
+3
+Fig. 6.
+Visual analysis of depth maps and reconstructed depth points from 3DGS [12]. (a) Depth map rendered via alpha blending using the original
+3DGS model. (b) Depth points reconstructed from the alpha-blended depth map, where red boxes indicate significant geometric artifacts and inconsistencies,
+especially around object boundaries and fine structures. (c) Depth points reconstructed from our predicted depth map, where the depth values are anchored at
+the centers of the corresponding Gaussians, resulting in more accurate and smoother geometry. (d) Depth points reconstructed from our predicted depth map
+using midpoints along the Gaussian ray intersections, offering further geometric refinement and ensuring continuity.
+set to 2 × 10−4 to control the threshold for identifying blurry
+regions. Gaussians satisfying the criterion for Gblur are then
+split according to the strategy in [12] during the optimization
+process. The effectiveness of this deblurring method is demon-
+strated in Fig. 5 (d) and (e), which show how our blur split
+component mitigates the ‘under-reconstruction’ issue, thereby
+enhancing scene coverage and image clarity.
+Depth Reinitialization. Our depth reinitialization compo-
+nent leverages dense depth information to reposition Gaus-
+sians, thereby mitigating both the ‘overlapping’ and ‘under-
+reconstruction’ phenomena in Sec. III-B. The use of depth to
+enhance neural rendering is a well-established and effective
+strategy, as demonstrated in several prior NeRF-based algo-
+rithms [19], [57]. However, in 3DGS-based approaches, the
+primary challenge is not merely utilizing the reconstructed
+depth but rather generating accurate and practical depth data.
+Similar to NeRF [9], 3DGS can render a blended depth map
+by replacing the Gaussian color ci with the depth of its center
+di, formulated as dblend = PN
+i=1 wi · di. This formulation has
+been widely adopted in subsequent works, and the resulting
+depth map is shown in Fig. 6 (a). However, we observe that this
+seemingly reasonable 2D depth map can be misleading, often
+producing a depth point cloud with significant artifacts. In
+Fig. 6 (b), we reproject the blended depth into world space and
+visualize the Gaussian centers with their corresponding colors.
+Three representative failure cases, depth collapse, object mis-
+alignment, and blending boundary, are highlighted with red
+boxes for clarity. These issues primarily arise from the use of
+alpha blending across multiple overlapping Gaussians, which
+can lead to inconsistent depth estimations.
+Here, we present our formulation for rendering depth. Given
+an elliptical Gaussian defined by its scale s = (sx, sy, sz), we
+model it as a 3D ellipsoid: g(x, y, z) = x2
+s2x + y2
+s2y + z2
+s2z = 1.
+For an input ray parameterized as r(t) = o + td, where
+o and d represent the ray origin and direction transformed
+into the coordinate system of the ellipsoid, we compute the
+midpoint between the two intersection points of the ray and
+the ellipsoid. The depth at this midpoint is defined as the
+Gaussian depth dmid
+i
+. An alternative approach would be to
+determine the optimal t corresponding to the maximum density
+along the ray. We adopt the midpoint formulation, as it yields
+numerically identical results to the alternative method, while
+additionally providing a useful discriminant (i.e., a criterion
+for determining whether the ray intersects the ellipsoid).
+In scenarios involving multiple Gaussians, we select the
+one with the maximum contribution to each pixel in order
+to mitigate artifacts caused by alpha blending. The final depth
+dmid is defined as dmid = dmid
+imax, where imax = arg max
+i
+wi.
+
+8
+In practice, we observe that setting the depth based on the
+Gaussian center, as dcenter
+=
+dimax, yields comparable
+rendering quality to dmid after further optimization. However,
+since dmid yields superior reconstruction results, as demon-
+strated in Figs. 7 (a) and (b), we adopt it in our Mini-Splatting
+pipeline to support potential downstream applications.
+After generating the depth map, we reproject all depth
+points into world space. For each image, a subset of points
+is randomly selected as initialization seeds, to which the cor-
+responding ground-truth colors are assigned. During optimiza-
+tion, we repeatedly reinitialize our Gaussian representation
+with these points to explicitly organize the spatial distribution
+of Gaussians. The resulting merged point cloud is shown in
+Fig. 7 (c). These depth points facilitate more balanced scene
+coverage within our model, thereby mitigating the spatial
+irregularity inherent in the original representation.
+B. Redundant Gaussian Simplification
+Our redundant Gaussian simplification strategy consists
+of two key components, intersection preserving and primi-
+tive sampling, which jointly eliminate superfluous Gaussians,
+thereby reducing memory consumption while preserving struc-
+tural fidelity and rendering quality.
+Intersection Preserving. Inspired by ray-mesh intersection
+methods, our intersection preserving removes Gaussians that
+do not directly intersect with the rendering ray. Unlike hard-
+thresholding approaches, we avoid binarizing smooth opacity
+or blending weights into discrete 0, 1 values, as doing so
+may degrade visual fidelity. Instead, our approach retains
+structurally critical Gaussians, thereby maintaining a balance
+between structural precision and rendering quality.
+In depth reinitialization, we represent 3D Gaussians as
+ellipsoids and determine their depths based on midpoints along
+the viewing rays. We render the depth of the Gaussian with
+the maximum contribution, representing it as the depth of the
+scene. These midpoints, corresponding to the intersections of
+rays with the scene representation, serve as the foundation for
+the set of intersected Gaussians, denoted as Gint. Specifically,
+for each image, we define the set of intersected Gaussians Gint
+as those that are the primary contributors to at least one pixel:
+Gint = {Gi|i ∈Imax ∧i ∈[1, N]},
+(4)
+where Imax denotes the set of all indices within the rendered
+indices imax(x), and N is the number of Gaussians.
+Primitive Sampling. In this section, we analyze the limita-
+tions of direct Gaussian pruning and propose our primitive
+sampling. This component incorporates stochastic sampling
+informed by scene geometry, thereby maintaining rendering
+quality while preserving a sparse set of Gaussians.
+The concept of pruning in neural representations was ini-
+tially introduced in grid-based neural radiance fields [26],
+[58] to eliminate empty or low-information voxels. This idea
+can be naturally extended to Gaussian representations by
+assigning each Gaussian a predefined importance score Ii
+and pruning those with low values. While this approach is
+effective for removing a small subset of Gaussians, applying
+it with a low preservation ratio often results in a noticeable
+Merged Depth Points
+(c)
+Depth Points (Mid)
+(b)
+Depth Points (Center)
+(a)
+Fig. 7. Depth points. (a) Depth points from our depth map using Gaussian
+centers. (b) Depth points from our depth map using midpoints. (c) Merged
+depth points from our depth map using midpoints. The Depth Points (Mid)
+exhibit improved point cloud reconstruction results.
+PSNR: 23.21
+24.20
+25.01
+25.28
+25.28
+24.99
+24.41
+PSNR: 23.28
+Fig. 8. The relation between the preserving ratio and geometry. Our sampling
+strategy demonstrates improved geometric fidelity and rendering quality,
+particularly at low Gaussian preservation ratios.
+degradation of rendering quality. This limitation arises because
+the importance metric reflects significance only prior to simpli-
+fication. Naive pruning may disrupt local geometric continuity,
+thereby impairing final rendering quality after optimization. In
+particular, neighboring Gaussians within a local region tend
+to share similar importance scores, which can lead to their
+simultaneous removal or retention, risking the loss of essential
+geometric structures. To assess this effect, we perform pruning
+on the set of intersected Gaussians and evaluate geometric
+fidelity using the Chamfer distance between the centers of the
+pruned and non-simplified Gaussian sets, as shown in Fig. 8.
+The substantial increase in Chamfer distance observed at low
+preservation ratios highlights that relying solely on Gaussian
+importance results in suboptimal simplification.
+Compared to deterministic pruning, a stochastic sampling
+strategy offers improved preservation of overall geometric
+structures. Motivated by this observation, we incorporate
+Gaussian importance Ii into the sampling probability of each
+Gaussian, defined as Pi =
+Ii
+PN
+i=1 Ii , which enables weighted
+sampling in proportion to the relative importance of each
+Gaussian. As shown in Fig. 8, primitive sampling more
+effectively retains local geometry, thereby enhancing the final
+rendering quality. In our experiments, we find that importance
+computed from blending weights consistently yields superior
+performance in both pruning and sampling. Furthermore,
+combining blending weight with additional attributes, such as
+the projected scale of Gaussians or the rendered index, leads
+
+9
+(b)
+(a)
+(c)
+Fig. 9. The relationship between the optimization progress of bicycle and (a)
+the number of Gaussians, (b) the geometric similarity compared with resulting
+Gaussians, and (c) the rendering quality, as observed under the progressive
+growth and our aggressive growth patterns.
+to varying levels of effectiveness across indoor and outdoor
+scenes, highlighting the potential for the design of adaptive
+importance to different scans.
+V. REGION-PRIORITIZED OPTIMIZATION SCHEME FOR
+GAUSSIAN OPTIMIZATION
+To emphasize geometric priority during optimization, we
+focus on salient regions and introduce a region-prioritized
+optimization scheme comprising two key components, aggres-
+sive model growth, which hastens early structure emergence,
+and occluded Gaussian culling, which reduces unnecessary
+update overhead. Together, these components alleviate the
+indiscrimination in training dynamics.
+A. Aggressive Model Growth
+We first propose aggressive model growth as an alternative
+to the conventional progressive Gaussian growth schedule in
+order to accelerate early structure emergence. This sched-
+ule can be achieved through Gaussian densification in an
+aggressive manner (i.e., aggressive Gaussian densification),
+which incorporates two key components, critical Gaussian
+identification and aggressive Gaussian clone. Together, these
+components enable the model to dramatically and selectively
+clone Gaussians with high reconstruction significance during
+the early stages of optimization.
+Model Growth from Progressive to Aggressive. A typical
+Gaussian optimization process can be divided into two main
+phases: the densification phase (i.e., optimization coupled
+with Gaussian densification before the 15K iterations) and
+the refinement phase (i.e., pure optimization after the 15K
+iterations). Most existing approaches employ a progressive
+scheduler to grow the number of Gaussians following the
+principle of Progressive Model Growth adopted in 3DGS [12],
+which incrementally increases the number of Gaussians in a
+restrained and iterative manner over an extended densification
+period, as illustrated in Fig. 9.
+In contrast to existing progressive patterns, we propose an
+aggressive schedule, motivated by the analysis in Sec. III-C.
+Aggressive Model Growth aims to rapidly densify 3D Gaus-
+sians within a constrained number of optimization iterations,
+thereby significantly shortening the densification period and
+accelerating the overall optimization process. A straightfor-
+ward implementation of aggressive model growth is to recon-
+struct dense Gaussians from a predefined number of sampled
+depth points. This approach is similar to depth reinitialization
+described in Sec. IV-A, but applied at an early iteration (e.g.,
+2K steps). While this naive design can considerably accelerate
+optimization, it suffers from limited scalability to complex
+or diverse scenes due to its reliance on a fixed sampling
+hyperparameter. Moreover, it often triggers a sudden spike in
+the number of Gaussians (e.g., increasing from 0.5M to 4M
+for bicycle), which can destabilize optimization and degrade
+rendering quality. Therefore, we retain depth reinitialization
+as the core component but enhance it by incorporating critical
+Gaussian identification and aggressive Gaussian clone, result-
+ing in our proposed aggressive model growth.
+Critical Gaussian Identification. At the early stage of opti-
+mization, the Gaussian representation initialized from sparse
+SfM points is assumed to be in an under-reconstructed state.
+Rather than densifying all Gaussians indiscriminately, which
+may occur when reducing the densification threshold, we aim
+to selectively identify critical Gaussians that are more likely
+to lie on the object surface. This targeted component avoids
+redundancy and promotes structural fidelity. To identify such
+Gaussians, we derive a reconstruction significance criterion
+through an approximation of the alpha blending:
+c(x) =
+N
+X
+i=1
+wici ≈wimaxcimax,
+(5)
+where imax = arg max
+i
+wi, and the critical Gaussians Gimax
+are those providing the maximum blending weight wimax. To
+ensure a minimum contribution of each selected Gaussian, we
+apply a predefined threshold via the quantile function [26]
+using the 0.99 quantile to filter out a few less significant
+Gaussians from Gimax, resulting in the final set Gcrit.
+Aggressive Gaussian Clone. According to [45], [49], den-
+sifying Gaussians while preserving opacity introduces a bias
+that implicitly amplifies the influence of densified Gaussians,
+thereby disrupting the optimization process. This issue be-
+comes more significant in our aggressive model growth (e.g.,
+approximately 5% or fewer Gaussians are selected at each
+densification iteration in the progressive strategy, compared to
+30% in our case). To mitigate this problem, we smooth the
+densification operation in accordance with the state transition
+method in [49]. Specifically, we adopt Gaussian clone to den-
+sify all critical Gaussians, and set the number of cloned Gaus-
+sians to 2, which simplifies the computation of the Gaussian
+center pnew = pold , opacity αnew = 1 −
+√
+1 −αold and co-
+variance matrix Σnew =
+ αold 2 
+2αnew −(αnew )2
+√
+2
+−2
+Σold .
+We further integrate the aforementioned components into
+the densification stage and ensure compatibility with depth
+reinitialization. Specifically, the structure-aware distribution
+scheme is preserved, with critical Gaussian identification and
+aggressive Gaussian clone applied every 250 iterations, begin-
+ning at 500 iterations. Depth reinitialization is conducted at 2K
+iterations, with the number of sampled depth points adjusted
+to match the current number of Gaussians. We shorten the total
+densification period to 3K iterations, with overall optimization

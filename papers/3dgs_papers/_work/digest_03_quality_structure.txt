@@ -1,0 +1,1072 @@
+
+
+==========================================================================================
+### 2311.16493_MipSplatting  (pages=19, img=2311.16493_MipSplatting_fig.png)
+==========================================================================================
+Mip-Splatting: Alias-free 3D Gaussian Splatting
+Zehao Yu1,2
+Anpei Chen1,2
+Binbin Huang3
+Torsten Sattler4
+Andreas Geiger1,2
+1University of T¨ubingen
+2T¨ubingen AI Center
+3ShanghaiTech University
+4Czech Technical University in Prague
+https://niujinshuchong.github.io/mip-splatting
+(c) Zoom-out of (a) 
+Erosion
+(Brake cable
+too thin)
+3D Object
+3D Gaussian
+Camera Center
+Image Plane
+(Screen Space)
+Decreased
+Focal length
+Increased
+Focal length
+2D Gaussian
+Dilated
+2D Gaussian
+5 Pixels
+Brightening
+High frequency
+artifacts due to
+degenerate (thin)
+3D Gaussians
+Dilation
+(Spokes too thick due to
+screen space dilation)
+Faithful
+Rendering
+Faithful
+Rendering
+(a) Faithful Representation
+(b) Degenerate Representation
+(d) Zoom-in of (b) 
+Figure 1. 3D Gaussian Splatting [18] renders images by representing 3D Objects as 3D Gaussians which are projected onto the image
+plane followed by 2D Dilation in screen space as shown in (a). The method’s intrinsic shrinkage bias leads to degenerate 3D Gaussians
+exceed sampling limit as illustrated by the δ function in (b) while rendering similarly to 2D due to the dilation operation. However, when
+changing the sampling rate (via the focal length or camera distance), we observe strong dilation effects (c) and high frequency artifacts (d).
+Abstract
+Recently, 3D Gaussian Splatting has demonstrated im-
+pressive novel view synthesis results, reaching high fidelity
+and efficiency. However, strong artifacts can be observed
+when changing the sampling rate, e.g., by changing focal
+length or camera distance. We find that the source for this
+phenomenon can be attributed to the lack of 3D frequency
+constraints and the usage of a 2D dilation filter. To address
+this problem, we introduce a 3D smoothing filter which
+constrains the size of the 3D Gaussian primitives based
+on the maximal sampling frequency induced by the input
+views, eliminating high-frequency artifacts when zooming
+in. Moreover, replacing 2D dilation with a 2D Mip filter,
+which simulates a 2D box filter, effectively mitigates alias-
+ing and dilation issues. Our evaluation, including scenarios
+such a training on single-scale images and testing on mul-
+tiple scales, validates the effectiveness of our approach.
+1. Introduction
+Novel View Synthesis (NVS) plays a critical role in com-
+puter graphics and computer vision, with various appli-
+cations including virtual reality, cinematography, robotics,
+and more. A particularly significant advancement in this
+field is the Neural Radiance Field (NeRF) [28], introduced
+by Mildenhall et al. in 2020.
+NeRF utilizes a multi-
+layer perceptron (MLP) to represent geometry and view-
+dependent appearance effectively, demonstrating remark-
+able novel view rendering quality. Recently, 3D Gaussian
+Splatting (3DGS) [18] has gained attention as an appealing
+alternative to both MLP [28] and feature grid-based repre-
+sentations [4, 11, 24, 32, 46]. 3DGS stands out for its im-
+pressive novel view synthesis results, while achieving real-
+time rendering at high resolutions. This effectiveness and
+efficiency, coupled with the potential integration into the
+standard rasterization pipeline of GPUs represents a signif-
+1
+arXiv:2311.16493v1 [cs.CV] 27 Nov 2023
+
+icant step towards practical usage of NVS methods.
+Specifically, 3DGS represents complex scenes as a set
+of 3D Gaussians, which are rendered to screen space
+through splatting-based rasterization. The attributes of each
+3D Gaussian, i.e., position, size, orientation, opacity, and
+color, are optimized through a multi-view photometric loss.
+Thereafter, a 2D dilation operation is applied in screen
+space for low-pass filtering. Although 3DGS has demon-
+strated impressive NVS results, it produces artifacts when
+camera views diverge from those seen during training, such
+as zoom in and zoom out, as illustrated in Figure 1. We
+find that the source for this phenomenon can be attributed
+to the lack of 3D frequency constraints and the usage of a
+2D dilation filter. Specifically, zooming out leads to a re-
+duced size of the projected 2D Gaussians in screen space,
+while applying the same amount of dilation results in dila-
+tion artifacts. Conversely, zooming in causes erosion arti-
+facts since the projected 2D Gaussians expand, yet dilation
+remains constant, causing erosion and resulting in incorrect
+gaps between Gaussians in the 2D projection.
+To resolve these issues, we propose to regularize the 3D
+representation in 3D space. Our key insight is that the high-
+est frequency that can be reconstructed of a 3D scene is
+inherently constrained by the sampling rates of the input
+images. We first derive the multi-view frequency bounds of
+each Gaussian primitive based on the training views accord-
+ing to the Nyquist-Shannon Sampling Theorem [33, 45].
+By applying a low-pass filter to the 3D Gaussian primitives
+in 3D space during the optimization, we effectively restrict
+the maximal frequency of the 3D representation to meet the
+Nyquist limit. Post-training, this filter becomes an intrinsic
+part of the scene representation, remaining constant regard-
+less of viewpoint changes. Consequently, our method elim-
+inates the artifacts presents in 3DGS [18] when zooming in,
+as shown in the 8× higher resolution image in Figure 2.
+Nonetheless, rendering the reconstructed scene at lower
+sampling rates (e.g., zooming out) results in aliasing. Pre-
+vious work [1–3, 17] address aliasing by employing cone
+tracing and applying pre-filtering to the input positional or
+feature encoding, which is not applicable to 3DGS. Thus,
+we introduce a 2D Mip filter (`a la “mipmap”) specifically
+designed to ensure alias-free reconstruction and render-
+ing across different scales. Our 2D Mip filter mimics the
+2D box filter inherent to the actual physical imaging pro-
+cess [29, 37, 48].by approximating it with a 2D Gaussian
+low pass filter. In contrast to previous work [1–3, 17] that
+rely on the MLP’s ability to interpolate multi-scale signals
+during training with multi-scale images, our closed-form
+modification to the 3D Gaussian representation results in
+excellent out-of-distribution generalization: Training at a
+single sampling rate enables faithful rendering at various
+sampling rates different from those used during training as
+demonstrated by the 1/4× down-sampled image in Figure 2.
+8× Resolution
+Full Resolution
+1/4 Resolution
+3DGS [18]
+3DGS + EWA [59]
+Mip-Splatting
+Reference
+Figure 2. We trained all the models on single-scale (full resolu-
+tion here) images and rendered images with different resolutions
+by changing focal length. While all methods show similar per-
+formance at training scale, we observe strong artifacts in previous
+work [18, 59] when changing the sampling rate. By contrast, our
+Mip-Splatting renders faithful images across different scales.
+In summary, we make the following contributions:
+• We introduce a 3D smoothing filter for 3DGS to effec-
+tively regularize the maximum frequency of 3D Gaus-
+sian primitives, resolving the artifacts observed in out-of-
+distribution renderings of prior methods [18, 59].
+• We replace the 2D dilation filter with a 2D Mip filter to
+address aliasing and dilation artifacts.
+• Experiments on challenging benchmark datasets [2, 28]
+demonstrate the effectiveness of Mip-Splatting when
+modifying the sampling rate.
+• Our modifications to 3DGS are principled and simple, re-
+quiring only few changes to the original 3DGS code.
+2. Related Work
+Novel View Synthesis: NVS is the process of generating
+new images from viewpoints different from those of the
+original captures [12, 22]. NeRF [28], which leverages vol-
+ume rendering [10, 21, 25, 26], has become a standard tech-
+nique in the field. NeRF utilizes MLPs [5, 27, 34] to model
+scenes as continuous functions, which, despite their com-
+pact representation, impede rendering speed due to the ex-
+pensive MLP evaluation that is required for each ray point.
+Subsequent methods [16, 40, 41, 52, 54] distill a pretrained
+NeRF into a sparse representation, enabling real-time ren-
+dering of NeRFs. Further advancements have been made
+to improve the training and rendering of NeRF with ad-
+vanced scene representations [4, 6, 11, 18, 19, 24, 32, 46,
+51].
+In particular, 3D Gaussians Splatting (3DGS) [18]
+2
+
+demonstrated impressive novel view synthesis results, while
+achieving real-time rendering at high-definition resolutions.
+Importantly, 3DGS represents the scene explicitly as a col-
+lection of 3D Gaussians and uses rasterization instead of
+ray tracing. Nevertheless, 3DGS focuses on in-distribution
+evaluation where training and testing are conducted at sim-
+ilar sampling rates (focal length/scene distance).
+In this
+paper, we study the out-of-distribution generalization of
+3DGS, training models at a single scale and evaluating it
+across multiple scales.
+Primitive-based Differentiable Rendering:
+Primitive-
+based rendering techniques, which rasterize geometric
+primitives onto the image plane, have been explored ex-
+tensively due to their efficiency [13, 14, 38, 44, 59, 60].
+Differentiable point-based rendering methods [20, 36, 39,
+43, 49, 53, 57] offer great flexibility in representing in-
+tricate structures and are thus well-suited for novel view
+synthesis. Notably, Pulsar [20] stands out for its efficient
+sphere rasterization. The more recent 3D Gaussian Splat-
+ting (3DGS) work [18] utilizes anisotropic Gaussians [59]
+and introduces a tile-based sorting for rendering, achiev-
+ing remarkable frame rates. Despite its impressive results,
+3DGS exhibits strong artifacts when rendering at a differ-
+ent sampling rate. We address this issue by introducing a
+3D smoothing filter to constrain the maximal frequencies of
+the 3D Gaussian primitive representation, and a 2D Mip fil-
+ter that approximates the box filter of the physical imaging
+process for alias-free rendering.
+Anti-aliasing in Rendering: There are two principal strate-
+gies to combat aliasing: super-sampling, which increases
+the number of samples [7], and prefiltering, which ap-
+plies low-pass filtering to the signal to meet the Nyquist
+limit [8, 15, 31, 47, 50, 59].
+For example, EWA splat-
+ting [59] applies a Gaussian low pass filter to the projected
+2D Gaussian in screen space to produce a band limited out-
+put respecting the Nyquist frequency of the image. While
+we also apply a band-limited filter to the Gaussian primi-
+tives, our band-limited filter is applied in 3D space and the
+filter size is fully determined by the training images not the
+images to be rendered. While our 2D Mip filter is also a
+Gaussian low pass filter in screen space, it approximates the
+box filter of the physical imaging process, approximating
+a single pixel. Conversely, the EWA filter limits the fre-
+quency signal’s bandwidth to the rendered image, and the
+size of the filter is chosen empirically. A critical differ-
+ence to [59] is that we tackle the reconstruction problem,
+optimizing the 3D Gaussian representation via inverse ren-
+dering while EWA splatting only considers the rendering
+problem.
+Recent neural rendering methods integrate pre-filtering
+to mitigate aliasing [1–3, 17, 58]. Mip-NeRF [1], for in-
+stance, introduced an integrated position encoding (IPE) to
+attenuate high-frequency details. A similar idea is adapted
+for feature grid-based representations [3, 17, 58].
+How-
+ever, these approaches require multi-scale images for super-
+vision. In contrast, our approach is based on 3DGS [18] and
+determines the necessary low-pass filter size based on pixel
+size, allowing for alias-free rendering
+
+
+==========================================================================================
+### 2312.00109_ScaffoldGS  (pages=14, img=2312.00109_ScaffoldGS_fig.png)
+==========================================================================================
+Scaffold-GS: Structured 3D Gaussians for View-Adaptive Rendering
+Tao Lu 1,3*
+Mulin Yu1*
+Linning Xu2
+Yuanbo Xiangli4
+Limin Wang1,3
+Dahua Lin1,2
+Bo Dai1
+1Shanghai Artificial Intelligence Laboratory, 2The Chinese University of Hong Kong,
+3Nanjing University, 4Cornell University
+PSNR: 28.04dB 
+PSNR: 28.57dB
+GT
+(3D-GS) 17.16dB / 242MB / 127FPS
+(Ours) 20.41 dB / 66MB / 110FPS
+(3D-GS) 34.60dB / 204MB / 113 FPS
+(Ours) 35.41dB / 48MB / 88 FPS
+(3D-GS) 29.93 dB / 288MB / 109 FPS
+(Ours) 31.13 dB / 133MB / 128FPS
+3D-GS RGB
+Ours RGB
+Initial points
+3D Gaussians
+ (3D-GS, Ours-anchor)
+Scaffold-GS
+3D-GS Opacity
+Ours Opacity
+Figure 1. Scaffold-GS represents the scene using a set of 3D Gaussians structured in a dual-layered hierarchy. Anchored on a sparse
+grid of initial points, a modest set of neural Gaussians are spawned from each anchor to dynamically adapt to various viewing angles
+and distances. Our method achieves rendering quality and speed comparable to 3D-GS with a more compact model (last row metrics:
+PSNR/storage size/FPS). Across multiple datasets, Scaffold-GS demonstrates more robustness in large outdoor scenes and intricate indoor
+environments with challenging observing views e.g. transparency, specularity, reflection, texture-less regions and fine-scale details.
+Abstract
+Neural rendering methods have significantly advanced
+photo-realistic 3D scene rendering in various academic and
+industrial applications. The recent 3D Gaussian Splatting
+method has achieved the state-of-the-art rendering quality
+and speed combining the benefits of both primitive-based
+representations and volumetric representations. However,
+it often leads to heavily redundant Gaussians that try to
+fit every training view, neglecting the underlying scene ge-
+ometry.
+Consequently, the resulting model becomes less
+robust to significant view changes, texture-less area and
+lighting effects. We introduce Scaffold-GS, which uses an-
+chor points to distribute local 3D Gaussians, and predicts
+their attributes on-the-fly based on viewing direction and
+distance within the view frustum.
+Anchor growing and
+pruning strategies are developed based on the importance
+of neural Gaussians to reliably improve the scene cover-
+age. We show that our method effectively reduces redun-
+dant Gaussians while delivering high-quality rendering. We
+also demonstrates an enhanced capability to accommodate
+scenes with varying levels-of-detail and view-dependent ob-
+* denotes equal contribution.
+servations, without sacrificing the rendering speed. Project
+page: https://city-super.github.io/scaffold-gs/.
+1. Introduction
+Photo-realistic and real-time rendering of 3D scenes has al-
+ways been a pivotal interest in both academic research and
+industrial domains, with applications spanning virtual real-
+ity [51], media generation [36], and large-scale scene vi-
+sualization [43, 45, 49]. Traditional primitive-based repre-
+sentations like meshes and points [6, 26, 32, 55] are faster
+due to the use of rasterization techniques tailored for mod-
+ern GPUs. However, they often yield low-quality render-
+ings, exhibiting discontinuity and blurry artifacts. In con-
+trast, volumetric representations and neural radiance fields
+utilize learning-based parametric models [3, 5, 30], hence
+can produce continuous rendering results with more details
+preserved. Nevertheless, they come with the cost of time-
+consuming stochastic sampling, leading to slower perfor-
+mance and potential noise.
+In recent times, 3D Gaussian Splatting (3D-GS) [22] has
+1
+arXiv:2312.00109v1 [cs.CV] 30 Nov 2023
+
+achieved state-of-the-art rendering quality and speed. Ini-
+tialized from point clouds derived from Structure from Mo-
+tion (SfM) [42], this method optimizes a set of 3D Gaus-
+sians to represent the scene. It preserves the inherent con-
+tinuity found in volumetric representations, whilst facilitat-
+ing rapid rasterization by splatting 3D Gaussians onto 2D
+image planes.
+While this approach offers several advantages, it tends
+to excessively expand Gaussian balls to accommodate ev-
+ery training view, thereby neglecting scene structure. This
+results in significant redundancy and limits its scalability,
+particularly in the context of complex large-scale scenes.
+Furthermore, view-dependent effects are baked into indi-
+vidual Gaussian parameters with little interpolation capa-
+bilities, making it less robust to substantial view changes
+and lighting effects.
+We present Scaffold-GS, a Gaussian-based approach that
+utilizes anchor points to establish a hierarchical and region-
+aware 3D scene representation. We construct a sparse grid
+of anchor points initiated from SfM points. Each of these
+anchors tethers a set of neural Gaussians with learnable off-
+sets, whose attributes (i.e. opacity, color, rotation, scale) are
+dynamically predicted based on the anchor feature and the
+viewing position. Unlike the vanilla 3D-GS which allows
+3D Gaussians to freely drift and split, our strategy exploits
+scene structure to guide and constrain the distribution of 3D
+Gaussians, whilst allowing them to locally adaptive to vary-
+ing viewing angles and distances. We further develop the
+corresponding growing and pruning operations for anchors
+to enhance the scene coverage.
+Through extensive experiments, we show that our
+method delivers rendering quality on par with or even sur-
+passing the original 3D-GS. At inference time, we limit
+the prediction of neural Gaussians to anchors within the
+view frustum, and filter out trivial neural Gaussians based
+on their opacity with a filtering step (i.e. learnable selec-
+tor). As a result, our approach can render at a similar speed
+(around 100 FPS at 1K resolution) as the original 3D-GS
+with little computational overhead. Moreover, our storage
+requirements are significantly reduced as we only need to
+store anchor points and MLP predictors for each scene.
+In conclusion, our contributions are: 1) Leveraging scene
+structure, we initiate anchor points from a sparse voxel
+grid to guide the distribution of local 3D Gaussians, form-
+ing a hierarchical and region-aware scene representation; 2)
+Within the view frustum, we predict neural Gaussians from
+each anchor on-the-fly to accommodate diverse viewing di-
+rections and distances, resulting in more robust novel view
+synthesis; 3) We develop a more reliable anchor growing
+and pruning strategy utilizing the predicted neural Gaus-
+sians for better scene coverage.
+2. Related work
+MLP-based Neural Fields and Rendering.
+Early neu-
+ral fields typically adopt a multi-layer perceptron (MLP) as
+the global approximator of 3D scene geometry and appear-
+ance. They directly use spatial coordinates (and viewing
+direction) as input to the MLP and predict point-wise at-
+tribute, e.g. signed distance to scene surface (SDF) [33, 34,
+46, 54], or density and color of that point [2, 30, 49]. Be-
+cause of its volumetric nature and inductive bias of MLPs,
+this stream of methods achieves the SOTA performance in
+novel view synthesis. The major challenge of this scene rep-
+resentation is that the MLP need to be evaluated on a large
+number of sampled points along each camera ray. Con-
+sequently, rendering becomes extremely slow, with limited
+scalability towards complex and large-scale scenes. Despite
+several works have been proposed to accelerate or mitigate
+the intensive volumetric ray-marching, e.g. using proposal
+network [4], baking technique [11, 19], and surface render-
+ing [41]. They either incorporated more MLPs or traded
+rendering quality for speed.
+Grid-based Neural Fields and Rendering.
+This type of
+scene representations are usually based on a dense uniform
+grid of voxels. They have been greatly used in 3D shape
+and geometry modeling [12, 15, 21, 29, 35, 44, 57]. Some
+recent methods have also focused on faster training and in-
+ference of radiance field by exploiting spatial data struc-
+ture to store scene features, which were interpolated and
+queried by sampled points during ray-marching. For in-
+stance, Plenoxel [13] adopted a sparse voxel grid to inter-
+polate a continuous density field, and represented view-
+dependent visual effects with Spherical Harmonics. The
+idea of tensor factorization has been studied in multiple
+works [9, 10, 50, 52] to further reduce data redundancy and
+speed-up rendering. K-planes [14] used neural planes to
+parameterize a 3D scene, optionally with an additional tem-
+poral plane to accommodate dynamics. Several generative
+works [8, 40] also capitalized on triplane structure to model
+a 3D latent space for better geometry consistency. Instant-
+NGP [31] used a hash grid and achieved drastically faster
+feature query, enabling real-time rendering of neural radi-
+ance field. Although these approaches can produce high-
+quality results and are more efficient than global MLP rep-
+resentation, they still need to query many samples to render
+a pixel, and struggle to represent empty space effectively.
+Point-based Neural Fields and Rendering.
+Point-based
+representations utilize the geometric primitive (i.e. point
+clouds) for scene rendering. A typical procedure is to ras-
+terize an unstructured set of points using a fixed size, and
+exploits specialized modules on GPU and graphics APIs for
+rendering [7, 37, 38]. In spite of its fast speed and flexibil-
+2
+
+ity to solve topological changes, they usually suffer from
+holes and outliers that lead to artifacts in rendering. To alle-
+viate the discontinuity issue, differentiable point-based ren-
+dering has been extensively studied to model objects geom-
+etry [16, 20, 27, 48, 55]. In particular, [48, 55] used dif-
+ferentiable surface splatting that treats point primitives as
+discs, ellipsoids or surfels that are larger than a pixel. [1, 24]
+augmented points with neural features and rendered using
+2D CNNs. As a comparison, Point-NeRF [53] achieved
+high-quality novel view synthesis utilizing 3D volume ren-
+dering, along with region growing and point pruning dur-
+ing optimization. However, they resorted to volumetric ray-
+marching, hence hindered display rate. Notably, the recent
+work 3D-GS [22] employed anisotropic 3D Gaussians ini-
+tialized from structure from motion (SfM) to represent 3D
+scenes, where a 3D Gaussian was optimized as a volume
+and projected to 2D to be rasterized as a primitive. Since
+it integrated pixel color using α-blender, 3D-GS produced
+high-quality results with fine-scale detail, and rendered at
+real-time frame rate.
+3. Methods
+The original 3D-GS [22] optimizes Gaussians to reconstruct
+every training view, with heuristic splitting and pruning op-
+erations but in general neglects the underlying scene struc-
+ture. This often leads to highly redundant Gaussians and
+makes the model less robust to novel viewing angles and
+distances. To address this issue, we propose a hierarchical
+3D Gaussian scene representation that respects the scene
+geometric structure, with anchor points initialized from
+SfM to encode local scene information and spawn local neu-
+ral Gaussians. The physical properties of neural Gaussians
+are decoded from the learned anchor features in a view-
+dependent manner on-the-fly. Fig. 2 illustrates our frame-
+work. We start with a brief background of 3D-GS then un-
+fold our proposed method in details. Sec. 3.2.1 introduces
+how to initialize the scene with a regular sparse grid of an-
+chor points from the irregular SfM point clouds. Sec. 3.2.2
+explains how we predict neural Gaussians properties based
+on anchor points and view-dependent information. To make
+our method more robust to the noisy initialization, Sec. 3.3
+introduces
+
+
+==========================================================================================
+### 2403.17888_2DGS  (pages=13, img=2403.17888_2DGS_fig.png)
+==========================================================================================
+2D Gaussian Splatting for Geometrically Accurate Radiance Fields
+BINBIN HUANG, ShanghaiTech University, China
+ZEHAO YU, University of Tübingen Tübingen AI Center, Germany
+ANPEI CHEN, University of Tübingen Tübingen AI Center, Germany
+ANDREAS GEIGER, University of Tübingen Tübingen AI Center, Germany
+SHENGHUA GAO, ShanghaiTech University, China
+https://surfsplatting.github.io
+Mesh
+Radiance field
+Disk (color)
+Disk (normal)
+Surface normal
+(a) 2D disks as surface elements
+(b) 2D Gaussian splatting
+(c) Meshing
+Fig. 1. Our method, 2DGS, (a) optimizes a set of 2D oriented disks to represent and reconstruct a complex real-world scene from multi-view RGB images. These
+optimized 2D disks are tightly aligned to the surfaces. (b) With 2D Gaussian splatting, we allow real-time rendering of high quality novel view images with
+view consistent normals and depth maps. (c) Finally, our method provides detailed and noise-free triangle mesh reconstruction from the optimized 2D disks.
+3D Gaussian Splatting (3DGS) has recently revolutionized radiance field
+reconstruction, achieving high quality novel view synthesis and fast render-
+ing speed. However, 3DGS fails to accurately represent surfaces due to the
+multi-view inconsistent nature of 3D Gaussians. We present 2D Gaussian
+Splatting (2DGS), a novel approach to model and reconstruct geometrically
+accurate radiance fields from multi-view images. Our key idea is to collapse
+the 3D volume into a set of 2D oriented planar Gaussian disks. Unlike 3D
+Gaussians, 2D Gaussians provide view-consistent geometry while modeling
+surfaces intrinsically. To accurately recover thin surfaces and achieve stable
+Authors’ Contact Information: Binbin Huang, huangbb@shanghaitech.edu.cn, Shang-
+haiTech University, Shanghai, China; Zehao Yu, zehao.yu@uni-tuebingen.de, Uni-
+versity of Tübingen and Tübingen AI Center, Tübingen, Germany; Anpei Chen,
+anpei.chen@uni-tuebingen.de, University of Tübingen and Tübingen AI Center, Tübin-
+gen, Germany; Andreas Geiger, a.geiger@uni-tuebingen.de, University of Tübingen and
+Tübingen AI Center, Tübingen, Germany; Shenghua Gao, gaoshh@shanghaitech.edu.cn,
+ShanghaiTech University, Shanghai, China.
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for third-party components of this work must be honored.
+For all other uses, contact the owner/author(s).
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA
+© 2024 Copyright held by the owner/author(s).
+ACM ISBN 979-8-4007-0525-0/24/07
+https://doi.org/10.1145/3641519.3657428
+optimization, we introduce a perspective-accurate 2D splatting process uti-
+lizing ray-splat intersection and rasterization. Additionally, we incorporate
+depth distortion and normal consistency terms to further enhance the quality
+of the reconstructions. We demonstrate that our differentiable renderer al-
+lows for noise-free and detailed geometry reconstruction while maintaining
+competitive appearance quality, fast training speed, and real-time rendering.
+CCS Concepts: • Computing methodologies →Reconstruction; Render-
+ing; Machine learning approaches.
+Additional Key Words and Phrases: Novel View Synthesis, Radiance Fields,
+Surface Splatting, Surface Reconstruction
+ACM Reference Format:
+Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao.
+2024. 2D Gaussian Splatting for Geometrically Accurate Radiance Fields.
+In Special Interest Group on Computer Graphics and Interactive Techniques
+Conference Conference Papers ’24 (SIGGRAPH Conference Papers ’24), July
+27-August 1, 2024, Denver, CO, USA. ACM, New York, NY, USA, 13 pages.
+https://doi.org/10.1145/3641519.3657428
+1
+INTRODUCTION
+Photorealistic novel view synthesis (NVS) and accurate geometry
+reconstruction stand as pivotal long-term objectives in computer
+graphics and vision. Recently, 3D Gaussian Splatting (3DGS) [Kerbl
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA.
+arXiv:2403.17888v3 [cs.CV] 22 Feb 2025
+
+2
+•
+Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao
+et al. 2023] has emerged as an appealing alternative to implicit [Bar-
+ron et al. 2022a; Mildenhall et al. 2020] and feature grid-based rep-
+resentations [Barron et al. 2023; Müller et al. 2022] in NVS, due to
+its real-time photorealistic NVS results at high resolutions. Rapidly
+evolving, 3DGS has been quickly extended with respect to multiple
+domains, including anti-aliasing rendering [Yu et al. 2024], material
+modeling [Jiang et al. 2023; Shi et al. 2023], dynamic scene recon-
+struction [Yan et al. 2023], and animatable avatar creation [Qian
+et al. 2023; Zielonka et al. 2023]. Nevertheless, it falls short in cap-
+turing intricate geometry since the volumetric 3D Gaussian, which
+models the complete angular radiance, conflicts with the thin nature
+of surfaces.
+On the other hand, earlier works [Pfister et al. 2000; Zwicker et al.
+2001a,b] have shown surfels (surface elements) to be an effective
+representation of complex geometry. Surfels approximate the object
+surface locally with shape and shade attributes and can be derived
+from known geometry. They are widely used in SLAM [Whelan et al.
+2016] and other robotics tasks [Schöps et al. 2019] as an efficient ge-
+ometry representation. Subsequent advancements [Yifan et al. 2019]
+have incorporated surfels into a differentiable framework. However,
+these methods typically require ground truth (GT) geometry, depth
+sensor data, or operate under constrained scenarios with known
+lighting.
+Inspired by these works, we propose 2D Gaussian Splatting for
+3D scene reconstruction and novel view synthesis that combines
+the benefits of both worlds, while overcoming their limitations. Un-
+like 3DGS, our approach represents a 3D scene with 2D Gaussian
+primitives, each defining an oriented elliptical disk. The significant
+advantage of 2D Gaussian over its 3D counterpart lies in the accu-
+rate geometry representation during rendering. Specifically, 3DGS
+evaluates a Gaussian’s value at the intersection between a pixel ray
+and a 3D Gaussian [Keselman and Hebert 2022, 2023], which leads
+to inconsistency depth when rendered from different viewpoints.
+In contrast, our method utilizes explicit ray-splat intersection, re-
+sulting in a perspective correct splatting, as illustrated in Figure 2,
+which in turn significantly improves reconstruction quality. Fur-
+thermore, the inherent surface normals in 2D Gaussian primitives
+enable direct surface regularization through normal constraints. In
+contrast with surfels-based models [Pfister et al. 2000; Yifan et al.
+2019; Zwicker et al. 2001a], our 2D Gaussians can be recovered from
+unknown geometry with gradient-based optimization.
+While our 2D Gaussian approach excels in geometric model-
+ing, optimizing solely with photometric losses can lead to noisy
+reconstructions, due to the inherently unconstrained nature of 3D
+reconstruction tasks, as noted in [Barron et al. 2022b; Yu et al. 2022b;
+Zhang et al. 2020]. To enhance reconstructions and achieve smoother
+surfaces, we introduce two regularization terms: depth distortion
+and normal consistency. The depth distortion term concentrates 2D
+primitives distributed within a tight range along the ray, address-
+ing the rendering process’s limitation where the distance between
+Gaussians is ignored. The normal consistency term minimizes dis-
+crepancies between the rendered normal map and the gradient of
+the rendered depth, ensuring alignment between the geometries
+defined by depth and normals. Employing these regularizations
+in combination with our 2D Gaussian model enables us to extract
+highly accurate surface meshes, as demonstrated in Figure 1.
+Fig. 2. Comparison of 3DGS and 2DGS. 3DGS utilizes different intersec-
+tion planes for value evaluation when viewing from different viewpoints,
+resulting in inconsistency. Our 2DGS provides multi-view consistent value
+evaluations.
+In summary, we make the following contributions:
+• We present a highly efficient differentiable 2D Gaussian ren-
+derer, enabling perspective-correct splatting by leveraging
+2D surface modeling, ray-splat intersection, and volumetric
+integration.
+• We introduce two regularization losses for improved and
+noise-free surface reconstruction.
+• Our approach achieves state-of-the-art geometry reconstruc-
+tion and NVS results compared to other explicit representa-
+tions.
+2
+RELATED WORK
+2.1
+Novel view synthesis
+Significant advancements have been achieved in NVS, particularly
+since the introduction of Neural Radiance Fields (NeRF) [Milden-
+hall et al. 2021]. NeRF employs a multi-layer perceptron (MLP) to
+represent geometry and view-dependent appearance, optimized via
+volume rendering to deliver exceptional rendering quality. Post-
+NeRF developments have further enhanced its capabilities. For in-
+stance, Mip-NeRF [Barron et al. 2021] and subsequent works [Barron
+et al. 2022a, 2023; Hu et al. 2023] tackle NeRF’s aliasing issues. Ad-
+ditionally, the rendering efficiency of NeRF has seen substantial
+improvements through techniques such as distillation [Reiser et al.
+2021; Yu et al. 2021] and baking [Chen et al. 2023a; Hedman et al.
+2021; Reiser et al. 2023; Yariv et al. 2023]. Moreover, the training
+and representational power of NeRF have been enhanced using
+feature-grid based scene representations [Chen et al. 2022, 2023c;
+Fridovich-Keil et al. 2022; Liu et al. 2020; Müller et al. 2022; Sun et al.
+2022a].
+Recently, 3D Gaussian Splatting (3DGS) [Kerbl et al. 2023] has
+emerged, demonstrating impressive real-time NVS results. This
+method has been quickly extended to multiple domains [Xie et al.
+2023; Yan et al. 2023; Yu et al. 2024; Zielonka et al. 2023]. In this work,
+we propose to “flatten” 3D Gaussians to 2D Gaussian primitives to
+better align their shape with the object surface. Combined with
+two novel regularization losses, our approach reconstructs surfaces
+more accurately than 3DGS while preserving its high-quality and
+real-time rendering capabilities.
+2.2
+3D reconstruction
+3D Reconstruction from multi-view images has been a long-standing
+goal in computer vision. Multi-view stereo based methods [Schön-
+berger et al. 2016; Yao et al. 2018; Yu and Gao 2020] rely on a modular
+SIGGRAPH Conference Papers ’24, July 27-August 1, 2024, Denver, CO, USA.
+
+2D Gaussian Splatting for Geometrically Accurate Radiance Fields
+•
+3
+pipeline that involves feature matching, depth prediction, and fu-
+sion. In contrast, recent neural approaches [Niemeyer et al. 2020;
+Yariv et al. 2020] represent surface implicitly via an MLP [Mescheder
+et al. 2019; Park et al. 2019] , extracting surfaces post-training via
+the Marching Cube algorithm. Further advancements [Oechsle et al.
+2021; Wang et al. 2021; Yariv et al. 2021] integrated implicit surfaces
+with volume rendering, achieving detailed surface reconstructions
+from RGB images. These methods have been extended to large-scale
+reconstructions via additional regularization [Li et al. 2023; Yu et al.
+2022a,b], and efficient reconstruction for objects [Wang et al. 2023].
+Despite these impressive developments, efficient large-scale scene
+reconstruction remains a challenge. For instance, Neuralangelo [Li
+et al. 2023] requires 128 GPU hours for reconstructing a single scene
+from the Tanks and Temples Dataset [Knapitsch et al. 2017]. In this
+work, we introduce 2D Gaussian splatting, a method that signifi-
+cantly accelerates the reconstruction process. It achieves similar or
+slightly better results compared to previous implicit neural surface
+representations, while being an order of magnitude faster.
+2.3
+Differentiable Point-based Graphics
+Differentiable point-based rendering [Aliev et al. 2020; Insafutdinov
+and Dosovitskiy 2018; Rückert et al. 2022; Wiles
+
+
+==========================================================================================
+### 2403.19615_SA-GS  (pages=30, img=2403.19615_SA-GS_fig.png)
+==========================================================================================
+SA-GS: Scale-Adaptive Gaussian Splatting for
+Training-Free Anti-Aliasing
+Xiaowei Song*1,2, Jv Zheng*1,3, Shiran Yuan1,4, Huan-ang Gao1, Jingwei
+Zhao5, Xiang He5, Weihao Gu5, and Hao Zhao†1
+1 Institute for AI Industry Research (AIR), Tsinghua University
+2 Tongji University
+3 Ocean University of China
+4 Duke Kunshan University
+5 Haomo.ai
+kevin729@tongji.edu.cn, zhengju@stu.ouc.edu.cn
+zhaohao@air.tsinghua.edu.cn
+Need training
+GT
+3D GS
+Mip-Splatting
+SA-GSint
+SA-GSsup
+Zoom in (8x)
+Zoom out (1/8x)
+PSNR:17.16
+PSNR:26.37
+PSNR:25.80
+PSNR:29.67
+PSNR:15.28
+PSNR:21.81
+PSNR:21.33
+PSNR:21.35
+Training-free
+Training-free
+Need training
+Training-free
+Training-free
+Fig. 1: Under zoom-in, 3D Gaussian Splatting [10] (3DGS) exhibits significant erosion
+artefacts, while under zoom-out, it undergoes dramatic dilation. Mip-Splatting [24]
+utilizes 3D smoothing and 2D Mip filters to regularize primitives during training. In
+contrast, our method is training-free and maintains scale consistency using solely a
+single 2D scale-adaptive filter. Scale adaptation allows us to use super-sampling
+(named as SA-GSsup later in the paper) and its limiting case integration (named as
+SA-GSint later in the paper) to obtain more accurate results when zooming out.
+Abstract. In this paper, we present a Scale-adaptive method for Anti-
+aliasing Gaussian Splatting (SA-GS). While the state-of-the-art method
+Mip-Splatting needs modifying the training procedure of Gaussian splat-
+ting, our method functions at test-time and is training-free. Specifically,
+SA-GS can be applied to any pretrained Gaussian splatting field as a
+plugin to significantly improve the field’s anti-alising performance. The
+core technique is to apply 2D scale-adaptive filters to each Gaussian dur-
+ing test time. As pointed out by Mip-Splatting, observing Gaussians at
+* Indicates Equal Contribution. † Indicates Corresponding Author.
+arXiv:2403.19615v1 [cs.CV] 28 Mar 2024
+
+2
+Song et al.
+different frequencies leads to mismatches between the Gaussian scales
+during training and testing. Mip-Splatting resolves this issue using 3D
+smoothing and 2D Mip filters, which are unfortunately not aware of
+testing frequency. In this work, we show that a 2D scale-adaptive filter
+that is informed of testing frequency can effectively match the Gaussian
+scale, thus making the Gaussian primitive distribution remain consistent
+across different testing frequencies. When scale inconsistency is elimi-
+nated, sampling rates smaller than the scene frequency result in conven-
+tional jaggedness, and we propose to integrate the projected 2D Gaussian
+within each pixel during testing. This integration is actually a limiting
+case of super-sampling, which significantly improves anti-aliasing perfor-
+mance over vanilla Gaussian Splatting. Through extensive experiments
+using various settings and both bounded and unbounded scenes, we show
+SA-GS performs comparably with or better than Mip-Splatting. Note
+that super-sampling and integration are only effective when our scale-
+adaptive filtering is activated. Our codes, data and models are available
+at https://github.com/zsy1987/SA-GS.
+Keywords: 3D Vision, Novel View Synthesis, Rasterization, Scale Con-
+sistency, Super-Sampling
+1
+Introduction
+Novel View Synthesis (NVS) has played an important role in fields such as visu-
+alization [12], simulation [20,21], automation [26,27], and VR/AR [16,19]. The
+advent of Neural Radiance Fields (NeRFs) [13,25] has significantly enhanced the
+quality of view synthesis while bypassing the need of reconstructing geometry,
+texture, material and lighting (which is typically a very under-determined in-
+verse problem). Recently, another method, 3D Gaussian Splatting (3DGS) [10]
+has garnered attention from both academia and industry for its high synthesis
+quality and fast rendering speed. Gaussian primitive-based representation and
+its corresponding efficient CUDA implementation enable 3DGS [10] to render
+scenes in real-time with intricate details, greatly accelerating NVS systems in-
+tended for tasks such as gaming, simulation and multimedia.
+Problem. Unlike implicit representations like NeRFs, 3DGS [10] utilizes
+Gaussian primitives to represent 3D scenes in an explicit manner. This is achieved
+by optimizing the position, scale, transparency, rotation and spherical harmonic
+coefficients of each Gaussian primitive to fit input images, producing a continu-
+ous 3D signal with a complex Gaussian mixture distribution. However, as pointed
+out by a recent study Mip-Splatting [24], there is a trick in 3DGS not mentioned
+in the paper, which is introduced to ensure numerical stability. Specifically, 2D
+dilation is added during training to expand the distribution over a planar region
+to eliminate the case in which the region is smaller than one single pixel (thus
+causing instability). This operation guarantees steady updating of the Gaussian
+primitives, but results in inconsistencies in the degree of dilation and the degree
+of change in Gaussian scale if the intrinsic and extrinsic parameters of the cam-
+era are not equal to the training situation, with artefacts illustrated in Fig. 1.
+
+SA-GS
+3
+This is due to the fact that 2D dilation is fixed on the pixel space and is not
+informed of the scale variation of the Gaussian, as illustrated in Fig. 3.
+Cause & Solution. Training data is typically produced using consistent
+camera settings. Therefore, the use of a fixed dilation operation during the train-
+ing phase does not result in variations in the dilated scale at the same location.
+In this case, the Gaussian primitives can still learn a reasonable 2D projection
+distribution. However, during the rendering phase, the Gaussian scene may be
+observed at various resolutions and distances. This can compromise the other-
+wise good 2D projection distribution, resulting in a different α-blending process
+than during the training phase, which ultimately affects the rendering quality.
+In this paper, we name this phenomenon as Gaussian scale mismatch, which
+is a property specific to 3DGS and absent in NeRFs. We believe that the 2D pro-
+jection distribution of Gaussian primitives in the rendering phase should be con-
+sistent with the training phase. We correct the 2D dilation operation (in 3DGS)
+and the 3D smoothing+2D Mip filter (in Mip-Splatting) via a 2D scale-adaptive
+filter to enforce scale consistency at different rendering parameter settings.
+Anti-aliasing. When the projected 2D Gaussian distribution remains con-
+sistent with the training at different rendering settings, anti-aliasing is simplified
+to ensure the synergy of the sampling frequency and the scene frequency. As the
+sampling frequency decreases, the Nyquist sampling theorem [15,18] may not be
+satisfied at a certain frequency level, resulting in aliasing effects in the image.
+Therefore, we introduce conventional anti-aliasing ideas, super-sampling and its
+limiting case integration, into 3DGS so that the Nyquist sampling theorem is
+satisfied when zooming out. Notably, super-sampling and integration only make
+sense after the Gaussian scale mismatch issue is addressed.
+Significance. As shown in Fig. 1, our method can well address the artefacts
+of vanilla 3DGS while being training-free. Under the zoom-in and zoom-out set-
+tings, vanilla 3DGS shows severe visual quality degradation because of erosion
+and dilation. The quality degradation is actually caused by an intertwined effect
+of Gaussian scale mismatch and aliasing, which is different from the case that,
+in NeRFs, artefacts under zoom-in and zoom-out are solely caused by alias-
+ing. While Mip-Splatting [24] can address these artefacts, our method is: (1)
+More flexible. Mip-Splatting needs to modify the training procedure of 3DGS,
+but our method is a training-free plugin; (2) More elegant. Mip-Splatting re-
+solves the Gaussian scale mismatch issue with 3D smoothing and 2D Mip filter,
+but our method exploits a single 2D scale-adaptive filter; (3) More accurate.
+Our method performs comparably with Mip-Splatting but out-performs it un-
+der zoom-out because our scale-adaptive formulation can unleash the power of
+simple and effective strategies super-sampling (and its limiting case integration).
+In summary, our contributions are as follows:
+1. We introduce a training-free approach that can be directly applied to the
+inference process of any pretrained 3DGS [10] model to resolve its visual arte-
+facts at drastically changed rendering settings. The method itself is named
+as scale-adaptive Gaussian splatting (SA-GS) as a whole.
+
+4
+Song et al.
+2. Technically, we propose a 2D scale-adaptive filter that keeps the Gaussian
+projection scale consistent with the training phase scale at different rendering
+settings. This scale-adaptive filter also allows simple anti-aliasing techniques
+(super-sampling and its limiting case integration) to work effectively.
+3. Extensive qualitative and quantitative experiments were conducted on the
+Mip-NeRF 360 [2] and Blender [13] datasets. Our method achieves superior
+or comparable performance compared to the state-of-the-art Gaussian anti-
+aliasing methods, while being training-free.
+2
+Related Works
+2.1
+Anti-aliased Neural Radiance Fields
+Aliasing is a common issue in conventional computer graphics that occurs when
+the rendering frequency drastically changes, resulting in visual artefacts such as
+jagged edges or moiré patterns. These artefacts are caused by the discrete sam-
+pling of continuous physical signals. Neural rendering, which is represented by
+neural radiance fields (NeRFs) [13] or other techniques [4,9,11], is also troubled
+by aliasing. Anti-aliasing neural radiance fields are an active research direction,
+with notable milestones like Mip-NeRF [1], Mip-NeRF 360 [2], Zip-NeRF [3] and
+Tri-MipRF [7]. Mip-NeRF [1] featurizes the 3d frustum with an approximate el-
+lipse such as the view-dependent distance-aware visual effects are captured by a
+closed-form geometric encoding of the (approximate) ellipse. Mip-NeRF 360 [2]
+accelerates Mip-NeRF [1] with a density proposal network and addresses un-
+bounded scenes using a heuristic contraction rule. Zip-NeRF [3] designs a spiral
+sampling pattern, instead of volume encoding, for the anti-aliasing of radiance
+fields based on hash grids. Tri-MipRF [7] interpolates down-sampled tri-planes
+(at corresponding scales) to build a mipmap-like representation. Despite various
+techniques designed for different NeRF backbones (MLP-based, triplane-based
+or grid-based), most of them are motivated by two old ideas: super-sampling and
+mipmap. Our method SA-GS is also motivated by super-sampling, but as will
+be discussed in the next section, in Gaussian splatting fields, other issues need
+to be addressed before the power of super-sampling can be fully unleashed.
+2.2
+Gaussian Splatting
+3D Gaussian Splatting (3DGS) [10] is a recently proposed neural1 rendering
+paradigm that is primitive-based (like Point-NeRF [23] or ADOP [17]), uses
+spherical harmonics as the color representation (like Plenoxels [5]), and renders
+at a very fast rate (faster than Instant-NGP [14]). While this new paradigm has
+recently seen much progress in terms of physical integration (PhysGaussian [22])
+and geometrical alignment (SuGaR [6]), anti-aliasing for 3DGS [10] is not yet
+well addressed. We note that one fundamental challenge is that when 3DGS [10]
+1 This is somewhat inaccurate because many people argue that 3DGS does not involve
+typical neural networks but only matrix multiplication.
+
+SA-GS
+5
+is rendered at different distances (i.e., resolutions), the Gaussian scale might
+not match the training-time scale. This mismatch issue entangles with aliasing,
+making the problem extremely complicated. This has been pointed
+
+
+==========================================================================================
+### 2404.10772_GaussianOpacityFields  (pages=15, img=2404.10772_GaussianOpacityFields_fig.png)
+==========================================================================================
+Gaussian Opacity Fields: Efficient Adaptive Surface Reconstruction in
+Unbounded Scenes
+ZEHAO YU, University of Tübingen, Tübingen AI Center, Germany
+TORSTEN SATTLER, Czech Technical University in Prague, Czech Republic
+ANDREAS GEIGER, University of Tübingen, Tübingen AI Center, Germany
+https://niujinshuchong.github.io/gaussian-opacity-fields
+Fig. 1. Applying TSDF fusion with rendered depth maps from the state-of-the-art Mip-Splatting [Yu et al. 2024a] models results in noisy and incomplete
+meshes, while meshes extracted with our method are complete, smooth, and detailed. This is achieved by establishing Gaussian opacity fields from 3D
+Gaussians, which enables geometry extraction by directly identifying its level-set. Moreover, we generate tetrahedral meshes from 3D Gaussians and utilize
+Marching Tetrahedra to extract adaptive and compact meshes.
+Recently, 3D Gaussian Splatting (3DGS) has demonstrated impressive novel
+view synthesis results, while allowing the rendering of high-resolution im-
+ages in real-time. However, leveraging 3D Gaussians for surface reconstruc-
+tion poses significant challenges due to the explicit and disconnected nature
+of 3D Gaussians. In this work, we present Gaussian Opacity Fields (GOF),
+a novel approach for efficient, high-quality, and adaptive surface recon-
+struction in unbounded scenes. Our GOF is derived from ray-tracing-based
+volume rendering of 3D Gaussians, enabling direct geometry extraction
+from 3D Gaussians by identifying its levelset, without resorting to Poisson
+reconstruction or TSDF fusion as in previous work. We approximate the
+surface normal of Gaussians as the normal of the ray-Gaussian intersection
+plane, enabling the application of regularization that significantly enhances
+geometry. Furthermore, we develop an efficient geometry extraction method
+utilizing Marching Tetrahedra, where the tetrahedral grids are induced from
+3D Gaussians and thus adapt to the scene’s complexity. Our evaluations
+reveal that GOF surpasses existing 3DGS-based methods in surface recon-
+struction and novel view synthesis. Further, it compares favorably to or even
+outperforms, neural implicit methods in both quality and speed.
+CCS Concepts: • Computing methodologies →Reconstruction; Render-
+ing; Machine learning approaches.
+Additional Key Words and Phrases: Novel View Synthesis, Differentiable
+Rendering, Gaussian Splatting, Surface Reconstruction, Multi-view-to-3D
+Authors’ addresses: Zehao Yu, University of Tübingen, Tübingen AI Center, Germany;
+Torsten Sattler, Czech Technical University in Prague, Czech Republic; Andreas Geiger,
+University of Tübingen, Tübingen AI Center, Germany.
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for components of this work owned by others than the
+author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+republish, to post on servers or to redistribute to lists, requires prior specific permission
+and/or a fee. Request permissions from permissions@acm.org.
+© 2024 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+0730-0301/2024/12-ART $15.00
+https://doi.org/10.1145/3687937
+ACM Reference Format:
+Zehao Yu, Torsten Sattler, and Andreas Geiger. 2024. Gaussian Opacity Fields:
+Efficient Adaptive Surface Reconstruction in Unbounded Scenes. ACM Trans.
+Graph. 43, 6 (December 2024), 15 pages. https://doi.org/10.1145/3687937
+1
+INTRODUCTION
+3D Reconstruction from multi-view images has been a long-standing
+goal in computer vision, with various applications in robotics, graph-
+ics, animation, virtual reality, and more. Since Neural Radiance Field
+(NeRF) [Mildenhall et al. 2020] demonstrated impressive novel view
+synthesis (NVS) results with implicit representations [Mescheder
+et al. 2019; Park et al. 2019] and volume rendering [Drebin et al.
+1988; Kajiya and Von Herzen 1984; Levoy 1990], it has been extended
+to surface reconstruction with occupancy networks [Oechsle et al.
+2021] and Signed Distance Functions (SDF) [Wang et al. 2021; Yariv
+et al. 2021]. While recent advancements [Li et al. 2023; Yariv et al.
+2023; Yu et al. 2022a,b] have shown impressive reconstruction re-
+sults, these methods are mostly limited to reconstructing foreground
+objects [Rosu and Behnke 2023] and computationally expensive to
+optimize [Yariv et al. 2023]. For instance, Neuralangelo [Li et al.
+2023] models the background separately with NeRFs and necessi-
+tates approximately 128 GPU hours to reconstruct a single scene.
+Another research avenue focuses on directly extracting surfaces
+from NeRF’s opacity field for real-time rendering [Chen et al. 2023a;
+Rakotosaona et al. 2024; Reiser et al. 2024; Tang et al. 2022]. These
+methods employ a modular workflow including opacity field train-
+ing, mesh extraction, simplification, and refinement. Particularly
+noteworthy is Binary Opacity Grids (BOG)[Reiser et al. 2024], which
+excels at capturing intricate details in unbounded scenes through
+super-sampling. To extract detailed surfaces, it renders depth maps
+ACM Trans. Graph., Vol. 43, No. 6, Article . Publication date: December 2024.
+arXiv:2404.10772v2 [cs.CV] 11 Sep 2024
+
+2
+•
+Zehao Yu, Torsten Sattler, and Andreas Geiger
+to generate a sparse high-resolution voxel grid and applies a heuris-
+tic fusion technique to label the voxels as inside or outside. March-
+ing cube algorithm [Lorensen and Cline 1998] is applied to extract
+a high-resolution mesh with hundreds of millions of points and
+thousands of millions of triangles, which is then simplified using
+slow post-processing techniques [Garland and Heckbert 1997]. No-
+tably, as it focuses on NVS rather than surface reconstruction, the
+extracted meshes are noisy and contain fewer details in the back-
+ground region, probably due to lack of regularization and contracted
+space [Barron et al. 2022a] fusion.
+More recently, 3D Gaussian Splatting (3DGS) [Kerbl et al. 2023]
+represents complex scenes as a set of 3D Gaussians, demonstrating
+photorealistic NVS results while trained efficiently and rendered
+in real-time. It has been quickly extended to surface reconstruc-
+tion [Chen et al. 2023b; Guédon and Lepetit 2023; Huang et al. 2024;
+Yu et al. 2024b]. Notably, SuGaR [Guédon and Lepetit 2023] regular-
+izes the 3D Gaussians to align with surfaces and employs Poisson
+surface reconstruction [Kazhdan and Hoppe 2013] to extract a mesh
+from rendered depth maps. 2D Gaussian Splatting (2DGS) [Huang
+et al. 2024] uses 2D Gaussians instead of 3D Gaussians as a scene
+representation for better surface representation and utilizes TSDF
+fusion to reconstruct a mesh. While these methods have shown
+improved reconstruction, they struggle with extracting fine-grained
+geometry [Guédon and Lepetit 2023] and reconstructing background
+regions [Huang et al. 2024]. A primary challenge is the inconsistency
+between mesh extraction and volume rendering during training.
+Specifically, Poisson reconstruction ignores the opacity and scale of
+Gaussian primitives and rendered depth maps are not sufficiently
+reliable. Moreover, TSDF fusion struggles to accurately model thin
+structures and to reconstruct unbounded scenes. Resorting to high-
+resolution voxel grids for TSDF leads to the creation of large meshes,
+similar to BOG [Reiser et al. 2024], due to the lack of adaptivity in
+the grid resolution relative to the scene’s geometric complexity.
+Contributions: In this paper, we propose Gaussian Opacity Fields
+(GOF), a novel approach to achieve efficient, high-quality, and adap-
+tive surface reconstruction from 3D Gaussians directly. Our key
+insights are threefold: First, we establish a Gaussian opacity field
+from a set of 3D Gaussians. Specifically, unlike projection-based
+volume rendering, our method leverages an explicit ray-Gaussian
+intersection to determine a Gaussian’s contribution during volume
+rendering. Our ray-tracing-inspired formula facilitates the evalua-
+tion of opacity values for any point along a ray. We then define the
+opacity of any 3D point as the minimal opacity among all training
+views that observed the point. Taking the minimum opacity across
+all views achieves view independence, making the opacity field
+solely a function of position. Our GOF is consistent with volume
+rendering during training and enables surface extraction from 3D
+Gaussians by directly identifying a level set, without resorting to
+Poisson reconstruction or TSDF fusion. Second, we approximate
+the surface normals of 3D Gaussians as the normals of intersec-
+tion planes between the ray and Gaussians. This technique allows
+for the incorporation of regularizations [Huang et al. 2024] during
+training, thus enhancing the fidelity of geometry reconstruction.
+Third, we propose an efficient surface extraction technique based
+on tetrahedra-grids. Recognizing that 3D Gaussians effectively in-
+dicate potential surface locations, we focus opacity evaluations on
+these areas. In particular, we use the center and corners of 3D bound-
+ing boxes around the 3D Gaussian primitives as vertex sets for the
+tetrahedral mesh. Upon assessing the opacity at tetrahedral points,
+we utilize the Marching Tetrahedra algorithm for triangle mesh ex-
+traction. Given that our opacity fields challenge the assumption that
+opacity changes linearly, we further implement a binary search algo-
+rithm to accurately identify the opacity field’s level set, substantially
+enhancing the quality of the resulting surfaces.
+To demonstrate the effectiveness and efficiency of GOF, we carry
+out extensive experiments across three challenging datasets [Barron
+et al. 2022a; Jensen et al. 2014; Knapitsch et al. 2017]. Our results
+indicate that GOF not only matches but, in some cases, surpasses
+the performance of existing SDF-based methods, while being much
+faster. Moreover, GOF outperforms all other 3DGS-based methods
+in both surface reconstruction and novel view synthesis.
+2
+RELATED WORK
+2.1
+Novel view synthesis
+NeRF [Mildenhall et al. 2020] utilizes a multi-layer perception (MLP)
+for scene representation, including geometry and view-dependent
+appearances. The MLP is optimized via a photometric loss through
+volume rendering [Drebin et al. 1988; Kajiya and Von Herzen 1984;
+Levoy 1990; Max 1995]. Subsequent enhancements have focused on
+optimizing NeRF’s training using feature-grid representations [Chen
+et al. 2022; Fridovich-Keil et al. 2022; Kulhanek and Sattler 2023;
+Müller et al. 2022; Sun et al. 2022] and improving rendering speed
+via baking [Hedman et al. 2021; Reiser et al. 2021, 2023; Yariv et al.
+2023]. Moreover, NeRF has been adapted to address challenges in
+anti-aliasing [Barron et al. 2022b, 2023] and unbounded scene mod-
+eling [Barron et al. 2022a; Zhang et al. 2020]. More recently, 3D
+Gaussian splatting [Kerbl et al. 2023] represents complex scenes
+with 3D Gaussians. It demonstrated impressive NVS results while
+being optimized efficiently and rendering high-resolution images
+in real-time. Subsequent works improved its rendering quality via
+anti-aliasing [Yu et al. 2024a] or extended it to dynamic scenes
+modeling [Zhou et al. 2024], and more [Chen and Wang 2024]. In
+this work, we extend 3DGS for high-quality surface reconstruction
+through the development of Gaussian Opacity Fields. We further
+introduce an efficient tetrahedron grid-based mesh extraction algo-
+rithm to extract scene adaptive and compact meshes.
+2.2
+3D reconstruction
+3D Reconstruction from multi-view
