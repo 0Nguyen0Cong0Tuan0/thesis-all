@@ -7,11 +7,23 @@ training) with **Spec-Gaussian** (replaces SH high-frequency handling with a 24-
 per-Gaussian ASG latent + a `SpecularNetwork` MLP producing a specular residual added
 to `sh_color`).
 
-Key behaviors:
-- Specular branch activates after iter 3000.
-- SH gradients are shielded ×0.01 during iters 3000–5000.
+Key behaviors (as of 2026-06-11):
+- Specular branch activates after iter 7000 (`specular_start_iter` default) —
+  mid-densification, mirroring Spec-Gaussian's iter-3000 start, so densification
+  doesn't recruit geometry to fake highlights.
+- FastGS's multi-view consistency vote is Lambertian-biased against specular; two
+  guards are in place: the scorer renders specular-aware once the branch is active
+  (`compute_gaussian_score_fastgs(..., specular_mlp=...)`), and GT pixels above the
+  `highlight_mask_quantile=0.95` luminance quantile are excluded from the vote
+  (`compute_metric_map` in `utils/fast_utils.py`).
+- SH shielding is a soft cosine **LR** decay on `f_rest` only (1.0→0.1 over
+  `sh_decay_steps=2000` after specular start, then 0.3) via `set_sh_lr_scale`;
+  the old hard `grad.mul_(0.01)` freeze is gone.
+- `_features_asg` has its own Adam optimizer stepped at MLP cadence (the main
+  optimizer only steps every 32/64 iters post-15k).
 - DashGaussian was deliberately dropped.
 - ASG integration is already wired up and working (see repo `task.md`).
+- Current state, known issues and next steps: `results/CODE_REVIEW_2026-06-11.md`.
 
 ## Current phase: pipeline optimization
 

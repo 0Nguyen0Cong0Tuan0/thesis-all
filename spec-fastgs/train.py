@@ -16,7 +16,7 @@ from utils.image_utils import psnr
 from gaussian_renderer import render_fastgs
 from scene import Scene, GaussianModel, SpecularModel
 
-from utils.general_utils import safe_state
+from utils.general_utils import safe_state, sh_lr_scale_cosine
 from utils.fast_utils import compute_gaussian_score_fastgs, sampling_cameras
 
 from argparse import ArgumentParser, Namespace
@@ -98,18 +98,6 @@ def training(dataset, opt, pipe):
         viewpoint_indices.pop(idx)
 
         # --------------------------------------------------------
-        # COMPUTE VIEWDIR + NORMAL
-        # --------------------------------------------------------
-
-        xyz = gaussians.get_xyz
-        cam_center = cam.camera_center
-
-        viewdir = xyz - cam_center
-        viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
-
-        normal = gaussians.get_normal_axis(viewdir)
-
-        # --------------------------------------------------------
         # SPECULAR (SG STYLE) — Phase A: sparse MLP via cached visibility
         # --------------------------------------------------------
         # Only Gaussians visible in the PREVIOUS step feed the ASG MLP.
@@ -150,11 +138,18 @@ def training(dataset, opt, pipe):
                 do_spec = (iteration % spec_full_interval == 0)  # throttle the costly path
 
             if do_spec and vis_indices.numel() > 0:
-                asg_feat = gaussians.get_asg_features  # [N, 24]
+                # viewdir/normal only for the evaluated subset: get_normal_axis
+                # (argsort + build_rotation) over all N every iter was pure waste
+                # on the 15k pre-specular iters and on throttled iters.
+                xyz_vis = gaussians.get_xyz[vis_indices]                  # [M, 3]
+                viewdir = xyz_vis - cam.camera_center
+                viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
+                normal = gaussians.get_normal_axis(viewdir, indices=vis_indices)
+
                 spec_sparse = specular_mlp.step(
-                    asg_feat[vis_indices],
-                    viewdir[vis_indices],
-                    normal[vis_indices],
+                    gaussians.get_asg_features[vis_indices],
+                    viewdir,
+                    normal,
                 )  # [M, 3]
 
                 # Scatter back into a full-scene buffer; index_put preserves grad
@@ -190,13 +185,9 @@ def training(dataset, opt, pipe):
         # --------------------------------------------------------
         # LOSS
         # --------------------------------------------------------
-        # Phase A design:
-        #   • photometric_loss  — L1 + SSIM, unchanged from FastGS baseline.
-        #     Gradients flow back through the renderer into mlp_color, so the
-        #     specular MLP is already supervised by image reconstruction.
-        #   • spec_reg          — lightweight L2 penalty on specular MLP outputs
-        #     (Gaussian-space). Prevents the MLP from producing unbounded colors
-        #     or collapsing to zero, without requiring a second render pass.
+        # Phase A design: photometric L1 + SSIM, unchanged from FastGS baseline.
+        # Gradients flow back through the renderer into mlp_color, so the
+        # specular MLP is already supervised by image reconstruction.
         # --------------------------------------------------------
 
         gt = cam.original_image.cuda()
@@ -204,18 +195,10 @@ def training(dataset, opt, pipe):
         Ll1      = l1_loss(image, gt)
         ssim_val = fast_ssim(image.unsqueeze(0), gt.unsqueeze(0))
 
-        photometric_loss = (
+        loss = (
             (1.0 - opt.lambda_dssim) * Ll1
             + opt.lambda_dssim * (1.0 - ssim_val)
         )
-
-        # Gaussian-space specular regulariser (no extra render needed)
-        if spec_sparse is not None:
-            spec_reg = spec_sparse.pow(2).mean() * 0.0
-        else:
-            spec_reg = 0.0
-
-        loss = photometric_loss + spec_reg
 
         loss.backward()
 
@@ -234,37 +217,39 @@ def training(dataset, opt, pipe):
         radii_final = radii
 
         # --------------------------------------------------------
-        # Reduce SH competition: scale down SH gradients for a window after specular activation
-        # This prevents SH from absorbing highlight residuals while specular learns.
-        # Minimal parameters (tunable): spec_start, spec_freeze_steps, sh_grad_scale
+        # Reduce SH competition: soft cosine decay of the f_rest LEARNING RATE
+        # around specular activation (Sol 6). LR scaling (not grad.mul_) because
+        # post-15k the optimizer accumulates grads over 32/64 iters: mutating the
+        # accumulated buffer every iter compounded to 0.01^j, and the old block
+        # also froze _features_dc (diffuse) unintentionally. f_dc learns normally.
         # --------------------------------------------------------
-        spec_start = opt.specular_start_iter  # must match when specular is enabled
-        spec_freeze_steps = 2000  # number of iterations to reduce SH learning
-        sh_grad_scale = 0.01  # scale applied to SH gradients (0 disables updates)
-
-        if iteration > spec_start and iteration <= spec_start + spec_freeze_steps:
-            try:
-                if hasattr(gaussians, "_features_rest") and gaussians._features_rest.grad is not None:
-                    gaussians._features_rest.grad.mul_(sh_grad_scale)
-                if hasattr(gaussians, "_features_dc") and gaussians._features_dc.grad is not None:
-                    gaussians._features_dc.grad.mul_(sh_grad_scale)
-            except Exception:
-                pass
+        gaussians.set_sh_lr_scale(
+            sh_lr_scale_cosine(
+                iteration,
+                opt.specular_start_iter,
+                decay_steps=opt.sh_decay_steps,
+                scale_min=opt.sh_scale_min,
+                scale_after=opt.sh_scale_after,
+            )
+        )
 
         # --------------------------------------------------------
         # OPTIMIZER STEP
         # --------------------------------------------------------
 
-        skip_sh = (iteration > spec_start and iteration <= spec_start + spec_freeze_steps)
-        gaussians.optimizer_step(iteration, skip_sh=skip_sh)
+        gaussians.optimizer_step(iteration)
 
         # Update specular lr BEFORE stepping optimizer to ensure non-zero lr is used.
         # Only step when the MLP actually ran this iter (ran_spec): on throttled iters
         # the specular graph wasn't built, so its grads are None and a step would be a
         # no-op at best. update_learning_rate must precede optimizer_step.
+        # The ASG latents step at the SAME cadence as the MLP — leaving them on the
+        # main optimizer's 32/64-iter throttle starved the specular branch's
+        # per-Gaussian capacity (~470 Adam steps over its whole training window).
         if iteration > opt.specular_start_iter and ran_spec:
             specular_mlp.update_learning_rate(iteration - opt.specular_start_iter)
             specular_mlp.optimizer_step()
+            gaussians.asg_optimizer_step()
 
         # --------------------------------------------------------
         # LOG
@@ -298,9 +283,15 @@ def training(dataset, opt, pipe):
                 size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                 camlist = sampling_cameras(scene.getTrainCameras().copy())
 
+                # Once specular is active, score with specular-aware renders so the
+                # MLP's (view-dependent) contribution isn't counted as cross-view
+                # error by the consistency vote.
+                spec_for_score = specular_mlp if iteration > opt.specular_start_iter else None
+
                 with torch.no_grad():
                     importance_score, pruning_score = compute_gaussian_score_fastgs(
-                        camlist, gaussians, pipe, background, opt, DENSIFY=True
+                        camlist, gaussians, pipe, background, opt, DENSIFY=True,
+                        specular_mlp=spec_for_score
                     )
 
                 gaussians.densify_and_prune_fastgs(

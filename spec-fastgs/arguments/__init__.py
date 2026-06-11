@@ -107,7 +107,21 @@ class OptimizationParams(ParamGroup):
         self.optimizer_type = "default"
 
         self.specular_lr_max_steps = 30000
-        self.specular_start_iter = 15000
+        # Specular starts MID-densification (like Spec-Gaussian's iter-3000 start):
+        # densifying without a view-dependent model recruits geometry to fake
+        # highlights (Gaussian bloat + baked-in blur). The scorer is specular-aware
+        # from this iter on (see compute_gaussian_score_fastgs).
+        self.specular_start_iter = 7000
+
+        # Exclude GT pixels above this luminance quantile from the multi-view
+        # consistency vote (specular highlights violate its Lambertian assumption).
+        # 1.0 disables the mask.
+        self.highlight_mask_quantile = 0.95
+
+        # soft SH shielding around specular activation (cosine LR decay on f_rest)
+        self.sh_decay_steps = 2000
+        self.sh_scale_min = 0.1
+        self.sh_scale_after = 0.3
         
         super().__init__(parser, "Optimization Parameters")
 

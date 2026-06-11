@@ -30,6 +30,27 @@ def compute_photometric_loss(viewpoint_cam, image):
     loss = (1.0 - 0.2) * Ll1 + 0.2 * (1.0 - fast_ssim(image.unsqueeze(0), gt_image.unsqueeze(0)))
     return loss
 
+def compute_metric_map(render_image, gt_image, loss_thresh, highlight_quantile=1.0):
+    """Per-pixel high-error vote for the multi-view consistency score.
+
+    `highlight_quantile` < 1.0 excludes the brightest GT pixels (above that
+    luminance quantile) from the vote. The consistency test implicitly assumes
+    Lambertian surfaces — specular highlights move with the camera, so they show
+    permanent cross-view "error" that SH can never fix, and voting on them drives
+    runaway clone/split at highlight regions (measured: 4x Gaussian bloat
+    concentrated where bright-region RMSE peaks). Masking them keeps the vote
+    meaningful on the diffuse majority of the image."""
+    l1_loss_norm = get_loss(render_image, gt_image)
+    metric_map = l1_loss_norm > loss_thresh
+
+    if highlight_quantile < 1.0:
+        lum = gt_image.mean(dim=0)  # [H, W]
+        lum_thresh = torch.quantile(lum.flatten(), highlight_quantile)
+        metric_map = metric_map & (lum <= lum_thresh)
+
+    return metric_map.int()
+
+
 def normalize(config_value, value_tensor):
     multiplier = config_value
     value_tensor[value_tensor.isnan()] = 0
@@ -42,7 +63,7 @@ def normalize(config_value, value_tensor):
 
     return ret_value
 
-def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = False):
+def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = False, specular_mlp = None):
     """Compute multi-view consistency scores for Gaussians to guide densification.
 
     For each camera in `camlist` the function renders the scene and computes a
@@ -58,6 +79,12 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = 
         args: runtime config containing thresholds (e.g. `loss_thresh`).
         DENSIFY (bool): whether to compute and return the importance score
             used for densification. If False, only the pruning score is computed.
+        specular_mlp: when the specular branch is active, pass the SpecularModel so
+            the scoring renders include the specular residual. Otherwise the scorer
+            renders SH-only while training renders SH+specular, and everything the
+            MLP correctly explains is counted as cross-view "error" — biasing
+            densification toward specular regions. Caller is expected to run this
+            under torch.no_grad() (train.py does).
 
     Returns:
         importance_score (Tensor): per-Gaussian integer counts of how many views
@@ -72,16 +99,28 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = 
 
     for view in range(len(camlist)):
         my_viewpoint_cam = camlist[view]
-        render_image = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult)["render"]
+
+        # Specular-aware scoring: evaluate the MLP for THIS camera (full set,
+        # no_grad) so scoring renders match what the training loss actually sees.
+        mlp_color = None
+        if specular_mlp is not None:
+            viewdir = gaussians.get_xyz - my_viewpoint_cam.camera_center
+            viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
+            normal = gaussians.get_normal_axis(viewdir)
+            mlp_color = specular_mlp.step(gaussians.get_asg_features, viewdir, normal)
+
+        render_image = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult, mlp_color=mlp_color)["render"]
         photometric_loss = compute_photometric_loss(my_viewpoint_cam, render_image)
 
         gt_image = my_viewpoint_cam.original_image.cuda()
         get_flag = True
-        l1_loss_norm = get_loss(render_image, gt_image)
-        
-        metric_map = (l1_loss_norm > args.loss_thresh).int()
 
-        render_pkg = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult, get_flag = get_flag, metric_map = metric_map)
+        metric_map = compute_metric_map(
+            render_image, gt_image, args.loss_thresh,
+            highlight_quantile=getattr(args, "highlight_mask_quantile", 1.0)
+        )
+
+        render_pkg = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult, get_flag = get_flag, metric_map = metric_map, mlp_color=mlp_color)
 
         accum_loss_counts = render_pkg["accum_metric_counts"]
 

@@ -25,8 +25,7 @@ python train.py \
     --is_indoor \
     --sh_degree 3 \
     --highfeature_lr 0.02 \
-    --grad_abs_thresh 0.0004 \
-    --specular_start_iter 3000
+    --grad_abs_thresh 0.0004
 
 # 2. RENDER
 python render.py \

@@ -67,6 +67,7 @@ class GaussianModel:
         self.denom = torch.empty(0)
         self.optimizer = None
         self.shoptimizer = None
+        self.asgoptimizer = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
 
@@ -170,8 +171,13 @@ class GaussianModel:
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
     
-    def get_normal_axis(self, dir_pp_normalized=None, return_delta=False):
-        normal_axis = self.get_minimum_axis
+    def get_normal_axis(self, dir_pp_normalized=None, return_delta=False, indices=None):
+        # `indices` restricts the (argsort + build_rotation) work to a subset of
+        # Gaussians — used by the visibility-gated specular path in train.py.
+        if indices is None:
+            normal_axis = self.get_minimum_axis
+        else:
+            normal_axis = get_minimum_axis(self.get_scaling[indices], self.get_rotation[indices])
         normal_axis, positive = flip_align_view(normal_axis, dir_pp_normalized)
         normal = normal_axis / normal_axis.norm(dim=1, keepdim=True)  # (N, 3)
         return normal
@@ -221,19 +227,26 @@ class GaussianModel:
 
         l = [
             {'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
-            {'params': [self._features_dc], 'lr': training_args.lowfeature_lr, "name": "f_dc"}, 
-            {'params': [self._features_asg], 'lr': training_args.feature_lr, "name": "f_asg"},
+            {'params': [self._features_dc], 'lr': training_args.lowfeature_lr, "name": "f_dc"},
             {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"}
         ]
         sh_l = [{'params': [self._features_rest], 'lr': training_args.highfeature_lr / 20.0, "name": "f_rest"}]
+        # ASG latents get their own optimizer: post-densification the main optimizer
+        # steps only every 32/64 iters (gradient accumulation), but the specular MLP
+        # steps every iter it runs — keeping f_asg in the main optimizer starved the
+        # per-Gaussian specular capacity (~470 steps over 15k-30k). The ASG optimizer
+        # is stepped from train.py on every iter the specular MLP actually ran.
+        asg_l = [{'params': [self._features_asg], 'lr': training_args.feature_lr, "name": "f_asg"}]
+        self.sh_base_lr = training_args.highfeature_lr / 20.0
 
         if self.optimizer_type == "default":
             self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
             self.shoptimizer = torch.optim.Adam(sh_l, lr=0.0, eps=1e-15)
+            self.asgoptimizer = torch.optim.Adam(asg_l, lr=0.0, eps=1e-15)
         elif self.optimizer_type == "sparse_adam":
-            self.optimizer = SparseGaussianAdam(l + sh_l, lr=0.0, eps=1e-15)
+            self.optimizer = SparseGaussianAdam(l + sh_l + asg_l, lr=0.0, eps=1e-15)
         self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
                                                     lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,
@@ -247,28 +260,44 @@ class GaussianModel:
                 param_group['lr'] = lr
                 return lr
 
-    def optimizer_step(self, iteration, skip_sh=False):
+    def optimizer_step(self, iteration):
         ''' An optimization schdeuler. The goal is similar to the sparse Adam of taming 3dgs.'''
         if iteration <= 15000:
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none = True)
-            if not skip_sh and iteration % 16 == 0:
+            if iteration % 16 == 0:
                 self.shoptimizer.step()
                 self.shoptimizer.zero_grad(set_to_none = True)
         elif iteration <= 20000:
             if iteration % 32 == 0:
                 self.optimizer.step()
                 self.optimizer.zero_grad(set_to_none = True)
-                if not skip_sh:
-                    self.shoptimizer.step()
-                    self.shoptimizer.zero_grad(set_to_none = True)
+                self.shoptimizer.step()
+                self.shoptimizer.zero_grad(set_to_none = True)
         else:
             if iteration % 64 == 0:
                 self.optimizer.step()
                 self.optimizer.zero_grad(set_to_none = True)
-                if not skip_sh:
-                    self.shoptimizer.step()
-                    self.shoptimizer.zero_grad(set_to_none = True)
+                self.shoptimizer.step()
+                self.shoptimizer.zero_grad(set_to_none = True)
+
+    def asg_optimizer_step(self):
+        ''' Stepped from train.py on every iter the specular MLP ran, so the ASG
+            latents learn at the same cadence as the MLP (not the 32/64-iter
+            throttle of the main optimizer). '''
+        if self.asgoptimizer is not None:
+            self.asgoptimizer.step()
+            self.asgoptimizer.zero_grad(set_to_none=True)
+
+    def set_sh_lr_scale(self, scale):
+        ''' Soft SH shielding: scales the f_rest learning rate instead of mutating
+            gradient buffers. Mutating grads interacted badly with the accumulation
+            in optimizer_step (a grad contributed j iters before the step ended up
+            scaled by 0.01^j) and also froze f_dc unintentionally. '''
+        if self.shoptimizer is None:
+            return
+        for group in self.shoptimizer.param_groups:
+            group['lr'] = self.sh_base_lr * scale
 
     def construct_list_of_attributes(self):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
@@ -370,6 +399,7 @@ class GaussianModel:
         optimizable_tensors = {}
         optimizers = [self.optimizer]
         if self.shoptimizer: optimizers.append(self.shoptimizer)
+        if self.asgoptimizer: optimizers.append(self.asgoptimizer)
 
         for opt in optimizers:
             for group in opt.param_groups:
@@ -412,6 +442,7 @@ class GaussianModel:
         optimizable_tensors = {}
         optimizers = [self.optimizer]
         if self.shoptimizer: optimizers.append(self.shoptimizer)
+        if self.asgoptimizer: optimizers.append(self.asgoptimizer)
 
         for opt in optimizers:
             for group in opt.param_groups:

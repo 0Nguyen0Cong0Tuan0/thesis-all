@@ -34,6 +34,19 @@ def PILtoTorch(pil_image, resolution):
 # LEARNING RATE SCHEDULERS
 # ------------------------------------------------------------
 
+def sh_lr_scale_cosine(iteration, spec_start, decay_steps=2000, scale_min=0.1, scale_after=0.3):
+    """Soft SH shielding schedule (Sol 6): scale factor for the f_rest learning
+    rate around specular activation. 1.0 before `spec_start`, cosine decay
+    1.0 -> `scale_min` over `decay_steps`, then `scale_after` for the rest of
+    training so SH keeps competing only weakly with the specular branch."""
+    if iteration <= spec_start:
+        return 1.0
+    if iteration <= spec_start + decay_steps:
+        t = (iteration - spec_start) / decay_steps
+        return scale_min + (1.0 - scale_min) * 0.5 * (1.0 + np.cos(np.pi * t))
+    return scale_after
+
+
 def get_expon_lr_func(
     lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000
 ):
