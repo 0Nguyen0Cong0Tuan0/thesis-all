@@ -121,22 +121,36 @@ def training(dataset, opt, pipe):
         spec_sparse: torch.Tensor | None = None  # sparse MLP output [M, 3]
         vis_indices: torch.Tensor | None = None   # indices of evaluated Gaussians
         mlp_color: torch.Tensor | None = None     # full-scene buffer  [N, 3]
+        ran_spec = False                          # did the MLP actually run this iter?
+
+        # Tier-1 fix #3 (throttle). When the per-camera visibility cache is VALID
+        # (stable Gaussian count → mostly the post-densification phase), the MLP runs
+        # on the small visible subset, so we evaluate it EVERY iter — cheap and
+        # view-correct. When the cache is INVALID (count just changed during
+        # densification, or first sight of this camera) the only option is the full
+        # set, which is expensive, so we throttle that to once every K iters. We do
+        # NOT reuse a cached specular across iters: it is view-dependent, and views
+        # are sampled randomly, so a stale buffer would be the wrong view.
+        spec_full_interval = 4  # K: full-set MLP cadence while cache is invalid
 
         if iteration > opt.specular_start_iter:
             n_gs = gaussians.get_xyz.shape[0]
-            asg_feat = gaussians.get_asg_features  # [N, 24]
 
-            # Determine which Gaussians to evaluate — use THIS camera's last mask
             cached_mask = vis_cache.get(cam.uid)
-            if cached_mask is not None and cached_mask.shape[0] == n_gs:
+            cache_valid = cached_mask is not None and cached_mask.shape[0] == n_gs
+
+            if cache_valid:
                 # cached_mask lives on CPU (saves VRAM across many cameras);
                 # move only the small index list to the GPU.
                 vis_indices = cached_mask.nonzero(as_tuple=False).squeeze(1).to("cuda")  # [M]
+                do_spec = True                                   # cheap subset → every iter
             else:
                 # First time this camera is seen OR count changed after densification
-                vis_indices = torch.arange(n_gs, device="cuda")
+                vis_indices = torch.arange(n_gs, device="cuda")  # full set
+                do_spec = (iteration % spec_full_interval == 0)  # throttle the costly path
 
-            if vis_indices.numel() > 0:
+            if do_spec and vis_indices.numel() > 0:
+                asg_feat = gaussians.get_asg_features  # [N, 24]
                 spec_sparse = specular_mlp.step(
                     asg_feat[vis_indices],
                     viewdir[vis_indices],
@@ -147,6 +161,7 @@ def training(dataset, opt, pipe):
                 mlp_color = torch.zeros(
                     (n_gs, 3), device="cuda"
                 ).index_put((vis_indices,), spec_sparse)
+                ran_spec = True
 
         # --------------------------------------------------------
         # RENDER  (single pass — Phase A removes redundant sh & spec-sharp passes)
@@ -205,47 +220,18 @@ def training(dataset, opt, pipe):
         loss.backward()
 
         # --------------------------------------------------------
-        # DECOUPLED DENSIFICATION (METHOD 2)
+        # DENSIFICATION STATS  (Tier-1 fix #1: single render pass)
         # --------------------------------------------------------
+        # Previously a SECOND, SH-only render_fastgs + torch.autograd.grad ran every
+        # iter from specular_start→densify_until purely to source "decoupled" geometry
+        # gradients — roughly doubling per-iter cost in the densification phase. We
+        # drop it and reuse the main render's screen-space stats (standard 3DGS/FastGS
+        # densification). The specular residual is small (analysis: mean ~2.5 / std ~12
+        # on [0,255]), and with the throttled MLP most densify-phase iters already
+        # render SH-only, so the densification signal stays geometry-driven.
         viewspace_point_tensor_final = viewspace_point_tensor
         visibility_filter_final = visibility_filter
         radii_final = radii
-
-        if iteration > opt.specular_start_iter and iteration < opt.densify_until_iter:
-            render_pkg_sh = render_fastgs(
-                cam,
-                gaussians,
-                pipe,
-                background,
-                opt.mult,
-                mlp_color=None  # SH-only
-            )
-            image_sh = render_pkg_sh["render"]
-            viewspace_point_tensor_sh = render_pkg_sh["viewspace_points"]
-            visibility_filter_sh = render_pkg_sh["visibility_filter"]
-            radii_sh = render_pkg_sh["radii"]
-            
-            Ll1_sh = l1_loss(image_sh, gt)
-            ssim_val_sh = fast_ssim(image_sh.unsqueeze(0), gt.unsqueeze(0))
-            loss_sh = (
-                (1.0 - opt.lambda_dssim) * Ll1_sh
-                + opt.lambda_dssim * (1.0 - ssim_val_sh)
-            )
-            
-            geom_grad = torch.autograd.grad(
-                outputs=loss_sh,
-                inputs=viewspace_point_tensor_sh,
-                retain_graph=False,
-                create_graph=False,
-                allow_unused=True
-            )[0]
-            
-            if geom_grad is not None:
-                viewspace_point_tensor_sh.grad = geom_grad
-            
-            viewspace_point_tensor_final = viewspace_point_tensor_sh
-            visibility_filter_final = visibility_filter_sh
-            radii_final = radii_sh
 
         # --------------------------------------------------------
         # Reduce SH competition: scale down SH gradients for a window after specular activation
@@ -272,8 +258,11 @@ def training(dataset, opt, pipe):
         skip_sh = (iteration > spec_start and iteration <= spec_start + spec_freeze_steps)
         gaussians.optimizer_step(iteration, skip_sh=skip_sh)
 
-        # Update specular lr BEFORE stepping optimizer to ensure non-zero lr is used
-        if iteration > opt.specular_start_iter:
+        # Update specular lr BEFORE stepping optimizer to ensure non-zero lr is used.
+        # Only step when the MLP actually ran this iter (ran_spec): on throttled iters
+        # the specular graph wasn't built, so its grads are None and a step would be a
+        # no-op at best. update_learning_rate must precede optimizer_step.
+        if iteration > opt.specular_start_iter and ran_spec:
             specular_mlp.update_learning_rate(iteration - opt.specular_start_iter)
             specular_mlp.optimizer_step()
 

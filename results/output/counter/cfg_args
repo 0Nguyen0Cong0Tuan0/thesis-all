@@ -1,0 +1,1 @@
+Namespace(asg_degree=24, is_real=True, is_indoor=True, sh_degree=3, source_path='/kaggle/working/spec-fastgs/datasets/mipnerf360/counter', model_path='./output/counter', images='images', resolution=-1, white_background=False, data_device='cuda', eval=True)

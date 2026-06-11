@@ -24,3 +24,10 @@ desktop.ini
 *.log
 build/
 dist/
+
+# Training outputs — large & regenerable. Keep small metrics/config (JSON, cfg_args)
+# and analysis artifacts; exclude model checkpoints and render dumps.
+results/output/**/point_cloud/
+results/output/**/test/
+results/output/**/specular/
+results/output/**/input.ply

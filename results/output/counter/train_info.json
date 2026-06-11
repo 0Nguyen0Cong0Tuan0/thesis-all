@@ -1,0 +1,12 @@
+{
+    "scene": "counter",
+    "git_branch": "spec-fastgs_v2.2_nct",
+    "image_scale": "images",
+    "iterations": 30000,
+    "initial_gaussians": 155767,
+    "final_gaussians": 619823,
+    "training_time_seconds": 7349.79,
+    "training_time_formatted": "122m 29s",
+    "peak_vram_mib": 9675.21,
+    "datetime_completed": "2026-06-10 19:14:10"
+}
