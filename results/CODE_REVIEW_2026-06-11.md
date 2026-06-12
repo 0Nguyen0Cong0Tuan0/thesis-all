@@ -141,6 +141,23 @@ The measured gap is structural specular blur, not brightness. Ranked:
 
 ---
 
+## 5b. 2026-06-12 retrain verdict: the run did NOT contain the fixes
+
+The run delivered in `spec_fastgs_output/counter/` (completed 2026-06-11 18:35,
+121m4s, 619,916 Gaussians, PSNR 30.67 / SSIM 0.9248 / LPIPS 0.16602) is
+statistically identical to the v2.2 benchmark (122m29s, 619,823, 30.72/0.925/0.166)
+— pure run-to-run noise. Its `train_info.json` records `git_branch:
+spec-fastgs_v2.2_nct`, the same pre-fix branch as the old run. The fixes were
+committed to the **thesis-all** workspace repo (`main`, commit `ae016fd`,
+2026-06-11 23:21 +0700); the Kaggle notebook clones a *different* repo/branch that
+never received them. **No conclusion about the fixes can be drawn from this run.**
+
+Mitigation added to `train.py`: a `CODE_VERSION` constant printed at startup
+(`[SPEC-FASTGS] code: v2.3-…`) and written to `train_info.json` together with
+`git_commit`, `specular_start_iter`, `highlight_mask_quantile`, `sh_decay_steps`.
+A result folder whose `train_info.json` lacks `code_version` was produced by
+pre-fix code.
+
 ## 6. Recommended sequence
 
 1. Apply §3 fixes (≈30 lines: LR-based SH decay, dedicated ASG optimizer, gated

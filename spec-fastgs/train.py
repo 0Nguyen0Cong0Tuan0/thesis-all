@@ -28,6 +28,10 @@ try:
 except:
     TENSORBOARD_FOUND = False
 
+# Bump whenever training behavior changes; printed at startup and written to
+# train_info.json so every result folder identifies the code that produced it.
+CODE_VERSION = "v2.3-2026-06-11 (LR-decay SH, ASG optimizer, subset normals, highlight-masked vote, spec-aware scorer, spec@7000)"
+
 
 # ============================================================
 # TRAINING LOOP
@@ -36,6 +40,11 @@ except:
 def training(dataset, opt, pipe):
 
     start_time = time.time()
+    print(f"[SPEC-FASTGS] code: {CODE_VERSION}")
+    print(f"[SPEC-FASTGS] git: {get_git_branch()}@{get_git_commit()} | "
+          f"specular_start_iter={opt.specular_start_iter} | "
+          f"highlight_mask_quantile={getattr(opt, 'highlight_mask_quantile', 'N/A')} | "
+          f"sh_decay_steps={getattr(opt, 'sh_decay_steps', 'N/A')}")
     tb_writer = prepare_output_and_logger(dataset)
 
     # ------------------------------------------------------------
@@ -325,9 +334,14 @@ def training(dataset, opt, pipe):
 
     metadata = {
         "scene": dataset.source_path.split("/")[-1],
+        "code_version": CODE_VERSION,
         "git_branch": get_git_branch(),
+        "git_commit": get_git_commit(),
         "image_scale": dataset.images,
         "iterations": opt.iterations,
+        "specular_start_iter": opt.specular_start_iter,
+        "highlight_mask_quantile": getattr(opt, "highlight_mask_quantile", None),
+        "sh_decay_steps": getattr(opt, "sh_decay_steps", None),
         "initial_gaussians": initial_gaussians,
         "final_gaussians": gaussians.get_xyz.shape[0],
         "training_time_seconds": round(duration, 2),
@@ -350,6 +364,13 @@ def get_git_branch():
     try:
         import subprocess
         return subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).decode("utf-8").strip()
+    except Exception:
+        return "unknown"
+
+def get_git_commit():
+    try:
+        import subprocess
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode("utf-8").strip()
     except Exception:
         return "unknown"
 

@@ -31,3 +31,4 @@ results/output/**/point_cloud/
 results/output/**/test/
 results/output/**/specular/
 results/output/**/input.ply
+spec_fastgs_output/**/*
