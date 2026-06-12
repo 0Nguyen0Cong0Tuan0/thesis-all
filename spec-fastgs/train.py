@@ -30,7 +30,7 @@ except:
 
 # Bump whenever training behavior changes; printed at startup and written to
 # train_info.json so every result folder identifies the code that produced it.
-CODE_VERSION = "v2.3-2026-06-11 (LR-decay SH, ASG optimizer, subset normals, highlight-masked vote, spec-aware scorer, spec@7000)"
+CODE_VERSION = "v2.4-2026-06-12 (v2.3 speed fixes + relaxed suppressors: highlight mask OFF, gentler SH decay 0.3/0.5)"
 
 
 # ============================================================

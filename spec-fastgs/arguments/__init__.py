@@ -116,12 +116,20 @@ class OptimizationParams(ParamGroup):
         # Exclude GT pixels above this luminance quantile from the multi-view
         # consistency vote (specular highlights violate its Lambertian assumption).
         # 1.0 disables the mask.
-        self.highlight_mask_quantile = 0.95
+        # v2.4 (2026-06-12): DISABLED. The v2.3 run showed quantile=0.95 cut the
+        # Gaussian count only ~10% (negligible speed/VRAM gain) while starving
+        # highlight geometry — specular energyRatio fell 0.674→0.428, blur σ 3.15→4.9.
+        # It is a net-negative trade, so the mask is off pending a better targeting.
+        self.highlight_mask_quantile = 1.0
 
-        # soft SH shielding around specular activation (cosine LR decay on f_rest)
+        # soft SH shielding around specular activation (cosine LR decay on f_rest).
+        # v2.4 (2026-06-12): gentler handoff. The aggressive 1.0→0.1 decay turned
+        # down SH high-freq faster than the (under-producing) specular MLP could
+        # replace it, dimming highlights (gain a*=1.21, lum bias −7.6). Keep more
+        # SH high-freq during the ramp: floor 0.3 during decay, 0.5 afterwards.
         self.sh_decay_steps = 2000
-        self.sh_scale_min = 0.1
-        self.sh_scale_after = 0.3
+        self.sh_scale_min = 0.3
+        self.sh_scale_after = 0.5
         
         super().__init__(parser, "Optimization Parameters")
 

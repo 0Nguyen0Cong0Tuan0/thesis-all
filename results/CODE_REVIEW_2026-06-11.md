@@ -158,6 +158,33 @@ Mitigation added to `train.py`: a `CODE_VERSION` constant printed at startup
 A result folder whose `train_info.json` lacks `code_version` was produced by
 pre-fix code.
 
+## 5c. 2026-06-12 v2.3 retrain (fixed code) + v2.4 response
+
+The fixed code finally ran (`spec_fastgs_output/counter/`, `code_version: v2.3`,
+`git main@286f0cf`). **Speed won, specular regressed.**
+
+| | v2.2 | v2.3 | Δ |
+|---|---|---|---|
+| training | 122m29s | 75m55s | **−38%** |
+| Gaussians | 619,823 | 560,549 | −9.6% |
+| VRAM (MiB) | 9675 | 8892 | −8% |
+| PSNR / SSIM / LPIPS | 30.72 / 0.9250 / 0.166 | 30.44 / 0.9231 / 0.169 | flat (noise) |
+| energyRatio | 0.674 | **0.428** | worse |
+| NCC | 0.657 | **0.541** | worse |
+| blur best_sigma | ~3.15 | **4.9** | worse |
+
+Diagnosis: the speed win came from the subset-normal / single-pass / dedicated-ASG
+fixes. The **highlight mask (q=0.95) + SH LR decay (1.0→0.1) jointly suppressed
+high-freq at highlights faster than the under-producing specular MLP could replace
+it** → dimmer, blurrier specular (gain a*=1.21, lum bias −7.6). The mask cut count
+only ~10% (negligible speed/VRAM gain) for a large specular cost — net-negative.
+
+**v2.4 response (applied 2026-06-12):** keep all speed fixes; relax both
+suppressors — `highlight_mask_quantile` 0.95→**1.0 (off)**, `sh_scale_min`
+0.1→**0.3**, `sh_scale_after` 0.3→**0.5**. Target: recover energyRatio ≥0.674 at
+~76 min. (Old v2.2 render PNGs are not on disk, so its diagnostics are the prior
+documented figures, not freshly recomputed.)
+
 ## 6. Recommended sequence
 
 1. Apply §3 fixes (≈30 lines: LR-based SH decay, dedicated ASG optimizer, gated
