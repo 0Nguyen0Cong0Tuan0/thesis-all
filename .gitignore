@@ -31,4 +31,13 @@ results/output/**/point_cloud/
 results/output/**/test/
 results/output/**/specular/
 results/output/**/input.ply
-spec_fastgs_output/**/*
+# Run-output folders carry version suffixes (spec_fastgs_output_v2.3-..., __v2.4-..._1),
+# so match the prefix, not just the bare name. Also the training "output/" dir.
+spec_fastgs_output*/
+spec-fastgs/output/
+output/
+
+# 3DGS checkpoints / point clouds are always regenerable and often >100MB
+# (GitHub's hard push limit) — never commit them.
+*.ply
+*.pt

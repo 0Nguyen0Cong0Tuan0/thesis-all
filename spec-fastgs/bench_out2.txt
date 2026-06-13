@@ -1,0 +1,17 @@
+config                       cond  energyR  gain a*     NCC    L1_hl
+--------------------------------------------------------------------
+baseline (relu pe2 d2)      clean    0.868    1.011   0.809   0.0367
+latent48 (relu pe2 d2)      clean    0.902    0.995   0.814   0.0374
+lowrank_gf (relu r8 d2)     clean    0.862    1.070   0.871   0.0342
+relu_pe6 (relu pe6 d2)      clean    0.869    0.987   0.792   0.0444
+WIRE (gabor pe2 d2)         clean    0.870    1.085   0.673   0.0777
+SIREN w0=10 (sin pe2 d2)    clean    0.706    1.196   0.646   0.0752
+--------------------------------------------------------------------
+baseline (relu pe2 d2)      noisy    0.850    0.961   0.746   0.0528
+latent48 (relu pe2 d2)      noisy    0.841    0.955   0.756   0.0506
+lowrank_gf (relu r8 d2)     noisy    0.781    0.956   0.739   0.0579
+relu_pe6 (relu pe6 d2)      noisy    0.816    0.959   0.718   0.0644
+WIRE (gabor pe2 d2)         noisy    0.838    1.085   0.645   0.0818
+SIREN w0=10 (sin pe2 d2)    noisy    0.746    1.148   0.664   0.0751
+--------------------------------------------------------------------
+DONE

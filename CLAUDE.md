@@ -83,10 +83,30 @@ Options for changing the specular MLP architecture, all drop-in swaps sharing th
 3. Sigmoid removed + SIREN — highest expected gain on specular.
 4. Sigmoid removed + Hyper-Connections (n=2) — strongest theoretical backing.
 
-**Status (from prior session):** Option 1 done; moved on to Option 2.
+**Status (from prior session):** Option 1 + Option 2 (residual skip) done.
+
+**UPDATE 2026-06-13 — SIREN refuted; architecture is not the bottleneck.** A controlled
+GPU-free ablation (`results/MLP_LATENT_ABLATION_2026-06-13.md`,
+`spec-fastgs/bench_spec_arch.py`, drop-in `utils/spec_arch.py`) found: the baseline ReLU
+MLP already fits sharp view-dependent lobes (energyRatio 0.87, a*≈1, NCC 0.81) given
+clean inputs; **SIREN HURTS** (energyRatio 0.37 @ω₀=30, collapses when deep; the additive
+near-zero specular residual is hostile to a sine prior), WIRE worsens placement,
+deeper+wider not worth 7× params. The real levers are **(A) specular-weighted/HDR loss**
+and **(B) normal priors** (noisy normals degrade every architecture equally); the one
+worthwhile architecture change is **low-rank/LoRA ASG latent** (best NCC + fewer params).
+So do NOT chase SIREN/Hyper-Connections next — keep ReLU.
+
+**v2.5 (2026-06-13) implemented, both opt-in / default-off:** (1) specular-weighted L1 on
+the brightest GT pixels — `--spec_loss_weight 0.5 --spec_loss_quantile 0.97` (train.py
+loss; root cause A); (2) alternative architecture via `--spec_arch '{...}'` or `SPEC_ARCH`
+env (wired in `SpecularModel`), e.g. `{"activation":"relu","latent_mode":"lowrank","rank":8}`.
+Defaults leave the v2.4 path unchanged. CODE_VERSION bumped to v2.5; new params logged to
+train_info.json.
 
 Sources: Residual Connections (arXiv:1710.04773), Hyper-Connections (arXiv:2409.19606),
-SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454).
+SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454),
+SIREN (arXiv:2006.09661), WIRE (arXiv:2301.05187), LoRA (arXiv:2106.09685),
+Focal Frequency Loss (arXiv:2012.12821), DN-Splatter (arXiv:2403.17822).
 
 ## Reference artifacts
 

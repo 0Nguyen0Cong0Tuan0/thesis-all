@@ -47,6 +47,7 @@ evaluation discussion.
 | GaussianPro: 3DGS with Progressive Propagation | [2402.14650](https://arxiv.org/abs/2402.14650) | ICML 2024 | [METHOD] | Patch-match progressive densification; related multi-view-consistency idea. |
 | 3D Gaussian Splatting as Markov Chain Monte Carlo | [2404.09591](https://arxiv.org/abs/2404.09591) | NeurIPS 2024 | [METHOD] | Reframes densification as MCMC sampling; theoretical context. |
 | LightGaussian: Unbounded 3DGS Compression | [2311.17245](https://arxiv.org/abs/2311.17245) | NeurIPS 2024 | [REF] | Importance pruning + distillation for compact models. |
+| CompGS: Smaller and Faster Gaussian Splatting with Vector Quantization | [2311.18159](https://arxiv.org/abs/2311.18159) | ECCV 2024 | [METHOD] | VQ codebook for per-Gaussian attributes — basis for the VQ-ASG latent contribution (solution research 2026-06-13). |
 
 ## 02_specular_reflection — view-dependent / glossy / reflective appearance
 
@@ -65,6 +66,11 @@ evaluation discussion.
 | Ref-NeRF: Structured View-Dependent Appearance | [2112.03907](https://arxiv.org/abs/2112.03907) | CVPR 2022 (Best Paper) | [METHOD] | Reflected-radiance reparameterization + IDE; intellectual ancestor of specular modeling. |
 | NeRF-Casting: Improved View-Dependent Appearance with Consistent Reflections | [2405.14871](https://arxiv.org/abs/2405.14871) | SIGGRAPH Asia 2024 | [REF] | Reflection-ray casting for consistent specular. |
 | SpecNeRF: Gaussian Directional Encoding for Specular Reflections | [2312.13102](https://arxiv.org/abs/2312.13102) | CVPR 2024 | [METHOD] | Learnable Gaussian directional encoding for near-field specular; cited for encoding design. |
+| PhySG: Inverse Rendering with Spherical Gaussians | [2104.00674](https://arxiv.org/abs/2104.00674) | CVPR 2021 | [METHOD] | Spherical-Gaussian mixture BRDF + lighting — explicit high-specularity lobe basis (solution research 2026-06-13). |
+| GlossGau: Inverse Rendering for Glossy Surface with Anisotropic Spherical Gaussian | [2502.14129](https://arxiv.org/abs/2502.14129) | 2025 | [REF] | Anisotropic SG for glossy surfaces; closest to our ASG lobe family. |
+| NeRF in the Dark (RawNeRF): HDR View Synthesis from Noisy Raw Images | [2111.13679](https://arxiv.org/abs/2111.13679) | CVPR 2022 | [METHOD] | HDR/log tone-mapped loss — fix for the specular dimming (a*>1) deficit. |
+| HDR-NeRF: High Dynamic Range Neural Radiance Fields | [2111.14451](https://arxiv.org/abs/2111.14451) | CVPR 2022 | [REF] | Differentiable tone mapper; context for highlight HDR handling. |
+| GS-2DGS: Geometrically Supervised 2DGS for Reflective Object Reconstruction | [2506.13110](https://arxiv.org/abs/2506.13110) | 2025 | [REF] | Foundation-model normal supervision for reflective objects. |
 
 ## 03_quality_structure — anti-aliasing, surface, structured Gaussians
 
@@ -75,6 +81,8 @@ evaluation discussion.
 | 2D Gaussian Splatting for Geometrically Accurate Radiance Fields | [2403.17888](https://arxiv.org/abs/2403.17888) | SIGGRAPH 2024 | [REF] | Surfel Gaussians; used by several reflective-GS methods above. |
 | Gaussian Opacity Fields | [2404.10772](https://arxiv.org/abs/2404.10772) | SIGGRAPH Asia 2024 | [REF] | Surface extraction + improved densification metric. |
 | SA-GS: Scale-Adaptive Gaussian Splatting for Training-Free Anti-Aliasing | [2403.19615](https://arxiv.org/abs/2403.19615) | 2024 | [REF] | Test-time anti-aliasing alternative to Mip-Splatting. |
+| FreGS: 3D Gaussian Splatting with Progressive Frequency Regularization | [2403.06908](https://arxiv.org/abs/2403.06908) | CVPR 2024 | [METHOD] | Fourier amplitude+phase loss, low→high annealing — de-blur fix for the specular σ deficit (solution research 2026-06-13). |
+| DN-Splatter: Depth and Normal Priors for Gaussian Splatting and Meshing | [2403.17822](https://arxiv.org/abs/2403.17822) | WACV 2025 | [METHOD] | Monocular normal-prior supervision — fix for the noisy min-axis pseudo-normal (NCC deficit). |
 
 ## 04_method_blocks — architectural / optimization techniques used in the MLP & pipeline
 
@@ -85,6 +93,14 @@ evaluation discussion.
 | Residual Connections Encourage Iterative Inference | [1710.04773](https://arxiv.org/abs/1710.04773) | ICLR 2018 | [METHOD] | Theory behind the residual skip in `ASGRender` (Option 2). |
 | Deep Residual Learning (ResNet) | [1512.03385](https://arxiv.org/abs/1512.03385) | CVPR 2016 | [METHOD] | Original residual connections; foundation for Option 2/5. |
 | LoRA: Low-Rank Adaptation of Large Language Models | [2106.09685](https://arxiv.org/abs/2106.09685) | ICLR 2022 | [METHOD] | Low-rank factorization — basis for low-rank ASG (Sol-6 contribution). |
+| Focal Frequency Loss for Image Reconstruction and Synthesis | [2012.12821](https://arxiv.org/abs/2012.12821) | ICCV 2021 | [METHOD] | Adaptive frequency-domain loss up-weighting hard frequencies — top de-blur loss candidate (solution research 2026-06-13). |
+| Fourier Features Let Networks Learn High Frequency Functions | [2006.10739](https://arxiv.org/abs/2006.10739) | NeurIPS 2020 | [METHOD] | NTK-grounded positional encoding; defeats spectral bias on view dir. |
+| WIRE: Wavelet Implicit Neural Representations | [2301.05187](https://arxiv.org/abs/2301.05187) | CVPR 2023 | [METHOD] | Gabor-wavelet activation; high-freq INR alternative to SIREN in ASGRender. |
+| Deep Laplacian Pyramid Networks (LapSRN) | [1704.03915](https://arxiv.org/abs/1704.03915) | CVPR 2017 | [METHOD] | Multi-scale Laplacian detail loss — high-freq supervision. |
+| Online Hard Example Mining (OHEM) | [1604.03540](https://arxiv.org/abs/1604.03540) | CVPR 2016 | [METHOD] | Hard-example mining — re-balance the 95/5 diffuse/highlight pixel imbalance. |
+| Focal Loss for Dense Object Detection (RetinaNet) | [1708.02002](https://arxiv.org/abs/1708.02002) | ICCV 2017 | [METHOD] | (1-p)^γ down-weighting of easy samples — pixel-imbalance loss reweighting. |
+| FiLM: Visual Reasoning with a General Conditioning Layer | [1709.07871](https://arxiv.org/abs/1709.07871) | AAAI 2018 | [METHOD] | Feature-wise modulation/hypernetwork — efficient per-Gaussian latent conditioning. |
+| KAN: Kolmogorov–Arnold Networks | [2404.19756](https://arxiv.org/abs/2404.19756) | ICLR 2025 | [METHOD] | Learnable edge functions; novel high-freq architecture angle. |
 
 ## 05_surveys — background & positioning
 
@@ -96,3 +112,8 @@ evaluation discussion.
 ---
 
 *Generated for the Spec-FastGS thesis reference collection. PDFs downloaded from arXiv.*
+
+*Update 2026-06-13: added 16 papers (FFL, Fourier-features, WIRE, OHEM, Focal Loss, FiLM,
+KAN, LapSRN, FreGS, DN-Splatter, CompGS, RawNeRF, HDR-NeRF, PhySG, GlossGau, GS-2DGS)
+from the cross-field solution research for the specular-energy deficit. Full catalogue
+with per-solution rationale and ranked recommendations: `results/SOLUTIONS_RESEARCH_2026-06-13.md`.*

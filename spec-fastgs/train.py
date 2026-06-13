@@ -30,7 +30,7 @@ except:
 
 # Bump whenever training behavior changes; printed at startup and written to
 # train_info.json so every result folder identifies the code that produced it.
-CODE_VERSION = "v2.4-2026-06-12 (v2.3 speed fixes + relaxed suppressors: highlight mask OFF, gentler SH decay 0.3/0.5)"
+CODE_VERSION = "v2.5-2026-06-13 (v2.4 + opt-in specular-weighted loss [root cause A] + opt-in spec_arch low-rank latent [utils/spec_arch])"
 
 
 # ============================================================
@@ -44,7 +44,9 @@ def training(dataset, opt, pipe):
     print(f"[SPEC-FASTGS] git: {get_git_branch()}@{get_git_commit()} | "
           f"specular_start_iter={opt.specular_start_iter} | "
           f"highlight_mask_quantile={getattr(opt, 'highlight_mask_quantile', 'N/A')} | "
-          f"sh_decay_steps={getattr(opt, 'sh_decay_steps', 'N/A')}")
+          f"sh_decay_steps={getattr(opt, 'sh_decay_steps', 'N/A')} | "
+          f"spec_loss_weight={getattr(opt, 'spec_loss_weight', 'N/A')} | "
+          f"spec_arch={getattr(opt, 'spec_arch', '') or os.environ.get('SPEC_ARCH','')}")
     tb_writer = prepare_output_and_logger(dataset)
 
     # ------------------------------------------------------------
@@ -56,7 +58,13 @@ def training(dataset, opt, pipe):
     initial_gaussians = gaussians.get_xyz.shape[0]
     gaussians.training_setup(opt)
 
-    specular_mlp = SpecularModel(dataset.is_real, dataset.is_indoor)
+    # v2.5: opt-in alternative specular architecture (utils/spec_arch.py).
+    _arch_cfg = None
+    _arch_str = getattr(opt, "spec_arch", "") or ""
+    if _arch_str.strip():
+        import json as _json
+        _arch_cfg = _json.loads(_arch_str)
+    specular_mlp = SpecularModel(dataset.is_real, dataset.is_indoor, arch_cfg=_arch_cfg)
     specular_mlp.train_setting(opt)
 
     # ------------------------------------------------------------
@@ -209,6 +217,19 @@ def training(dataset, opt, pipe):
             + opt.lambda_dssim * (1.0 - ssim_val)
         )
 
+        # v2.5 (root cause A): specular-targeted supervision. Highlights are ~5% of
+        # pixels and get drowned by the global L1+DSSIM, so the specular MLP underfits
+        # (dim+blurry residual). Add a weighted L1 on the brightest GT pixels (a cheap
+        # highlight proxy) once the specular branch is active. weight=0 -> no-op.
+        if getattr(opt, "spec_loss_weight", 0.0) > 0.0 and iteration > opt.specular_start_iter:
+            with torch.no_grad():
+                lum = gt.mean(dim=0)  # [H,W] luminance proxy
+                thr = torch.quantile(lum.flatten(), opt.spec_loss_quantile)
+                hmask = (lum >= thr).float()  # [H,W]
+            denom = hmask.sum() + 1e-8
+            spec_l1 = ((image - gt).abs().mean(dim=0) * hmask).sum() / denom
+            loss = loss + opt.spec_loss_weight * spec_l1
+
         loss.backward()
 
         # --------------------------------------------------------
@@ -342,6 +363,9 @@ def training(dataset, opt, pipe):
         "specular_start_iter": opt.specular_start_iter,
         "highlight_mask_quantile": getattr(opt, "highlight_mask_quantile", None),
         "sh_decay_steps": getattr(opt, "sh_decay_steps", None),
+        "spec_loss_weight": getattr(opt, "spec_loss_weight", None),
+        "spec_loss_quantile": getattr(opt, "spec_loss_quantile", None),
+        "spec_arch": getattr(opt, "spec_arch", "") or os.environ.get("SPEC_ARCH", ""),
         "initial_gaussians": initial_gaussians,
         "final_gaussians": gaussians.get_xyz.shape[0],
         "training_time_seconds": round(duration, 2),

@@ -5,6 +5,7 @@
 import torch
 import torch.nn as nn
 import os
+import json
 
 from utils.spec_utils import SpecularNetwork, SpecularNetworkReal
 from utils.system_utils import searchForMaxIteration
@@ -21,13 +22,28 @@ class SpecularModel:
     - learning rate schedule
     """
 
-    def __init__(self, is_real=False, is_indoor=False):
+    def __init__(self, is_real=False, is_indoor=False, arch_cfg=None):
         """
         Args:
             is_real (bool): use real-scene variant
             is_indoor (bool): affects network config
+            arch_cfg (dict|None): opt-in alternative architecture (see
+                utils/spec_arch.SpecularNetworkV2). If None, falls back to the
+                SPEC_ARCH env var (JSON). If still None, the ORIGINAL network is
+                used — i.e. the default training path is unchanged. See the ablation
+                in results/MLP_LATENT_ABLATION_2026-06-13.md for which configs help.
         """
-        if is_real:
+        if arch_cfg is None:
+            env = os.environ.get("SPEC_ARCH")
+            if env:
+                arch_cfg = json.loads(env)
+
+        if arch_cfg:
+            from utils.spec_arch import SpecularNetworkV2, count_params
+            self.specular = SpecularNetworkV2(**arch_cfg).cuda()
+            print(f"[Specular] V2 arch enabled: {arch_cfg} | "
+                  f"shared params = {count_params(self.specular)}")
+        elif is_real:
             self.specular = SpecularNetworkReal(is_indoor).cuda()
         else:
             self.specular = SpecularNetwork().cuda()

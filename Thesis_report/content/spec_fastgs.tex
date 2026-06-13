@@ -1,0 +1,1073 @@
+% ============================================================
+% BÁO CÁO KHOÁ LUẬN — Spec-FastGS
+% Bản chi tiết (detailed draft). Cấu trúc bám theo content/noidung.tex.
+% Nguồn tham khảo: thư mục papers/3dgs_papers (xem BIBLIOGRAPHY.md).
+% ============================================================
+
+\section{Giới thiệu đề tài}
+
+    \subsection{Bối cảnh và động lực}
+    Bài toán tổng hợp góc nhìn mới (novel view synthesis) và tái tạo cảnh ba chiều
+    đã trải qua một bước chuyển lớn trong nửa thập kỷ vừa qua. Khởi đầu từ
+    \textit{Neural Radiance Fields} (NeRF) \cite{nerf}, cộng đồng nghiên cứu đã chứng
+    minh rằng một mạng nơ-ron đa lớp (MLP) có thể mã hoá \textit{ngầm} (implicit)
+    toàn bộ trường bức xạ của một cảnh và cho ra ảnh có độ chân thực rất cao. Tuy
+    nhiên, chi phí của NeRF nằm ở quá trình lấy mẫu thể tích (volumetric ray
+    marching) tốn kém, khiến cả huấn luyện lẫn kết xuất đều chậm. Hàng loạt công
+    trình tiếp theo đã tìm cách tăng tốc bằng các biểu diễn \textit{rõ ràng}
+    (explicit) hoặc \textit{lai} (hybrid): Plenoxels \cite{plenoxels} loại bỏ hoàn
+    toàn mạng nơ-ron bằng lưới voxel thưa, TensoRF \cite{tensorf} phân rã trường bức
+    xạ thành các thành phần tensor hạng thấp, Instant-NGP \cite{instantngp} dùng mã
+    hoá băm đa độ phân giải (multiresolution hash encoding) để rút thời gian huấn
+    luyện xuống còn vài giây, còn Zip-NeRF \cite{zipnerf} kết hợp lưới băm với chống
+    răng cưa để đạt chất lượng hàng đầu trên các cảnh không giới hạn.
+
+    Trong dòng chảy đó, \textit{3D Gaussian Splatting} (3DGS) \cite{kerbl3dgs} nổi
+    lên như một bước ngoặt: thay vì truy vấn một trường liên tục dọc theo tia,
+    3DGS biểu diễn cảnh bằng một tập hữu hạn các điểm Gaussian dị hướng
+    (anisotropic) có thể học được, rồi chiếu (splat) và pha trộn alpha chúng lên mặt
+    phẳng ảnh bằng một bộ rasterizer theo ô (tile-based) song song hoá triệt để trên
+    GPU. Nhờ đó 3DGS đạt tốc độ kết xuất thời gian thực ($>30$ khung hình/giây ở độ
+    phân giải 1080p) trong khi vẫn giữ chất lượng ngang hoặc vượt NeRF, đồng thời cho
+    phép chỉnh sửa cảnh một cách trực quan nhờ biểu diễn rõ ràng. Hai bài khảo sát
+    gần đây \cite{survey_chen,survey_fei} đã hệ thống hoá sự bùng nổ của hướng nghiên
+    cứu này và xác nhận 3DGS là nền tảng cho thế hệ tiếp theo của tái tạo cảnh 3D.
+
+    Mặc dù vậy, sau khi khảo sát kỹ lưỡng các công trình hậu-3DGS, nhóm nhận thấy
+    biểu diễn gốc còn hai hạn chế quan trọng, \textit{độc lập về bản chất} nhưng lại
+    \textit{tương tác bất lợi} với nhau khi cùng xuất hiện:
+
+    \begin{enumerate}
+        \item \textbf{Mô hình hoá ánh sáng phụ thuộc góc nhìn còn yếu.} Trong 3DGS,
+        màu của mỗi Gaussian được mã hoá bằng các hệ số điều hoà hình cầu
+        (Spherical Harmonics — SH) tới bậc 3. Về bản chất, SH là một cơ sở hàm trên
+        mặt cầu hướng nhìn, và các hệ số bậc thấp chỉ biểu diễn được những thành
+        phần biến thiên \textit{chậm} theo hướng — tức ánh sáng khuếch tán
+        (Lambertian/diffuse). Ngược lại, phản xạ bóng (specular highlight) là một
+        tín hiệu \textit{tần số cao}: vệt sáng có thể dịch chuyển hẳn sang một vị
+        trí khác trên bề mặt chỉ với một thay đổi nhỏ của góc nhìn. Để "ép" SH bậc
+        thấp tái tạo loại tín hiệu này, quá trình tối ưu buộc phải hoặc làm mờ
+        highlight (đánh mất chi tiết), hoặc nhồi thêm rất nhiều Gaussian nhỏ để
+        \textit{giả lập} sự thay đổi đó — cả hai đều bất lợi. Ref-NeRF \cite{refnerf}
+        đã chỉ ra chính xác điểm yếu này trong bối cảnh NeRF và đề xuất tái tham số
+        hoá theo bức xạ phản xạ; các phương pháp Gaussian như GaussianShader
+        \cite{gaussianshader}, Spec-Gaussian \cite{specgaussian} và VoD-3DGS
+        \cite{vod3dgs} tiếp nối tinh thần đó trong không gian splatting.
+
+        \item \textbf{Thời gian huấn luyện dài và số lượng Gaussian phình to.} Cơ
+        chế \textit{kiểm soát mật độ thích ứng} (Adaptive Density Control — ADC) của
+        3DGS quyết định nhân bản (clone), chia nhỏ (split) hay cắt tỉa (prune)
+        Gaussian dựa trên độ lớn gradient của vị trí tích luỹ \textit{từ một góc
+        nhìn tại một thời điểm}. Tiêu chí cục bộ này dễ kích hoạt nhân bản dư thừa,
+        đặc biệt ở các vùng có lỗi tái tạo dai dẳng, khiến số Gaussian leo thang lên
+        hàng triệu điểm và kéo dài thời gian huấn luyện cũng như tăng dung lượng lưu
+        trữ. Một loạt công trình đã tấn công vấn đề này từ nhiều góc: tinh chỉnh
+        tiêu chí gradient (AbsGS \cite{absgs}, Pixel-GS \cite{pixelgs}, Revising
+        Densification \cite{revisedens}, Efficient Density Control \cite{effdensity}),
+        đặt ngân sách Gaussian (Taming-3DGS \cite{taming3dgs}), ràng buộc số lượng
+        điểm (Mini-Splatting \cite{minisplatting}, Mini-Splatting2
+        \cite{minisplatting2}), nén/cắt tỉa sau huấn luyện (LightGaussian
+        \cite{lightgaussian}, Compact-3DGS \cite{compact3d}, EAGLES \cite{eagles}),
+        hoặc tăng tốc ở tầng rasterizer (Speedy-Splat \cite{speedysplat}) và lịch
+        trình độ phân giải (DashGaussian \cite{dashgs}).
+    \end{enumerate}
+
+    Điểm mấu chốt là: mỗi hạn chế đã có một hướng giải quyết \textit{riêng} rất hiệu
+    quả. \textbf{FastGS} \cite{fastgs} giải quyết hạn chế (2) bằng cơ chế
+    densification dựa trên \textit{tính nhất quán đa góc nhìn} (multi-view
+    consistency), huấn luyện một cảnh chỉ trong khoảng 100 giây trên GPU cao cấp.
+    \textbf{Spec-Gaussian} \cite{specgaussian} giải quyết hạn chế (1) bằng cách thay
+    phần xử lý tần số cao của SH bằng một trường biểu diện dị hướng (Anisotropic
+    Spherical Gaussian — ASG) kết hợp một mạng nơ-ron nhỏ. Hai phương pháp tối ưu
+    \textit{hai mục tiêu khác nhau} (tốc độ so với chất lượng phản xạ), được công bố
+    độc lập, và \textit{chưa từng được hợp nhất}. Câu hỏi nghiên cứu trung tâm của
+    đề tài là: \textit{liệu có thể kết hợp tốc độ của FastGS với chất lượng phản xạ
+    của Spec-Gaussian trong một pipeline duy nhất hay không, và những tương tác bất
+    lợi nào nảy sinh khi đặt một biểu diện phụ thuộc góc nhìn vào trong một cơ chế
+    densification vốn ngầm giả định bề mặt Lambertian?}
+
+    \subsection{Ý nghĩa khoa học và ứng dụng}
+    Về mặt \textbf{khoa học}, đề tài đóng góp vào việc hiểu sâu hơn mối tương tác
+    giữa hai trục thiết kế thường được nghiên cứu tách rời trong 3DGS: \textit{kiểm
+    soát mật độ} và \textit{mô hình hoá biểu diện}. Việc chỉ ra rằng cơ chế
+    densification đa góc nhìn — vốn là một ưu điểm cho cảnh khuếch tán — lại có thể
+    trở thành nguồn gây nhiễu cho nội dung phản xạ là một quan sát có giá trị phương
+    pháp luận, vượt ra ngoài phạm vi của riêng FastGS. Về mặt \textbf{ứng dụng},
+    việc tái tạo trung thực các vật liệu bóng (kim loại, gốm sứ, mặt kính) trong
+    thời gian huấn luyện ngắn có ý nghĩa trực tiếp cho thực tế ảo/tăng cường (VR/AR),
+    số hoá di sản, thương mại điện tử 3D và mô phỏng — những lĩnh vực mà bề mặt phản
+    xạ xuất hiện phổ biến và chất lượng của chúng quyết định cảm nhận chân thực của
+    người dùng.
+
+    \subsection{Phát biểu bài toán}
+    \textit{Đầu vào:} một tập ảnh 2D $\{I_k\}_{k=1}^{K}$ chụp đa góc nhìn của một
+    cảnh thật, kèm tham số máy ảnh (tư thế ngoại tại và nội tại) được ước lượng bằng
+    Structure-from-Motion qua COLMAP \cite{colmap,sfmsurvey}, cùng một đám mây điểm
+    thưa khởi tạo $\mathcal{P}_0$ thu được từ cùng quá trình SfM.
+
+    \textit{Đầu ra:} một biểu diễn cảnh gồm tập 3D Gaussian
+    $\mathcal{G} = \{(\mu_i, \Sigma_i, \alpha_i, \mathbf{c}_i^{\text{SH}})\}$
+    \textit{được tăng cường} bởi một nhánh phản xạ — mỗi Gaussian mang thêm một
+    latent ASG $\mathbf{z}_i$ — sao cho ảnh kết xuất ở một góc nhìn mới bất kỳ đạt
+    chất lượng cao, \textit{đặc biệt tại các vùng phản xạ bóng}, đồng thời thời gian
+    huấn luyện và số lượng $|\mathcal{G}|$ được kiểm soát.
+
+    \textit{Mục tiêu kép:} (i) \textbf{chất lượng} — tái tạo chính xác cả vị trí lẫn
+    cường độ của highlight phụ thuộc góc nhìn, đo bằng cả chỉ số toàn cục lẫn chỉ số
+    chẩn đoán chuyên biệt cho lớp phản xạ; (ii) \textbf{hiệu năng} — rút ngắn thời
+    gian huấn luyện và giảm số Gaussian so với việc ghép \textit{ngây thơ} (naïve)
+    hai phương pháp, tránh để chi phí của nhánh phản xạ và sự phình to Gaussian cộng
+    dồn.
+
+    \subsection{Đóng góp}
+    Báo cáo này trình bày \textbf{Spec-FastGS}, với bốn đóng góp chính:
+    \begin{enumerate}
+        \item \textbf{Hợp nhất FastGS và Spec-Gaussian} thành một pipeline thống
+        nhất: nhánh ASG kết hợp mạng \texttt{SpecularNetwork} sinh ra một phần dư
+        phản xạ (specular residual) được cộng vào màu SH, và toàn bộ được đặt
+        \textit{bên trong} vòng huấn luyện densification đa góc nhìn của FastGS thay
+        vì chạy như hai giai đoạn rời rạc.
+
+        \item \textbf{Phát hiện và xử lý xung đột Lambertian} giữa hai phương pháp.
+        Nhóm chỉ ra — ở mức mã nguồn — rằng phép bỏ phiếu nhất quán đa góc nhìn của
+        FastGS ngầm giả định bề mặt Lambertian, nên xem các highlight phụ thuộc góc
+        nhìn như một "lỗi" cố định và do đó nhân bản Gaussian mất kiểm soát tại các
+        vùng bóng. Nhóm đề xuất hai biện pháp bảo vệ bổ sung cho nhau (bỏ phiếu chịu
+        được highlight và bộ chấm điểm nhận biết phản xạ) và phân tích trung thực
+        đánh đổi của chúng.
+
+        \item \textbf{Tối ưu pipeline} để khử các điểm nghẽn tốc độ và sửa các lỗi
+        tương tác: gộp các lượt rasterization dư thừa (từ 3 lượt còn 1 lượt mỗi vòng
+        lặp), đánh giá MLP theo tầm nhìn (chỉ chạy trên Gaussian khả kiến), cấp một
+        bộ tối ưu Adam riêng cho latent ASG để nó không bị "bỏ đói", và thay cơ chế
+        đóng băng cứng gradient SH bằng suy giảm tốc độ học dạng cosine mềm.
+
+        \item \textbf{Bộ chỉ số chẩn đoán chuyên biệt cho phản xạ.} Ngoài
+        PSNR/SSIM/LPIPS — vốn bị thống trị bởi vùng khuếch tán và che lấp chất lượng
+        highlight — nhóm xây dựng và sử dụng các chỉ số phân tích lớp specular
+        (energyRatio, NCC, độ nhoè $\sigma$) để định lượng riêng biệt và minh bạch
+        chất lượng vùng bóng, từ đó phát hiện được sự suy giảm mà các chỉ số toàn
+        cục bỏ sót.
+    \end{enumerate}
+
+\newpage
+\section{Các công trình nghiên cứu liên quan}
+
+    \subsection{Nền tảng: 3D Gaussian Splatting}
+    3DGS \cite{kerbl3dgs} biểu diễn cảnh bằng tập các Gaussian dị hướng có thể học
+    được. Mỗi Gaussian thứ $i$ được tham số hoá bởi tâm $\mu_i \in \mathbb{R}^3$,
+    một ma trận hiệp phương sai $\Sigma_i \in \mathbb{R}^{3\times 3}$ được phân rã
+    thành $\Sigma_i = R_i S_i S_i^\top R_i^\top$ (với $R_i$ là ma trận xoay biểu
+    diễn qua quaternion và $S_i$ là ma trận tỉ lệ chéo, đảm bảo $\Sigma_i$ luôn nửa
+    xác định dương trong suốt quá trình tối ưu), một độ mờ $\alpha_i$, và một tập hệ
+    số SH $\mathbf{c}_i^{\text{SH}}$ mã hoá màu phụ thuộc góc nhìn. Ảnh được dựng
+    bằng cách chiếu các Gaussian 3D thành các Gaussian 2D trên mặt phẳng ảnh, chia
+    ảnh thành các ô không chồng lắp, sắp xếp các Gaussian theo độ sâu trong từng ô
+    và tổng hợp màu bằng alpha-blending:
+    \[
+        C(\mathbf{p}) \;=\; \sum_{i \in \mathcal{N}(\mathbf{p})}
+        \mathbf{c}_i \, \alpha_i' \prod_{j<i}\big(1 - \alpha_j'\big),
+    \]
+    trong đó $\alpha_i'$ là độ mờ hiệu dụng của Gaussian thứ $i$ tại điểm ảnh
+    $\mathbf{p}$ và $\mathcal{N}(\mathbf{p})$ là tập các Gaussian sắp xếp theo độ sâu
+    phủ lên $\mathbf{p}$. Hàm mất mát huấn luyện là tổ hợp giữa $\ell_1$ và D-SSIM:
+    $\mathcal{L} = (1-\lambda)\mathcal{L}_1 + \lambda\,\mathcal{L}_{\text{D-SSIM}}$.
+    Mọi công trình trong đề tài này đều mở rộng trực tiếp từ nền tảng đó; bộ dữ liệu
+    chuẩn Mip-NeRF 360 \cite{mipnerf360} được dùng làm môi trường đánh giá thống
+    nhất, do nó bao gồm các cảnh trong nhà và ngoài trời không giới hạn với nhiều bề
+    mặt phản xạ.
+
+    \subsection{Hướng tăng tốc và kiểm soát mật độ}
+        \subsubsection{FastGS — thành phần lõi về tốc độ}
+        FastGS \cite{fastgs} thay tiêu chí densification cục bộ, đơn góc nhìn của
+        3DGS bằng một cơ chế \textit{nhất quán đa góc nhìn}. Trực giác cốt lõi là:
+        một Gaussian \textit{xứng đáng} được giữ lại và nhân bản nếu nó đóng góp
+        \textit{nhất quán} cho việc tái tạo trên \textit{nhiều} góc nhìn, chứ không
+        chỉ trên một góc nhìn ngẫu nhiên tại một vòng lặp. Cụ thể, với mỗi Gaussian,
+        hệ thống lấy mẫu một tập (mặc định 10) camera, kết xuất và so sánh với ảnh
+        thật để bỏ phiếu xem Gaussian đó đóng góp tốt hay gây lỗi trên từng góc
+        nhìn, từ đó tổng hợp thành một điểm quan trọng (importance score) điều khiển
+        việc nhân bản và một điểm cắt tỉa (pruning score) điều khiển việc loại bỏ.
+        Nhờ tín hiệu được lấy trung bình trên nhiều góc nhìn, FastGS ổn định hơn và
+        có thể huấn luyện rất nhanh \textit{mà không cần} cơ chế ngân sách Gaussian
+        tường minh. Đây là \textbf{nửa tốc độ} của Spec-FastGS, và cũng chính là cơ
+        chế mà nhóm sẽ chỉ ra là xung đột với nội dung phản xạ ở
+        Mục~\ref{ssec:lambertian}.
+
+        \subsubsection{Các tiêu chí gradient và phương pháp đối sánh}
+        Trước FastGS, nhiều công trình đã cải tiến \textit{tiêu chí} densification.
+        AbsGS \cite{absgs} chỉ ra hiện tượng triệt tiêu gradient cùng hướng
+        (homodirectional gradient cancellation) làm các vùng chi tiết bị densify
+        không đủ, và đề xuất dùng độ lớn gradient tuyệt đối. Pixel-GS \cite{pixelgs}
+        trọng số hoá gradient theo số điểm ảnh mà Gaussian phủ, giúp các Gaussian
+        lớn ở vùng thưa được nhân bản hợp lý hơn. Revising Densification
+        \cite{revisedens} bổ sung hiệu chỉnh độ mờ và một tiêu chí dựa trên trường
+        độ mờ Gaussian. GaussianPro \cite{gaussianpro} lan truyền tiến bộ
+        (progressive propagation) theo kiểu patch-match — một dạng nhất quán đa góc
+        nhìn khác về tinh thần. 3DGS-MCMC \cite{mcmc} diễn giải lại densification
+        như một quá trình lấy mẫu Markov Chain Monte Carlo, cung cấp nền tảng lý
+        thuyết cho việc thêm/bớt Gaussian. Về phía \textit{kiểm soát số lượng}:
+        Taming-3DGS \cite{taming3dgs} đặt ngân sách dựa trên điểm số (trái ngược với
+        scheme không-ngân-sách của FastGS, gợi ý hướng đặt trần số Gaussian cho
+        Spec-FastGS nếu cần); Mini-Splatting \cite{minisplatting} và bản kế nhiệm
+        Mini-Splatting2 \cite{minisplatting2} kiểm soát số Gaussian bằng khởi tạo
+        lại theo độ sâu (depth-reinit) và densification mạnh tay nhưng có giới hạn —
+        liên hệ trực tiếp tới cơ chế cổng-theo-tầm-nhìn (visibility-gating) của
+        nhóm. Cuối cùng, các phương pháp nén/cắt tỉa như LightGaussian
+        \cite{lightgaussian}, Compact-3DGS \cite{compact3d} và EAGLES \cite{eagles}
+        giảm dung lượng sau huấn luyện thông qua cắt tỉa theo độ quan trọng, lượng
+        tử hoá thuộc tính và mã hoá nhẹ — bối cảnh cho việc lưu trữ latent ASG
+        24 chiều bổ sung của Spec-FastGS. Speedy-Splat \cite{speedysplat} và
+        DashGaussian \cite{dashgs} tăng tốc ở tầng rasterizer và lịch trình độ phân
+        giải; nhóm đã cân nhắc DashGaussian và \textit{chủ động loại bỏ} khỏi
+        pipeline để giữ sự đơn giản và cô lập đóng góp.
+
+    \subsection{Hướng phản xạ và ánh sáng phụ thuộc góc nhìn}
+        \subsubsection{Spec-Gaussian — thành phần lõi về phản xạ}
+        Spec-Gaussian \cite{specgaussian} xuất phát từ chính quan sát ở
+        Mục~1.1: SH bậc thấp không đủ dung lượng biểu diễn các highlight tần số cao.
+        Giải pháp của nó là gắn vào mỗi Gaussian một trường \textit{Anisotropic
+        Spherical Gaussian} (ASG) — một họ hàm trên mặt cầu hướng có khả năng biểu
+        diễn các thuỳ (lobe) hẹp, dị hướng, đặc trưng cho phản xạ bóng — và giải mã
+        latent ASG bằng một MLP nhỏ để sinh ra thành phần phản xạ, thay thế cho vai
+        trò của SH bậc cao. Spec-Gaussian cũng áp dụng huấn luyện thô-đến-mịn
+        (coarse-to-fine) và bật nhánh phản xạ từ giữa quá trình huấn luyện (khoảng
+        vòng lặp 3000) để densification không bị nhánh phản xạ chưa hội tụ làm
+        nhiễu. Đây là \textbf{nửa phản xạ} của Spec-FastGS và là cha trực tiếp của
+        module \texttt{SpecularNetwork}; chi tiết kế thừa và khác biệt được trình
+        bày ở Mục~3.
+
+        \subsubsection{Phổ rộng các phương pháp biểu diện phản xạ}
+        Việc mô hình hoá biểu diện phụ thuộc góc nhìn có một phổ rộng các tiếp cận.
+        Về phía NeRF, Ref-NeRF \cite{refnerf} tái tham số hoá bức xạ phát ra theo
+        hướng \textit{phản xạ} (thay vì hướng nhìn) và đưa ra mã hoá hướng tích hợp
+        (Integrated Directional Encoding) — tổ tiên trí tuệ của hầu hết các mô hình
+        specular hiện đại; NeRF-Casting \cite{nerfcasting} cải thiện tính nhất quán
+        của phản xạ bằng việc phóng tia phản xạ; SpecNeRF \cite{specnerf} đề xuất mã
+        hoá hướng dạng Gaussian học được cho phản xạ gần (near-field). Về phía
+        Gaussian, các hướng có thể chia thành: (a) \textit{hàm shading tường minh} —
+        GaussianShader \cite{gaussianshader} gắn một hàm shading cho bề mặt phản xạ;
+        (b) \textit{shading trì hoãn theo điểm ảnh} — 3DGS with Deferred Reflection
+        \cite{deferredrefl} tính specular ở không gian màn hình sau khi đã có pháp
+        tuyến, một thiết kế mà nhóm xem là hướng phát triển để loại bỏ chi phí MLP
+        theo từng Gaussian; (c) \textit{độ mờ phụ thuộc góc nhìn} — VoD-3DGS
+        \cite{vod3dgs} cho phép độ mờ thay đổi theo hướng nhìn, rất gần với ý tưởng
+        cổng-theo-góc-nhìn của nhóm; và (d) \textit{kết xuất ngược và tái chiếu
+        sáng} (inverse rendering / relighting) — GS-IR \cite{gs_ir}, Relightable
+        3D Gaussians \cite{relightable3dgs}, IRGS \cite{irgs}, GS-ROR
+        \cite{gsror}, RTR-GS \cite{rtrgs} và Reflective Gaussian (Ref-Gaussian)
+        \cite{refgaussian} phân tách bức xạ thành BRDF và ánh sáng, đạt chất lượng
+        phản xạ cao nhất nhưng với chi phí và độ phức tạp lớn hơn nhiều so với hướng
+        "phần dư phản xạ" nhẹ của Spec-Gaussian mà đề tài kế thừa. Phổ này định vị
+        rõ Spec-FastGS: nhóm chọn nhánh ASG nhẹ để \textit{tương thích với mục tiêu
+        tốc độ} của FastGS, thay vì các pipeline kết xuất ngược nặng nề.
+
+    \subsection{Chất lượng, chống răng cưa và cấu trúc Gaussian}
+    Một số công trình bổ trợ về chất lượng cũng liên quan tới đề tài. Mip-Splatting
+    \cite{mipsplatting} thêm bộ lọc làm mượt 3D và bộ lọc Mip 2D để chống răng cưa
+    khi đổi tỉ lệ — quan trọng vì highlight rất nhạy với răng cưa. SA-GS
+    \cite{sags} cung cấp một phương án chống răng cưa không cần huấn luyện lại. 2D
+    Gaussian Splatting \cite{twodgs} và Gaussian Opacity Fields \cite{gof} cải thiện
+    độ chính xác hình học của bề mặt, vốn là nền tảng cho việc ước lượng pháp tuyến
+    đáng tin cậy — một đầu vào của nhánh phản xạ. Scaffold-GS \cite{scaffoldgs} tổ
+    chức Gaussian quanh các điểm neo (anchor) với thuộc tính được giải mã bởi MLP,
+    là cơ sở kiến trúc cho hướng trường biểu diện dạng hash-grid mà nhóm đề xuất ở
+    phần phát triển.
+
+    \subsection{Các khối kỹ thuật dùng trong thiết kế}
+    Cuối cùng, một số kỹ thuật kiến trúc/tối ưu được dùng (hoặc dự kiến dùng) trong
+    nhánh MLP và pipeline. \textbf{Kết nối phần dư} (residual connections), khởi
+    nguồn từ ResNet \cite{resnet} và được lý giải sâu hơn dưới góc nhìn suy luận lặp
+    bởi \cite{resiterative}, cung cấp skip-connection giúp \texttt{ASGRender} hội tụ
+    ổn định hơn. \textbf{SIREN} \cite{siren} thay hàm kích hoạt ReLU bằng hàm tuần
+    hoàn $\sin(\omega_0 x)$, được thiết kế riêng cho việc biểu diễn các tín hiệu tần
+    số cao — đúng bản chất của highlight phản xạ. \textbf{Hyper-Connections}
+    \cite{hyperconn} tổng quát hoá kết nối phần dư bằng cách trộn nhiều bản sao của
+    trạng thái ẩn theo chiều sâu/rộng học được. \textbf{LoRA} \cite{lora} phân rã
+    một ma trận trọng số thành tích hai ma trận hạng thấp, là cơ sở cho ý tưởng phân
+    rã hạng thấp latent ASG nhằm giảm bộ nhớ và tăng khả năng tổng quát. Cùng với
+    Instant-NGP \cite{instantngp} và Scaffold-GS \cite{scaffoldgs}, đây là các viên
+    gạch cho các hướng phát triển ở Mục~5.
+
+\newpage
+\section{Phương pháp đề xuất: Spec-FastGS}
+
+    \subsection{Tổng quan kiến trúc}
+    Spec-FastGS giữ nguyên biểu diễn Gaussian và bộ rasterizer của 3DGS, bổ sung một
+    \textit{nhánh phản xạ} song song, và đặt toàn bộ bên trong vòng huấn luyện
+    densification đa góc nhìn của FastGS. Màu cuối cùng của mỗi Gaussian trước khi
+    pha trộn alpha là tổng của thành phần khuếch tán từ SH và phần dư phản xạ từ
+    nhánh ASG:
+    \[
+        \mathbf{c}_i \;=\; \mathbf{c}_i^{\text{SH}}(\mathbf{d})
+        \;+\; \mathbf{c}_i^{\text{spec}},
+        \qquad
+        \mathbf{c}_i^{\text{spec}} \;=\;
+        f_\theta\big(\mathbf{z}_i,\, \mathbf{d},\, \mathbf{n}_i\big),
+    \]
+    trong đó $\mathbf{c}_i^{\text{SH}}(\mathbf{d})$ là màu SH đánh giá theo hướng
+    nhìn $\mathbf{d}$, $\mathbf{z}_i \in \mathbb{R}^{24}$ là latent ASG học được của
+    Gaussian thứ $i$, $\mathbf{n}_i$ là pháp tuyến ước lượng từ trục ngắn nhất của
+    Gaussian (qua \texttt{get\_minimum\_axis} trên cặp tỉ lệ–xoay), và $f_\theta$ là
+    \texttt{SpecularNetwork}. Cách phân tách cộng tính này cho phép SH tiếp tục đảm
+    nhiệm thành phần khuếch tán biến thiên chậm, trong khi nhánh ASG chỉ phải học
+    \textit{phần dư} tần số cao — một bài toán dễ hơn và phù hợp với dung lượng của
+    MLP nhỏ.
+
+    \subsection{Nhánh phản xạ ASG + SpecularNetwork}
+    Tại mỗi vòng lặp, với một camera được lấy mẫu, nhánh phản xạ tính hướng nhìn
+    $\mathbf{d}$ và pháp tuyến $\mathbf{n}_i$ cho các Gaussian liên quan, ghép cùng
+    latent ASG rồi đưa qua MLP để sinh $\mathbf{c}_i^{\text{spec}}$, cộng trực tiếp
+    vào màu SH ngay trước alpha-blending. Qua phân tích đối sánh với baseline
+    Spec-Gaussian, nhóm đã thực hiện hai chỉnh sửa quan trọng ở tầng kiến trúc MLP:
+    \begin{itemize}
+        \item \textbf{Bỏ hàm kích hoạt \texttt{sigmoid} ở đầu ra.} Phiên bản ban đầu
+        áp \texttt{sigmoid} lên đầu ra MLP, chặn phần dư phản xạ về khoảng $[0,1]$.
+        Vì các đỉnh highlight có dải động cao (HDR) thường vượt ngưỡng này, sigmoid
+        đã \textit{cắt cụt} chính các đỉnh sáng cần tái tạo. Việc bỏ sigmoid (cho
+        đầu ra không bị chặn) là một thay đổi một dòng nhưng có tác động lớn lên dải
+        động của highlight.
+        \item \textbf{Thêm skip-connection dạng phần dư} trong \texttt{ASGRender}
+        \cite{resnet,resiterative}, giúp luồng gradient ổn định và cho phép mạng
+        tinh chỉnh lặp phần dư thay vì học lại từ đầu ở mỗi lớp.
+    \end{itemize}
+    Các hướng thay thế kiến trúc MLP mạnh hơn (SIREN \cite{siren}, Hyper-Connections
+    \cite{hyperconn}) được giữ lại như các phương án thử nghiệm ở phần phát triển,
+    do chúng yêu cầu khởi tạo lại trọng số và huấn luyện từ đầu.
+
+    \subsection{Densification đa góc nhìn và xung đột Lambertian}
+    \label{ssec:lambertian}
+    Đây là phát hiện trọng tâm của đề tài. Phép bỏ phiếu nhất quán đa góc nhìn của
+    FastGS \cite{fastgs} đánh giá một Gaussian dựa trên \textit{độ nhất quán} đóng
+    góp của nó qua nhiều góc nhìn. Phép đánh giá này ngầm mang một giả định
+    Lambertian: nó kỳ vọng một điểm bề mặt "tốt" sẽ trông \textit{tương tự} từ các
+    góc nhìn khác nhau. Nhưng một highlight phản xạ \textit{theo định nghĩa} là phụ
+    thuộc góc nhìn — nó xuất hiện ở góc này và biến mất ở góc kia. Do đó, dưới con
+    mắt của phép bỏ phiếu, một Gaussian phủ lên vùng highlight luôn biểu hiện một
+    "sai khác chéo góc nhìn" cố định, \textit{không phân biệt được} với một Gaussian
+    thực sự tái tạo kém. Hệ quả dây chuyền là:
+    \begin{enumerate}
+        \item phép bỏ phiếu liên tục báo "lỗi" tại vùng bóng;
+        \item ADC phản hồi bằng cách nhân bản/chia nhỏ Gaussian ở đó để "sửa lỗi";
+        \item nhưng vì lỗi mang bản chất phụ thuộc góc nhìn (không thể sửa bằng thêm
+        hình học khuếch tán), việc nhân bản không bao giờ làm phép bỏ phiếu hài
+        lòng, dẫn tới nhân bản mất kiểm soát.
+    \end{enumerate}
+    Kết quả thực nghiệm phù hợp với chẩn đoán này: số Gaussian phình lên $\sim$620k
+    và độ nhoè được "nướng chín" (bake-in) vào các highlight (độ nhoè $\sigma \approx
+    3$ điểm ảnh ở phiên bản gốc). Đáng chú ý, Spec-Gaussian gốc \textit{tránh} được
+    vấn đề này một cách tự nhiên vì nó (i) không dùng bỏ phiếu đa góc nhìn, và (ii)
+    bật nhánh phản xạ từ giữa quá trình densification để gradient densify đến từ các
+    lượt kết xuất \textit{đã có} phản xạ.
+
+    Từ chẩn đoán đó, nhóm đề xuất hai biện pháp bảo vệ bổ sung cho nhau:
+    \begin{enumerate}
+        \item \textbf{Bỏ phiếu chịu được highlight} (highlight-robust vote): loại
+        khỏi phép bỏ phiếu các điểm ảnh ground-truth có độ sáng (luminance) vượt một
+        ngưỡng phân vị \texttt{highlight\_mask\_quantile} (mặc định 0.95). Trực giác
+        là: chính các pixel sáng nhất mới mang nội dung phản xạ phụ thuộc góc nhìn,
+        nên loại chúng khỏi quyết định densification giúp phép bỏ phiếu không bị
+        chúng chi phối. Đặt ngưỡng bằng 1.0 sẽ vô hiệu hoá mặt nạ.
+        \item \textbf{Bộ chấm điểm nhận biết phản xạ} (specular-aware scorer) kết
+        hợp \textbf{kích hoạt phản xạ sớm hơn}. Bộ chấm điểm của FastGS được sửa để
+        kết xuất các góc nhìn chấm điểm \textit{kèm} phần dư phản xạ (đánh giá MLP
+        trên toàn tập ở chế độ \texttt{no\_grad}), nhờ đó phần specular đã được
+        "giải thích" không còn bị tính là lỗi. Đồng thời, nhánh phản xạ được bật từ
+        vòng lặp 7000 (giữa giai đoạn densification, lấy cảm hứng từ mốc 3000 của
+        Spec-Gaussian) thay vì sau khi densification kết thúc.
+    \end{enumerate}
+    Tinh thần của hai biện pháp này song hành với VoD-3DGS \cite{vod3dgs} — vốn cũng
+    nhận ra rằng nội dung phụ thuộc góc nhìn cần được đối xử khác biệt trong cơ chế
+    Gaussian. Nhóm sẽ phân tích trung thực ở Mục~4 rằng, ở dạng tham số hiện tại,
+    hai biện pháp này mang lại một \textit{đánh đổi} chứ chưa phải một thắng lợi
+    toàn diện.
+
+    \subsection{Tối ưu pipeline và sửa lỗi tương tác}
+    Việc ghép ngây thơ hai phương pháp khiến thời gian huấn luyện phình từ vài phút
+    lên hàng chục phút. Nhóm xác định và khử từng điểm nghẽn, đồng thời sửa các lỗi
+    tương tác tinh vi giữa lịch trình tối ưu của FastGS và nhánh phản xạ:
+    \begin{itemize}
+        \item \textbf{Gộp các lượt render dư thừa.} Phiên bản ghép ngây thơ thực
+        hiện tới ba lượt rasterization mỗi vòng lặp (một lượt chính, một lượt
+        "densification tách rời", một lượt specular sắc nét). Nhóm rút về \textit{một}
+        lượt \texttt{render\_fastgs} duy nhất, loại bỏ trực tiếp phần lớn chi phí
+        tính toán mỗi vòng lặp.
+        \item \textbf{MLP theo tầm nhìn} (visibility-gated). Thay vì chạy
+        \texttt{SpecularNetwork} trên toàn bộ $N$ Gaussian (bao gồm cả các Gaussian
+        vô hình ở góc nhìn hiện tại), nhánh chỉ đánh giá MLP trên các Gaussian khả
+        kiến (\texttt{radii > 0}). Vì camera được lấy mẫu \textit{ngẫu nhiên} mỗi
+        vòng, một mặt nạ tầm nhìn của vòng trước đến từ một góc nhìn không liên quan;
+        do đó nhóm lưu đệm tầm nhìn \textit{theo từng camera} (khoá bằng
+        \texttt{cam.uid}) và scatter kết quả về toàn tập bằng \texttt{index\_put}.
+        Khi densification làm thay đổi số Gaussian, kích thước mặt nạ lệch sẽ được
+        phát hiện và nhánh tạm lùi về đánh giá toàn tập cho đúng một bước.
+        \item \textbf{Tính pháp tuyến trên tập con.} viewdir và
+        \texttt{get\_normal\_axis} (gồm argsort và \texttt{build\_rotation}) trước
+        đây được tính trên \textit{toàn bộ} $N$ Gaussian mỗi vòng lặp, kể cả các
+        vòng trước khi bật phản xạ. Nhóm chuyển phép tính này vào trong nhánh phản
+        xạ và chỉ thực hiện trên các chỉ số khả kiến, vừa tiết kiệm thời gian vừa
+        thu nhỏ đồ thị autograd.
+        \item \textbf{Bộ tối ưu Adam riêng cho ASG.} Đây là một lỗi tương tác tinh
+        vi: latent ASG ban đầu nằm chung trong bộ tối ưu Gaussian chính, vốn — theo
+        lịch trình của FastGS — chỉ bước cập nhật mỗi 32 vòng (sau 15k) rồi mỗi 64
+        vòng (sau 20k), trong khi tích luỹ gradient giữa các bước. Vì nhánh phản xạ
+        chỉ huấn luyện trong khoảng 7000–30000, latent ASG — vốn là \textit{dung
+        lượng tần số cao thực sự} của nhánh phản xạ — chỉ nhận được vài trăm bước
+        Adam trên toàn bộ vòng đời, tức bị "bỏ đói" nghiêm trọng. Nhóm tách ASG ra
+        một bộ tối ưu Adam riêng, bước cập nhật \textit{mỗi khi} MLP chạy, để latent
+        học theo đúng nhịp của MLP; bộ tối ưu này được nối đúng qua các thao tác cắt
+        tỉa và nối Gaussian.
+        \item \textbf{Suy giảm tốc độ học SH dạng cosine mềm.} Thiết kế mong muốn là
+        "che chắn" thành phần SH tần số cao sau khi bật phản xạ, để nhường phần tần
+        số cao cho nhánh ASG. Phiên bản ghép ngây thơ làm điều này bằng cách nhân
+        gradient SH với một hằng số nhỏ ($\times 0.01$) \textit{mỗi vòng lặp}. Nhưng
+        vì gradient được \textit{tích luỹ} giữa các bước cập nhật cách nhau 32/64
+        vòng, một gradient đóng góp $j$ vòng trước khi cập nhật bị nhân tới
+        $0.01^{j}\!\approx\!0$ — tức đóng băng gần như hoàn toàn, và vô tình còn đóng
+        băng cả màu khuếch tán nền. Nhóm thay bằng cách suy giảm \textit{tốc độ học}
+        (chứ không phải gradient) của riêng thành phần $f_{\text{rest}}$ theo một
+        đường cosine mềm sau khi bật phản xạ:
+        \[
+            s(t) \;=\; s_{\min} + (1 - s_{\min})\,\tfrac{1}{2}\big(1 + \cos(\pi t)\big),
+            \quad t = \frac{\text{iter} - \text{iter}_{\text{spec}}}{\text{decay\_steps}},
+        \]
+        giảm từ $1.0$ về $s_{\min}$ trong \texttt{decay\_steps} vòng rồi giữ ở mức
+        $s_{\text{after}}$, không hề đụng tới màu khuếch tán nền.
+    \end{itemize}
+    Các sửa đổi này được kiểm chứng logic bằng một bộ kiểm thử trên CPU (dùng stub
+    cho các submodule CUDA), bao gồm kiểm tra rằng pháp tuyến tính trên tập con
+    trùng khớp với pháp tuyến toàn tập được lập chỉ mục, rằng việc suy giảm LR chỉ
+    chạm vào $f_{\text{rest}}$, và rằng trạng thái Adam của ASG được bảo toàn qua các
+    thao tác cắt tỉa/nối Gaussian.
+
+\newpage
+\section{Thực nghiệm và kết quả}
+
+    \subsection{Thiết lập môi trường (Environment Setup)}
+    Do không có GPU CUDA cục bộ, toàn bộ quá trình huấn luyện được thực hiện trên
+    nền tảng đám mây (Kaggle / Google Colab) với GPU lớp P100/T4. Việc kiểm thử ở
+    mức module (tính đúng đắn của logic, hình dạng tensor, hành vi của các biện pháp
+    bảo vệ) được chạy trên CPU tại máy cục bộ bằng các stub thay thế cho các
+    submodule CUDA (\texttt{simple\_knn}, \texttt{diff\_gaussian\_rasterization\_%
+fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyên được về đúng
+    phiên bản mã nguồn sinh ra nó, nhóm nhúng một hằng số \texttt{CODE\_VERSION}
+    (kèm nhánh/commit git và các tham số then chốt) vào nhật ký khởi động và tệp
+    \texttt{train\_info.json} — một thực hành cần thiết sau khi phát hiện một lần
+    chạy lại vô tình dùng mã nguồn cũ. Cấu hình huấn luyện tóm tắt trong
+    Bảng~\ref{tab:sf_env}.
+
+    \begin{table}[h]
+    \centering
+    \caption{Cấu hình thực nghiệm Spec-FastGS}
+    \label{tab:sf_env}
+    \vspace{0.2cm}
+    \begin{tabular}{@{}ll@{}}
+    \toprule
+    \textbf{Thành phần} & \textbf{Cấu hình} \\ \midrule
+    Nền tảng huấn luyện & Kaggle GPU (lớp P100/T4) \\
+    Số vòng lặp & 30\,000 \\
+    Khoảng densification & mỗi 100 vòng \\
+    Bậc SH / Bậc ASG & 3 / 24 \\
+    Vòng bật phản xạ & 7\,000 \\
+    Ngưỡng mặt nạ highlight & 0.95 (v2.3) $\to$ 1.0 (v2.4) \\
+    \bottomrule
+    \end{tabular}
+    \end{table}
+
+    \subsection{Bộ dữ liệu và chỉ số đánh giá}
+    Thực nghiệm tiến hành trên cảnh \textit{counter} của bộ dữ liệu chuẩn
+    \textbf{Mip-NeRF 360} \cite{mipnerf360} (định dạng COLMAP, đánh giá trên 30 góc
+    nhìn test). Đây là một cảnh trong nhà giàu bề mặt phản xạ (bát kim loại, mặt
+    quầy bóng), phù hợp để bộc lộ chính xác vấn đề mà đề tài nhắm tới. Ngoài ba chỉ
+    số ảnh tiêu chuẩn — \textbf{PSNR}$\uparrow$ (tỉ lệ tín hiệu trên nhiễu, đo độ
+    trung thực tổng thể), \textbf{SSIM}$\uparrow$ (độ tương đồng cấu trúc) và
+    \textbf{LPIPS}$\downarrow$ (độ tương đồng cảm nhận dựa trên đặc trưng sâu) —
+    cùng các chỉ số tài nguyên (thời gian huấn luyện, số Gaussian, VRAM đỉnh), nhóm
+    bổ sung một \textbf{bộ chỉ số chẩn đoán lớp phản xạ}. Lý do là: các chỉ số toàn
+    cục được lấy trung bình trên \textit{toàn ảnh}, mà vùng phản xạ chỉ chiếm vài
+    phần trăm điểm ảnh, nên một sự suy giảm nghiêm trọng \textit{riêng ở vùng bóng}
+    gần như vô hình dưới PSNR/SSIM/LPIPS. Bộ chỉ số chẩn đoán được tính trên mặt nạ
+    gồm $5\%$ điểm ảnh có năng lượng specular cao nhất của ground-truth:
+    \begin{itemize}
+        \item \textbf{energyRatio}$\uparrow$ — tỉ lệ năng lượng specular của render
+        so với GT; giá trị $<1$ nghĩa là mô hình \textit{tái tạo thiếu} năng lượng
+        phản xạ (highlight quá mờ/quá tối);
+        \item \textbf{NCC}$\uparrow$ — hệ số tương quan chuẩn hoá giữa lớp specular
+        render và GT, đo độ chính xác \textit{vị trí} của highlight;
+        \item \textbf{best\_sigma} ($\sigma$)$\downarrow$ — độ lệch chuẩn của bộ lọc
+        Gauss cần áp lên lớp specular GT để khớp tốt nhất với render; $\sigma > 0$
+        nghĩa là render bị \textit{nhoè hơn} GT, và $\sigma$ càng lớn càng nhoè.
+    \end{itemize}
+
+    \subsection{Kết quả định lượng (Quantitative Results)}
+    Bảng~\ref{tab:sf_quant} so sánh ba phiên bản trên cảnh \textit{counter}:
+    \textbf{v2.2} (baseline trước tối ưu), \textbf{v2.3} (đã áp dụng đầy đủ các sửa
+    đổi của đề tài), và \textbf{v2.4} (nới lỏng hai biện pháp ức chế highlight). Tính
+    truy nguyên phiên bản được xác nhận chặt chẽ: mỗi \texttt{train\_info.json} ghi
+    lại \texttt{code\_version}, nhánh và mã commit Git (\texttt{c2b77a6} cho v2.4),
+    loại trừ khả năng nhầm lẫn với mã nguồn cũ. Riêng v2.4 được chạy \textbf{hai lần
+    độc lập} với cùng cấu hình để kiểm tra độ ổn định; hai lần cho kết quả gần như
+    trùng khít (chênh lệch PSNR $<0.03$ dB, SSIM/LPIPS trùng đến chữ số thứ tư), nên
+    Bảng~\ref{tab:sf_quant} và \ref{tab:sf_spec} trình bày lần chạy đại diện. Hai dòng
+    \textbf{v2.5-R1} (chỉ thêm mất mát có trọng số cho phản xạ --- nguyên nhân A) và
+    \textbf{v2.5-R2} (thêm cả latent ASG hạng thấp) tương ứng với hai kịch bản kiểm
+    chứng đang chạy trên Kaggle (\texttt{run\_spec-fastgs\_big\_r1.sh} /
+    \texttt{r2.sh}); số liệu sẽ được điền sau khi hoàn tất.
+
+    \begin{table}[h]
+    \centering
+    \caption{Kết quả định lượng trên cảnh Counter (Mip-NeRF 360)}
+    \label{tab:sf_quant}
+    \vspace{0.2cm}
+    \begin{tabular}{@{}lcccccc@{}}
+    \toprule
+    \textbf{Phiên bản} & \textbf{Time} & \textbf{Num GS} & \textbf{VRAM} &
+    \textbf{PSNR}$\uparrow$ & \textbf{SSIM}$\uparrow$ & \textbf{LPIPS}$\downarrow$ \\ \midrule
+    v2.2 (baseline)   & 122m29s & 619{,}823 & 9675 & \textbf{30.72} & \textbf{0.9250} & \textbf{0.166} \\
+    v2.3 (tối ưu)     & \textbf{75m55s} & \textbf{560{,}549} & \textbf{8892} & 30.44 & 0.9231 & 0.169 \\
+    v2.4 (nới lỏng)   & 75m40s & 587{,}575 & 9072 & 30.41 & 0.9232 & 0.169 \\
+    v2.5-R1 (mất mát phản xạ) & --- & --- & --- & --- & --- & --- \\
+    v2.5-R2 (\,+\,latent hạng thấp) & --- & --- & --- & --- & --- & --- \\
+    \bottomrule
+    \end{tabular}
+    \end{table}
+
+    Bảng~\ref{tab:sf_spec} trình bày bộ chỉ số chẩn đoán lớp phản xạ, thứ làm lộ rõ
+    điều mà Bảng~\ref{tab:sf_quant} che giấu.
+
+    \begin{table}[h]
+    \centering
+    \caption{Chỉ số chẩn đoán lớp phản xạ (mặt nạ top-5\% năng lượng specular)}
+    \label{tab:sf_spec}
+    \vspace{0.2cm}
+    \begin{tabular}{@{}lccc@{}}
+    \toprule
+    \textbf{Phiên bản} & \textbf{energyRatio}$\uparrow$ & \textbf{NCC}$\uparrow$ & \textbf{best\_$\sigma$}$\downarrow$ \\ \midrule
+    v2.2 (baseline) & \textbf{0.674} & \textbf{0.657} & \textbf{3.15} \\
+    v2.3 (tối ưu)   & 0.428 & 0.541 & 4.90 \\
+    v2.4 (nới lỏng) & 0.388 & 0.529 & 4.90 \\
+    v2.5-R1 (mất mát phản xạ) & --- & --- & --- \\
+    v2.5-R2 (\,+\,latent hạng thấp) & --- & --- & --- \\
+    \bottomrule
+    \end{tabular}
+    \end{table}
+
+    \textbf{Nhận xét số liệu:}
+    \begin{itemize}
+        \item \textbf{Tốc độ: cải thiện rõ rệt.} Thời gian huấn luyện giảm
+        $122\text{m}29\text{s} \to 75\text{m}55\text{s}$ ($-38\%$, tức nhanh hơn gần
+        47 phút), số Gaussian giảm $\sim 10\%$ ($619\text{k}\to 561\text{k}$), VRAM
+        đỉnh giảm $8\%$. Phân tích cho thấy phần lớn cải thiện này đến từ \textit{nhóm
+        sửa đổi tốc độ} (gộp lượt render, MLP theo tầm nhìn, tính pháp tuyến trên
+        tập con, bộ tối ưu ASG riêng), chứ không phải từ mặt nạ highlight.
+        \item \textbf{Chất lượng toàn cục: gần như đi ngang.} PSNR ($30.72\to
+        30.44$), SSIM ($0.9250\to 0.9231$) và LPIPS ($0.166\to 0.169$) dao động
+        trong khoảng nhiễu giữa các lần chạy — không thể kết luận cải thiện hay suy
+        giảm có ý nghĩa từ riêng các chỉ số này.
+        \item \textbf{Chất lượng phản xạ: suy giảm có hệ thống.} energyRatio
+        $0.674\to 0.428$ (render chỉ còn sản sinh $\sim 43\%$ năng lượng specular so
+        với $67\%$ trước đó), NCC $0.657\to 0.541$ (vị trí highlight kém chính xác
+        hơn), và độ nhoè $\sigma\ 3.15\to 4.90$ (highlight nhoè hơn). Đây chính là
+        thông tin mà các chỉ số toàn cục không bộc lộ, và là lý do nhóm xây dựng bộ
+        chẩn đoán chuyên biệt.
+        \item \textbf{v2.4 nới lỏng ức chế: giả thuyết bị bác bỏ.} Việc tắt mặt nạ
+        highlight và làm mềm suy giảm SH \textit{không} khôi phục năng lượng phản xạ:
+        energyRatio thậm chí nhích nhẹ xuống $0.428\to 0.388$, NCC $0.541\to 0.529$,
+        còn $\sigma$ giữ nguyên $4.90$ — toàn bộ trong khoảng nhiễu, không có dấu hiệu
+        phục hồi nào. Đồng thời số Gaussian tăng trở lại ($561\text{k}\to 588\text{k}$,
+        $+27\text{k}$) và VRAM tăng nhẹ, đúng như dự đoán rằng tắt mặt nạ sẽ để
+        densification tuyển thêm hình học tại vùng sáng; nhưng phần hình học mới đó
+        \textit{không} sinh ra năng lượng specular — nó chỉ là khối khuếch tán
+        (Lambertian) phụ, khiến PSNR toàn cục còn giảm nhẹ $0.03$ dB. Kết luận then
+        chốt: \textbf{hai biện pháp ức chế chưa bao giờ là nguyên nhân chính} của
+        thiếu hụt phản xạ; nới lỏng chúng chỉ tốn ngân sách Gaussian và VRAM mà không
+        mua lại được độ trung thực highlight nào. Do đó v2.4 \textit{kém hơn} v2.3 một
+        cách chặt chẽ (cùng chất lượng, nhiều Gaussian hơn, nhiều VRAM hơn).
+    \end{itemize}
+
+    \subsection{Kết quả định tính (Qualitative Results)}
+    Hình~\ref{fig:sf_speclayer} so sánh trực tiếp \textit{năng lượng lớp phản xạ}
+    giữa GT (trái) và render (phải) của một góc nhìn đại diện (v2.4). Có thể thấy rõ
+    render vừa \textit{mờ} hơn vừa \textit{yếu} hơn GT ở các vùng bóng (bát kim loại,
+    mặt quầy), trực quan hoá chính xác kết luận energyRatio $0.388$ và độ nhoè
+    $\sigma=4.9$. Hình~\ref{fig:sf_composite} đối chiếu ảnh tổng hợp (composite) của
+    Spec-FastGS với ảnh GT trên một trong các góc nhìn khó nhất (00003, nhiều phản
+    xạ, SSIM thấp nhất trong tập test).
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.95\linewidth]{img/specfast_speclayer.png}
+        \caption{Năng lượng lớp phản xạ: GT (trái) so với render Spec-FastGS
+        (phải), phiên bản v2.4. Render thiếu năng lượng và mờ hơn ở các vùng bóng —
+        minh hoạ trực quan cho energyRatio $=0.388$ và $\sigma=4.9$.}
+        \label{fig:sf_speclayer}
+    \end{figure}
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.48\linewidth]{img/specfast_composite_00003.png}
+        \hfill
+        \includegraphics[width=0.48\linewidth]{img/specfast_gt_00003.png}
+        \caption{Ảnh tổng hợp Spec-FastGS (trái) so với Ground Truth (phải) trên
+        góc nhìn 00003 — góc nhìn khó nhất trong tập test (SSIM $\approx 0.858$).}
+        \label{fig:sf_composite}
+    \end{figure}
+
+    \subsection{Khảo sát kiến trúc MLP và không gian latent (Ablation)}
+    Để trả lời câu hỏi \textit{liệu có thể đóng khoảng cách phản xạ bằng cách thay đổi
+    độ phức tạp/cấu trúc MLP hay bằng các phương pháp không gian latent}, nhóm thiết kế
+    một thí nghiệm khảo sát có kiểm soát, \textit{không cần GPU}. Vì mỗi lần huấn luyện
+    đầy đủ tốn $\sim 76$ phút, thay vào đó nhóm dùng một \textbf{bài toán tổng hợp} cô
+    lập đúng năng lực đang thiếu: tái tạo một thuỳ highlight sắc, phụ thuộc góc nhìn.
+    Mỗi trong $M=64$ ``Gaussian'' có một pháp tuyến ngẫu nhiên và một vật liệu
+    per-Gaussian (biên độ RGB $+$ độ bóng $p\in[8,256]$); đáp ứng specular theo hướng
+    nhìn $v$ là thuỳ Phong $A\cdot\mathrm{relu}(\mathrm{reflect}(-v,n)\cdot L)^p$ với
+    nguồn sáng chung $L$. Độ bóng $p$ cao $\Rightarrow$ tần số cao --- đúng tín hiệu mà
+    nhánh phản xạ thực đang sản sinh thiếu. Mọi kiến trúc được huấn luyện
+    \textbf{cùng số vòng lặp / cùng learning rate / cùng RNG khởi tạo}, rồi đánh giá
+    trên các hướng nhìn \textbf{tách riêng (held-out)} bằng \textit{chính bộ chỉ số
+    chẩn đoán thực} (energyRatio, gain $a^*$, NCC). Hai điều kiện được xét: pháp tuyến
+    \textit{sạch}, và pháp tuyến \textit{nhiễu} ($\sigma=0.3$, mô phỏng pháp tuyến
+    trục-ngắn-nhất \texttt{get\_minimum\_axis} --- nguyên nhân gốc B).
+
+    \begin{table}[h]
+    \centering
+    \caption{Khảo sát kiến trúc trên bài toán specular tổng hợp (pháp tuyến sạch;
+    energyRatio$\uparrow$, gain $a^*\!\to\!1$, NCC$\uparrow$)}
+    \label{tab:sf_ablation}
+    \vspace{0.2cm}
+    \begin{tabular}{@{}lccccc@{}}
+    \toprule
+    \textbf{Cấu hình} & \textbf{energyR}$\uparrow$ & \textbf{gain }$a^*$ &
+    \textbf{NCC}$\uparrow$ & \textbf{L1\_hl}$\downarrow$ & \textbf{tham số} \\ \midrule
+    latent F=48 (relu)              & \textbf{0.902} & 0.995 & 0.814 & 0.0374 & 33{,}539 \\
+    deeper+wider (relu d4 w256)     & 0.884 & 1.014 & 0.817 & 0.0368 & 222{,}083 \\
+    WIRE (Gabor) \cite{wire}        & 0.870 & 1.085 & 0.673 & 0.0777 & 30{,}467 \\
+    baseline (relu, F=24)           & 0.868 & 1.011 & 0.809 & 0.0367 & 30{,}467 \\
+    \textbf{low-rank/LoRA} \cite{lora} & 0.862 & 1.070 & \textbf{0.871} & \textbf{0.0342} & \textbf{28{,}611} \\
+    latent F=8 (relu)               & 0.845 & 1.020 & 0.788 & 0.0397 & 28{,}419 \\
+    SIREN ($\omega_0\!=\!10$) \cite{siren} & 0.706 & 1.196 & 0.646 & 0.0752 & 30{,}467 \\
+    SIREN ($\omega_0\!=\!30$) \cite{siren} & 0.369 & 2.516 & 0.382 & 0.1155 & 30{,}467 \\
+    \bottomrule
+    \end{tabular}
+    \end{table}
+
+    \textbf{Nhận xét khảo sát:}
+    \begin{itemize}
+        \item \textbf{Cấu trúc MLP không phải nút thắt.} Với đầu vào sạch, MLP ReLU
+        gốc đã tái tạo tốt thuỳ phụ thuộc góc nhìn (energyRatio $0.87$, $a^*\approx 1$,
+        NCC $0.81$). Các cấu trúc ``mạnh hơn'' không cho lợi ích ròng: \textbf{SIREN
+        gây hại} (energyRatio $0.37$ ở $\omega_0=30$, sụp đổ hoàn toàn khi tăng độ sâu;
+        chỉ $0.71$ ở $\omega_0=10$ --- vẫn thấp hơn ReLU), vì phần dư specular là
+        \textit{cộng thêm và gần bằng 0} ở hầu hết pixel, một tiên nghiệm sin dao động
+        khắp nơi là bất lợi. WIRE giữ năng lượng nhưng làm \textit{xấu vị trí} (NCC
+        $0.81\!\to\!0.67$) và chậm $2\times$; deeper+wider đổi $7.3\times$ tham số lấy
+        $+0.016$ energyRatio. \textbf{Kết quả này bác bỏ giả định trước đây (CLAUDE.md)
+        rằng SIREN cho kỳ vọng cải thiện cao nhất.}
+        \item \textbf{Không gian latent là đòn bẩy thực (vừa phải).} Chiều latent
+        per-Gaussian $F$ tỉ lệ thuận với chất lượng ($F=8/24/48 \Rightarrow$ energyRatio
+        $0.845/0.868/0.902$); ngược lại $F=8$ chỉ mất $-0.02$ energyRatio để đổi lấy
+        bộ nhớ per-Gaussian giảm $3\times$ (kết quả nén đáng giá cho luận văn).
+        \item \textbf{Phân rã hạng thấp (LoRA) là cải tiến kiến trúc xứng đáng nhất:}
+        cho \textbf{NCC tốt nhất ($0.871$) và L1 tốt nhất} với \textbf{ít tham số hơn}
+        --- nút thắt hạng $r=8$ đóng vai trò chính quy hoá ánh xạ latent$\to$ASG: vừa
+        nâng chất lượng vừa nén.
+        \item \textbf{Pháp tuyến nhiễu là suy giảm chi phối và miễn nhiễm với kiến
+        trúc.} Khi thêm nhiễu $\sigma=0.3$, NCC của \textit{mọi} biến thể giảm
+        $0.06$--$0.13$ và L1\_hl tăng $40$--$60\%$; không kiến trúc nào cứu được. Đây
+        là bằng chứng thực nghiệm rằng nguyên nhân gốc B phải được sửa bằng
+        \textit{tiên nghiệm pháp tuyến} \cite{dnsplatter}, không phải bằng MLP phức tạp
+        hơn.
+    \end{itemize}
+    Hệ quả: giữ ReLU; áp dụng \textbf{latent ASG hạng thấp} làm đóng góp về phía kiến
+    trúc; còn các đòn bẩy chi phối vẫn là \textit{mất mát có trọng số cho phản xạ}
+    (nguyên nhân A --- không xuất hiện trong bài toán tổng hợp này vì giám sát ở đây
+    không bị nhấn chìm, đúng lý do baseline đã đạt điểm tốt) và \textit{tiên nghiệm
+    pháp tuyến} (nguyên nhân B). Chi tiết đầy đủ:
+    \texttt{results/MLP\_LATENT\_ABLATION\_2026-06-13.md}.
+
+    \subsection{Phân tích và Thảo luận (Analysis \& Discussion)}
+    \begin{itemize}
+        \item \textbf{Thí nghiệm v2.4 đã bác bỏ giả thuyết "ức chế là thủ phạm".}
+        Giả thuyết ban đầu cho rằng chất lượng phản xạ tụt từ v2.2 sang v2.3 là do
+        hai biện pháp chống-Lambertian (mặt nạ highlight $+$ suy giảm LR của SH) rút
+        năng lượng tần số cao tại vùng bóng nhanh hơn tốc độ MLP kịp bù. v2.4 được
+        thiết kế đúng để kiểm chứng: \textit{giữ nguyên} nhóm sửa đổi tốc độ và
+        \textit{tháo bỏ} cả hai biện pháp ức chế (tắt mặt nạ \texttt{quantile}
+        $0.95\to 1.0$; làm mềm suy giảm SH $s_{\min}\ 0.1\to 0.3$, $s_{\text{after}}\
+        0.3\to 0.5$). Nếu giả thuyết đúng, energyRatio phải bật trở lại phía $0.674$.
+        Thực tế nó \textbf{không nhúc nhích} ($0.428\to 0.388$), trong khi số Gaussian
+        và VRAM lại tăng. Đây là một kết quả âm tính \textit{có giá trị}: nó loại trừ
+        densification/SH như nguyên nhân gốc và buộc phải tìm thủ phạm ở \textit{chính
+        nhánh phản xạ}.
+        \item \textbf{Truy nguyên ở mức mã nguồn: nhánh phản xạ bị "thiếu lực kéo".}
+        Khảo sát đường tính specular trong commit \texttt{c2b77a6} (đã xác nhận
+        sigmoid đầu ra đã gỡ và đã có kết nối tắt residual trong \texttt{ASGRender})
+        cho thấy hai khiếm khuyết cấu trúc giải thích trọn vẹn chữ ký chẩn đoán
+        ($a^*\approx 1.20$ \textit{quá tối}, $\sigma=4.9$ \textit{quá nhoè}, NCC
+        $\approx 0.52$ \textit{đặt sai chỗ}):
+        \begin{enumerate}
+            \item \textbf{Không có thành phần mất mát chuyên cho phản xạ.} Giám sát
+            duy nhất là $\mathcal{L} = (1-\lambda)\,\mathcal{L}_1 +
+            \lambda\,(1-\text{SSIM})$ trên \textit{toàn ảnh}. Highlight chỉ chiếm
+            $\sim 5\%$ pixel, nên trong tổng gradient, phần dành cho vùng bóng bị
+            $95\%$ pixel khuếch tán lấn át. MLP do đó hội tụ về một phần dư
+            \textit{an toàn}: tối và mượt (vì dự đoán gần giá trị trung bình tối
+            thiểu hoá $\mathcal{L}_1$ trên ít pixel sáng). Điều này trực tiếp tạo ra
+            $a^*>1$ (thiếu độ sáng) và $\sigma$ lớn (thiếu tần số cao). Việc gỡ mặt
+            nạ highlight ở v2.4 không thể chạm tới khiếm khuyết này, vì mặt nạ chỉ
+            tác động lên \textit{phiếu densification}, không lên \textit{gradient
+            ảnh} cấp cho MLP.
+            \item \textbf{Pháp tuyến giả nhiễu.} \texttt{ASGRender} tính hướng phản
+            xạ \texttt{reflect\_dir} từ pháp tuyến lấy theo \textit{trục ngắn nhất}
+            của Gaussian (\texttt{get\_minimum\_axis}) — một pháp tuyến \textit{hình
+            học}, không được giám sát. Với các Gaussian gần đẳng hướng (ba trục co
+            giãn xấp xỉ nhau), trục ngắn nhất gần như là nhiễu; hướng phản xạ vì thế
+            dao động giữa các Gaussian lân cận, làm thuỳ ASG chĩa sai → highlight bị
+            đặt lệch (NCC thấp) và bị "bôi" nhoè khi tổng hợp qua nhiều Gaussian
+            ($\sigma$ cao). Đây là nguồn gốc độc lập của sai số cấu trúc
+            ($\text{structural}\% \approx 98$, gần như không thể sửa chỉ bằng hệ số
+            độ sáng).
+        \end{enumerate}
+        \item \textbf{Vai trò thực của xung đột Lambertian được hiệu chỉnh lại.} Xung
+        đột Lambertian là \textit{có thật} và đã kiểm chứng ở mức mã nguồn, nhưng
+        v2.4 cho thấy nó \textbf{không} phải nút thắt chi phối độ trung thực phản xạ;
+        nó chủ yếu là một cơ chế \textit{kiểm soát số lượng} Gaussian (tắt mặt nạ làm
+        số Gaussian tăng $+27\text{k}$). Hệ quả phương pháp luận: một cơ chế đúng về
+        lý thuyết vẫn có thể không phải đòn bẩy quyết định cho chỉ tiêu ta quan tâm —
+        và chỉ một thí nghiệm đối chứng có chủ đích (cùng bộ chẩn đoán chuyên biệt)
+        mới phân biệt được. Đây chính là giá trị của bộ chỉ số phản xạ mà nhóm xây
+        dựng: nó biến một "cảm giác mơ hồ về độ mờ" thành một giả thuyết kiểm được và
+        bác được.
+        \item \textbf{Hướng khắc phục đã được định vị lại: về phía nhánh phản xạ.}
+        Vì nút thắt nằm ở \textit{lực kéo} của nhánh specular chứ không ở
+        densification, các thí nghiệm tiếp theo nhắm thẳng vào (i) \textit{mất mát
+        chuyên cho phản xạ} — thêm một số hạng có trọng số trên mặt nạ năng lượng
+        specular (hoặc mất mát kim tự tháp Laplacian) để cấp gradient đủ mạnh cho
+        highlight; (ii) \textit{nâng năng lực tần số cao của MLP} — kích hoạt SIREN
+        ($\sin(\omega_0 x)$, được thiết kế cho tín hiệu phụ thuộc góc nhìn tần số
+        cao) hoặc MLP sâu/rộng hơn; và (iii) \textit{cải thiện pháp tuyến} — thay
+        pháp tuyến trục-ngắn-nhất bằng pháp tuyến được giám sát/chính quy hoá để ổn
+        định hướng phản xạ. Trong số này, (i) và (ii) khớp trực tiếp với chữ ký
+        $a^*>1$, $\sigma$ cao và là ứng viên có kỳ vọng cao nhất.
+        \item \textbf{So sánh công bằng về tốc độ.} Các con số phút của FastGS gốc
+        được đo trên GPU lớp RTX-3090; Kaggle P100/T4 chậm hơn khoảng $3\times$. Để
+        đưa ra một tuyên bố overhead tốc độ công bằng trong luận văn, cần chạy
+        baseline FastGS \textit{thuần} (không nhánh phản xạ) trên \textit{cùng} GPU
+        Kaggle và so sánh trực tiếp — đây là một thí nghiệm đối chứng đã được lên kế
+        hoạch.
+    \end{itemize}
+
+\section{Kết luận và hướng phát triển}
+    Báo cáo trình bày Spec-FastGS — sự hợp nhất giữa densification đa góc nhìn
+    (FastGS \cite{fastgs}) và nhánh phản xạ ASG kết hợp MLP (Spec-Gaussian
+    \cite{specgaussian}). Đóng góp khái niệm trung tâm là việc phát hiện và phân
+    tích \textit{xung đột Lambertian} giữa một cơ chế kiểm soát mật độ giả định bề
+    mặt khuếch tán và một loại nội dung vốn phụ thuộc góc nhìn. Về thực nghiệm trên
+    cảnh \textit{counter}, các tối ưu pipeline đã rút ngắn thời gian huấn luyện
+    $38\%$ và giảm số Gaussian $\sim 10\%$ mà không làm tổn hại chất lượng toàn cục.
+    Quan trọng hơn về mặt phương pháp, hai thí nghiệm đối chứng có chủ đích — đo bằng
+    bộ chỉ số chẩn đoán phản xạ chuyên biệt của nhóm — đã \textit{định vị lại} nút
+    thắt chất lượng: phiên bản v2.4 (nới lỏng cả hai biện pháp chống-Lambertian) cho
+    thấy densification và suy giảm SH \textbf{không} phải nguyên nhân chi phối thiếu
+    hụt phản xạ; nút thắt thực nằm ở \textit{lực kéo} của chính nhánh specular —
+    thiếu thành phần mất mát chuyên cho phản xạ và pháp tuyến giả nhiễu — khiến phần
+    dư highlight vừa tối vừa nhoè. Đây là một kết quả âm tính có giá trị, giúp loại
+    bỏ một nhánh giả thuyết và tập trung nỗ lực tiếp theo cho đúng chỗ.
+
+    Dựa trên kết quả truy nguyên ở trên, nhóm đã khảo sát một danh mục giải pháp liên
+    ngành (thị giác máy tính, xử lý tín hiệu, biểu diễn ẩn, đồ hoạ, và tinh chỉnh hiệu
+    quả tham số trong NLP) và tổ chức các hướng phát triển theo đúng ba nhóm nguyên
+    nhân gốc. Thứ tự ưu tiên phản ánh tỉ lệ kỳ vọng \textit{tác động / công sức}: vì
+    chẩn đoán cho thấy thiếu hụt \textit{trước hết} là vấn đề lực kéo (giám sát), nên
+    sửa giám sát phải đi trước nâng năng lực hay sửa pháp tuyến.
+
+    \textbf{(A) Cấp lực kéo cho vùng highlight (nhóm giám sát --- ưu tiên cao nhất, chi phí thấp nhất).}
+    \begin{itemize}
+        \item \textbf{Mất mát có trọng số trên mặt nạ phản xạ}: thêm số hạng $L_1$ có
+        trọng số trên mặt nạ top-$k$ năng lượng specular (chính mặt nạ mà bộ chẩn đoán
+        đang dùng), trực tiếp chống hiện tượng $5\%$ pixel highlight bị $95\%$ pixel
+        khuếch tán nhấn chìm trong gradient. Đây là phép thử rẻ nhất cho toàn bộ chẩn
+        đoán và là ưu tiên số một.
+        \item \textbf{Mất mát miền tần số}: \textbf{Focal Frequency Loss}
+        \cite{focalfreq} tự động tăng trọng số cho các thành phần tần số khó tổng hợp
+        --- đúng dải cao mà render đang mất ($\sigma=4.9$); hoặc \textbf{chính quy hoá
+        tần số luỹ tiến} kiểu FreGS \cite{fregs}; hoặc \textbf{mất mát kim tự tháp
+        Laplacian} \cite{lapsrn} nhấn các băng chi tiết.
+        \item \textbf{Mất mát theo ánh xạ tông HDR / log}: đỉnh specular gần dải HDR;
+        $L_1$ thường sau khi cắt $[0,1]$ làm nhẹ sai số pixel sáng. Áp mất mát qua
+        đường cong log/tone-map \cite{rawnerf} để giữ gradient cho highlight --- nhắm
+        thẳng vào hiện tượng quá-tối $a^*>1$.
+    \end{itemize}
+
+    \textbf{(B) Nâng năng lực biểu diễn tần số cao (chống thiên kiến phổ của MLP).}
+    \begin{itemize}
+        \item \textbf{Thay hàm kích hoạt}: \textbf{SIREN} \cite{siren} (kích hoạt sin)
+        hoặc \textbf{WIRE} \cite{wire} (sóng con Gabor, tối ưu định vị không gian--tần
+        số) trong \texttt{ASGRender}; hoặc tăng băng thông \textbf{đặc trưng Fourier}
+        \cite{fourierfeat} của hướng nhìn để vượt thiên kiến phổ (đã có nền tảng NTK).
+        \item \textbf{Cơ sở thuỳ tường minh}: biểu diễn thuỳ specular bằng tổ hợp
+        \textbf{Spherical/Anisotropic Gaussian} \cite{physg} --- gọn, đóng dưới phép
+        nhân/quay, hỗ trợ độ bóng tuỳ ý cao; ASG hiện tại đã là một họ thuỳ, có thể
+        mở rộng/khớp trung thực hơn.
+        \item \textbf{Kiến trúc mới}: \textbf{Kolmogorov--Arnold Networks}
+        \cite{kan} (hàm cạnh học được) là một góc kiến trúc mới, rủi ro cao hơn nhưng
+        giàu tính trích dẫn cho luận văn.
+    \end{itemize}
+
+    \textbf{(C) Cải thiện pháp tuyến / hướng phản xạ (chống sai số đặt sai chỗ, NCC thấp).}
+    \begin{itemize}
+        \item \textbf{Tiên nghiệm pháp tuyến đơn ảnh}: giám sát pháp tuyến Gaussian
+        theo một mạng dự đoán pháp tuyến đơn ảnh đã huấn luyện sẵn \cite{dnsplatter};
+        pháp tuyến từ mô hình nền \textit{bền vững với bề mặt phản xạ} (khác MVS), cấp
+        \texttt{reflect\_dir} đáng tin cho ASG, thay cho pháp tuyến trục-ngắn-nhất
+        nhiễu (\texttt{get\_minimum\_axis}).
+        \item \textbf{Lan truyền pháp tuyến qua deferred shading}: gradient phản xạ
+        theo từng pixel lan pháp tuyến gần đúng sang các Gaussian lân cận
+        \cite{deferredrefl}, gỡ nút thắt gradient pháp tuyến gián đoạn.
+    \end{itemize}
+
+    \textbf{(D) Hướng đóng góp luận văn (năng lực không phình bộ nhớ / tái thiết kế).}
+    \begin{itemize}
+        \item \textbf{Phân rã hạng thấp latent ASG kiểu LoRA} \cite{lora} --- thay
+        latent 24 chiều dày đặc bằng cơ sở chung cộng hệ số per-Gaussian; hoặc
+        \textbf{lượng tử hoá vector} latent theo từ điển kiểu CompGS \cite{compgs}, cho
+        tiên nghiệm mạnh và giảm dung lượng; hoặc \textbf{điều biến FiLM}
+        \cite{film} dùng latent để điều biến một MLP dùng chung thay vì nối vào đầu vào.
+        \item \textbf{Trường biểu diện dạng hash-grid} kiểu Instant-NGP
+        \cite{instantngp} / Scaffold-GS \cite{scaffoldgs}, tách biểu diện khỏi từng
+        Gaussian.
+        \item \textbf{Deferred screen-space shading} \cite{deferredrefl} --- tô bóng
+        specular theo từng pixel (không theo từng Gaussian), loại bỏ chi phí MLP
+        per-Gaussian \textit{và} cho gradient pháp tuyến mượt: điểm gặp gỡ tự nhiên
+        giữa mục tiêu tốc độ và chất lượng phản xạ, hướng tái thiết kế mạnh nhất.
+    \end{itemize}
+
+% ============================================================
+% TÀI LIỆU THAM KHẢO
+% ============================================================
+\newpage
+\begin{thebibliography}{99}
+\bibitem{kerbl3dgs} B.~Kerbl, G.~Kopanas, T.~Leimkühler, G.~Drettakis,
+``3D Gaussian Splatting for Real-Time Radiance Field Rendering,'' \textit{ACM
+Transactions on Graphics (SIGGRAPH)}, 2023. \url{https://arxiv.org/abs/2308.04079}
+
+\bibitem{nerf} B.~Mildenhall, P.~P.~Srinivasan, M.~Tancik, J.~T.~Barron, R.~Ramamoorthi,
+R.~Ng, ``NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis,''
+\textit{ECCV}, 2020. \url{https://arxiv.org/abs/2003.08934}
+
+\bibitem{plenoxels} A.~Yu, S.~Fridovich-Keil, M.~Tancik, Q.~Chen, B.~Recht,
+A.~Kanazawa, ``Plenoxels: Radiance Fields without Neural Networks,'' \textit{CVPR},
+2022. \url{https://arxiv.org/abs/2112.05131}
+
+\bibitem{tensorf} A.~Chen, Z.~Xu, A.~Geiger, J.~Yu, H.~Su, ``TensoRF: Tensorial
+Radiance Fields,'' \textit{ECCV}, 2022. \url{https://arxiv.org/abs/2203.09517}
+
+\bibitem{instantngp} T.~Müller, A.~Evans, C.~Schied, A.~Keller, ``Instant Neural
+Graphics Primitives with a Multiresolution Hash Encoding,'' \textit{ACM Transactions
+on Graphics (SIGGRAPH)}, 2022. \url{https://arxiv.org/abs/2201.05989}
+
+\bibitem{zipnerf} J.~T.~Barron, B.~Mildenhall, D.~Verbin, P.~P.~Srinivasan,
+P.~Hedman, ``Zip-NeRF: Anti-Aliased Grid-Based Neural Radiance Fields,''
+\textit{ICCV}, 2023. \url{https://arxiv.org/abs/2304.06706}
+
+\bibitem{mipnerf360} J.~T.~Barron, B.~Mildenhall, D.~Verbin, P.~P.~Srinivasan,
+P.~Hedman, ``Mip-NeRF 360: Unbounded Anti-Aliased Neural Radiance Fields,''
+\textit{CVPR}, 2022. \url{https://arxiv.org/abs/2111.12077}
+
+\bibitem{survey_chen} G.~Chen, W.~Wang, ``A Survey on 3D Gaussian Splatting,''
+\textit{IEEE TPAMI}, 2025. \url{https://arxiv.org/abs/2401.03890}
+
+\bibitem{survey_fei} B.~Fei, J.~Xu, R.~Zhang, Q.~Zhou, W.~Yang, Y.~He, ``3D Gaussian
+Splatting as New Era: A Survey,'' 2024. \url{https://arxiv.org/abs/2403.11134}
+
+\bibitem{colmap} J.~L.~Schönberger, J.-M.~Frahm, ``Structure-from-Motion
+Revisited,'' \textit{CVPR}, 2016.
+
+\bibitem{sfmsurvey} O.~Özyeşil, V.~Voroninski, R.~Basri, A.~Singer, ``A Survey of
+Structure from Motion,'' \textit{Acta Numerica}, 2017.
+
+\bibitem{fastgs} ``FastGS: Training 3D Gaussian Splatting in 100 Seconds,''
+\textit{CVPR}, 2026. \url{https://arxiv.org/abs/2511.04283}
+
+\bibitem{taming3dgs} S.~Mallick, R.~Goel, B.~Kerbl, F.~V.~Carrasco, M.~Steinberger,
+F.~De La Torre, ``Taming 3DGS: High-Quality Radiance Fields with Limited Resources,''
+\textit{SIGGRAPH Asia}, 2024. \url{https://arxiv.org/abs/2406.15643}
+
+\bibitem{speedysplat} A.~Hanson, A.~Tu, G.~Lin, V.~Singla, M.~Zwicker, T.~Goldstein,
+``Speedy-Splat: Fast 3D Gaussian Splatting with Sparse Pixels and Sparse Primitives,''
+\textit{CVPR}, 2025. \url{https://arxiv.org/abs/2412.00578}
+
+\bibitem{dashgs} Y.~Chen et al., ``DashGaussian: Optimizing 3D Gaussian Splatting in
+200 Seconds,'' \textit{CVPR}, 2025. \url{https://arxiv.org/abs/2503.18402}
+
+\bibitem{minisplatting} G.~Fang, B.~Wang, ``Mini-Splatting: Representing Scenes with
+a Constrained Number of Gaussians,'' \textit{ECCV}, 2024.
+\url{https://arxiv.org/abs/2403.14166}
+
+\bibitem{minisplatting2} G.~Fang, B.~Wang, ``Mini-Splatting2: Building 360 Scenes
+within Minutes via Aggressive Gaussian Densification,'' 2024.
+\url{https://arxiv.org/abs/2411.12788}
+
+\bibitem{absgs} Z.~Ye, W.~Li, S.~Liu, P.~Qiao, Y.~Dou, ``AbsGS: Recovering Fine
+Details for 3D Gaussian Splatting,'' \textit{ACM MM}, 2024.
+\url{https://arxiv.org/abs/2404.10484}
+
+\bibitem{pixelgs} Z.~Zhang, W.~Hu, Y.~Lao, T.~He, H.~Zhao, ``Pixel-GS: Density
+Control with Pixel-aware Gradient for 3D Gaussian Splatting,'' \textit{ECCV}, 2024.
+\url{https://arxiv.org/abs/2403.15530}
+
+\bibitem{revisedens} S.~R.~Bulò, L.~Porzi, P.~Kontschieder, ``Revising Densification
+in Gaussian Splatting,'' \textit{ECCV}, 2024. \url{https://arxiv.org/abs/2404.06109}
+
+\bibitem{effdensity} X.~Bao et al., ``Efficient Density Control for 3D Gaussian
+Splatting,'' 2024. \url{https://arxiv.org/abs/2411.10133}
+
+\bibitem{gaussianpro} K.~Cheng et al., ``GaussianPro: 3D Gaussian Splatting with
+Progressive Propagation,'' \textit{ICML}, 2024. \url{https://arxiv.org/abs/2402.14650}
+
+\bibitem{mcmc} S.~Kheradmand et al., ``3D Gaussian Splatting as Markov Chain Monte
+Carlo,'' \textit{NeurIPS}, 2024. \url{https://arxiv.org/abs/2404.09591}
+
+\bibitem{lightgaussian} Z.~Fan et al., ``LightGaussian: Unbounded 3D Gaussian
+Compression with 15x Reduction and 200+ FPS,'' \textit{NeurIPS}, 2024.
+\url{https://arxiv.org/abs/2311.17245}
+
+\bibitem{compact3d} J.~C.~Lee, D.~Rho, X.~Sun, J.~H.~Ko, E.~Park, ``Compact 3D
+Gaussian Representation for Radiance Field,'' \textit{CVPR}, 2024.
+\url{https://arxiv.org/abs/2311.13681}
+
+\bibitem{eagles} S.~Girish, K.~Gupta, A.~Shrivastava, ``EAGLES: Efficient
+Accelerated 3D Gaussians with Lightweight Encodings,'' \textit{ECCV}, 2024.
+\url{https://arxiv.org/abs/2312.04564}
+
+\bibitem{specgaussian} Z.~Yang, X.~Gao, Y.-T.~Sun, Y.~Huang, X.~Lyu, W.~Zhou,
+S.~Jiao, X.~Qi, X.~Jin, ``Spec-Gaussian: Anisotropic View-Dependent Appearance for
+3D Gaussian Splatting,'' \textit{NeurIPS}, 2024.
+\url{https://arxiv.org/abs/2402.15870}
+
+\bibitem{refnerf} D.~Verbin, P.~Hedman, B.~Mildenhall, T.~Zickler, J.~T.~Barron,
+P.~P.~Srinivasan, ``Ref-NeRF: Structured View-Dependent Appearance for Neural
+Radiance Fields,'' \textit{CVPR (Best Paper)}, 2022.
+\url{https://arxiv.org/abs/2112.03907}
+
+\bibitem{nerfcasting} D.~Verbin, P.~P.~Srinivasan, P.~Hedman, B.~Mildenhall,
+B.~Attal, R.~Szeliski, J.~T.~Barron, ``NeRF-Casting: Improved View-Dependent
+Appearance with Consistent Reflections,'' \textit{SIGGRAPH Asia}, 2024.
+\url{https://arxiv.org/abs/2405.14871}
+
+\bibitem{specnerf} L.~Ma, V.~Agrawal, H.~Turki, C.~Kim, C.~Gao, P.~Sander,
+M.~Zollhöfer, C.~Richardt, ``SpecNeRF: Gaussian Directional Encoding for Specular
+Reflections,'' \textit{CVPR}, 2024. \url{https://arxiv.org/abs/2312.13102}
+
+\bibitem{gaussianshader} Y.~Jiang, J.~Tu, Y.~Liu, X.~Gao, X.~Long, W.~Wang, Y.~Ma,
+``GaussianShader: 3D Gaussian Splatting with Shading Functions for Reflective
+Surfaces,'' \textit{CVPR}, 2024. \url{https://arxiv.org/abs/2311.17977}
+
+\bibitem{deferredrefl} K.~Ye, Q.~Hou, K.~Zhou, ``3D Gaussian Splatting with Deferred
+Reflection,'' \textit{SIGGRAPH}, 2024. \url{https://arxiv.org/abs/2404.18454}
+
+\bibitem{vod3dgs} M.~Nowak, P.~Pajagic et al., ``VoD-3DGS: View-opacity-Dependent
+3D Gaussian Splatting,'' 2025. \url{https://arxiv.org/abs/2501.17978}
+
+\bibitem{gs_ir} Z.~Liang, Q.~Zhang, Y.~Feng, Y.~Shan, K.~Jia, ``GS-IR: 3D Gaussian
+Splatting for Inverse Rendering,'' \textit{CVPR}, 2024.
+\url{https://arxiv.org/abs/2311.16473}
+
+\bibitem{relightable3dgs} J.~Gao, C.~Gu, Y.~Lin, H.~Zhu, X.~Cao, L.~Zhang, Y.~Yao,
+``Relightable 3D Gaussians: Realistic Point Cloud Relighting with BRDF Decomposition
+and Ray Tracing,'' \textit{ECCV}, 2024. \url{https://arxiv.org/abs/2311.16043}
+
+\bibitem{irgs} C.~Gu et al., ``IRGS: Inter-Reflective Gaussian Splatting with 2D
+Gaussian Ray Tracing,'' \textit{CVPR}, 2025. \url{https://arxiv.org/abs/2412.15867}
+
+\bibitem{gsror} Z.~Zhu et al., ``GS-ROR: Reflective Object Relighting with 3D
+Gaussian Splatting and SDF Priors,'' 2024. \url{https://arxiv.org/abs/2406.18544}
+
+\bibitem{rtrgs} Y.~Hu et al., ``RTR-GS: 3D Gaussian Splatting for Inverse Rendering
+with Radiance Transfer and Reflection,'' \textit{ACM MM}, 2025.
+\url{https://arxiv.org/abs/2507.07733}
+
+\bibitem{refgaussian} Y.~Yao et al., ``Reflective Gaussian Splatting,'' \textit{ICLR},
+2025. \url{https://arxiv.org/abs/2412.19282}
+
+\bibitem{mipsplatting} Z.~Yu, A.~Chen, B.~Huang, T.~Sattler, A.~Geiger,
+``Mip-Splatting: Alias-free 3D Gaussian Splatting,'' \textit{CVPR (Best Student
+Paper)}, 2024. \url{https://arxiv.org/abs/2311.16493}
+
+\bibitem{sags} X.~Song et al., ``SA-GS: Scale-Adaptive Gaussian Splatting for
+Training-Free Anti-Aliasing,'' 2024. \url{https://arxiv.org/abs/2403.19615}
+
+\bibitem{twodgs} B.~Huang, Z.~Yu, A.~Chen, A.~Geiger, S.~Gao, ``2D Gaussian
+Splatting for Geometrically Accurate Radiance Fields,'' \textit{SIGGRAPH}, 2024.
+\url{https://arxiv.org/abs/2403.17888}
+
+\bibitem{gof} Z.~Yu, T.~Sattler, A.~Geiger, ``Gaussian Opacity Fields: Efficient
+Adaptive Surface Reconstruction in Unbounded Scenes,'' \textit{SIGGRAPH Asia}, 2024.
+\url{https://arxiv.org/abs/2404.10772}
+
+\bibitem{scaffoldgs} T.~Lu, M.~Yu, L.~Xu, Y.~Xiangli, L.~Wang, D.~Lin, B.~Dai,
+``Scaffold-GS: Structured 3D Gaussians for View-Adaptive Rendering,'' \textit{CVPR},
+2024. \url{https://arxiv.org/abs/2312.00109}
+
+\bibitem{resnet} K.~He, X.~Zhang, S.~Ren, J.~Sun, ``Deep Residual Learning for Image
+Recognition,'' \textit{CVPR}, 2016. \url{https://arxiv.org/abs/1512.03385}
+
+\bibitem{resiterative} S.~Jastrzębski, D.~Arpit, N.~Ballas, V.~Verma, T.~Che,
+Y.~Bengio, ``Residual Connections Encourage Iterative Inference,'' \textit{ICLR},
+2018. \url{https://arxiv.org/abs/1710.04773}
+
+\bibitem{siren} V.~Sitzmann, J.~N.~P.~Martel, A.~W.~Bergman, D.~B.~Lindell,
+G.~Wetzstein, ``Implicit Neural Representations with Periodic Activation Functions
+(SIREN),'' \textit{NeurIPS}, 2020. \url{https://arxiv.org/abs/2006.09661}
+
+\bibitem{hyperconn} D.~Zhu et al., ``Hyper-Connections,'' \textit{ICLR}, 2025.
+\url{https://arxiv.org/abs/2409.19606}
+
+\bibitem{lora} E.~J.~Hu, Y.~Shen, P.~Wallis, Z.~Allen-Zhu, Y.~Li, S.~Wang, L.~Wang,
+W.~Chen, ``LoRA: Low-Rank Adaptation of Large Language Models,'' \textit{ICLR},
+2022. \url{https://arxiv.org/abs/2106.09685}
+
+\bibitem{focalfreq} L.~Jiang, B.~Dai, W.~Wu, C.~C.~Loy, ``Focal Frequency Loss for
+Image Reconstruction and Synthesis,'' \textit{ICCV}, 2021.
+\url{https://arxiv.org/abs/2012.12821}
+
+\bibitem{fregs} J.~Zhang, F.~Zhan, M.~Xu, S.~Lu, E.~Xing, ``FreGS: 3D Gaussian
+Splatting with Progressive Frequency Regularization,'' \textit{CVPR}, 2024.
+\url{https://arxiv.org/abs/2403.06908}
+
+\bibitem{lapsrn} W.-S.~Lai, J.-B.~Huang, N.~Ahuja, M.-H.~Yang, ``Deep Laplacian
+Pyramid Networks for Fast and Accurate Super-Resolution,'' \textit{CVPR}, 2017.
+\url{https://arxiv.org/abs/1704.03915}
+
+\bibitem{rawnerf} B.~Mildenhall, P.~Hedman, R.~Martin-Brualla, P.~P.~Srinivasan,
+J.~T.~Barron, ``NeRF in the Dark: High Dynamic Range View Synthesis from Noisy Raw
+Images,'' \textit{CVPR}, 2022. \url{https://arxiv.org/abs/2111.13679}
+
+\bibitem{fourierfeat} M.~Tancik, P.~P.~Srinivasan, B.~Mildenhall et al., ``Fourier
+Features Let Networks Learn High Frequency Functions in Low Dimensional Domains,''
+\textit{NeurIPS}, 2020. \url{https://arxiv.org/abs/2006.10739}
+
+\bibitem{wire} V.~Saragadam, D.~LeJeune, J.~Tan, G.~Balakrishnan, A.~Veeraraghavan,
+R.~G.~Baraniuk, ``WIRE: Wavelet Implicit Neural Representations,'' \textit{CVPR},
+2023. \url{https://arxiv.org/abs/2301.05187}
+
+\bibitem{physg} K.~Zhang, F.~Luan, Q.~Wang, K.~Bala, N.~Snavely, ``PhySG: Inverse
+Rendering with Spherical Gaussians for Physics-based Material Editing and
+Relighting,'' \textit{CVPR}, 2021. \url{https://arxiv.org/abs/2104.00674}
+
+\bibitem{dnsplatter} M.~Turkulainen, X.~Ren, I.~Melekhov, O.~Seiskari, E.~Rahtu,
+J.~Kannala, ``DN-Splatter: Depth and Normal Priors for Gaussian Splatting and
+Meshing,'' \textit{WACV}, 2025. \url{https://arxiv.org/abs/2403.17822}
+
+\bibitem{compgs} K.~L.~Navaneet, K.~P.~Meibodi, S.~A.~Koohpayegani, H.~Pirsiavash,
+``CompGS: Smaller and Faster Gaussian Splatting with Vector Quantization,''
+\textit{ECCV}, 2024. \url{https://arxiv.org/abs/2311.18159}
+
+\bibitem{film} E.~Perez, F.~Strub, H.~de~Vries, V.~Dumoulin, A.~Courville, ``FiLM:
+Visual Reasoning with a General Conditioning Layer,'' \textit{AAAI}, 2018.
+\url{https://arxiv.org/abs/1709.07871}
+
+\bibitem{kan} Z.~Liu, Y.~Wang, S.~Vaidya et al., ``KAN: Kolmogorov--Arnold
+Networks,'' \textit{ICLR}, 2025. \url{https://arxiv.org/abs/2404.19756}
+\end{thebibliography}

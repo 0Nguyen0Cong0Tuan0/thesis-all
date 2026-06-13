@@ -130,7 +130,24 @@ class OptimizationParams(ParamGroup):
         self.sh_decay_steps = 2000
         self.sh_scale_min = 0.3
         self.sh_scale_after = 0.5
-        
+
+        # v2.5 (2026-06-13): specular-targeted supervision (root cause A).
+        # The global L1+DSSIM loss drowns the ~5% highlight pixels under the 95%
+        # diffuse region, so the MLP underfits and the residual comes out dim+blurry
+        # (gain a*>1, σ~4.9). This adds a weighted L1 on the top-(1-quantile) GT
+        # luminance pixels to restore highlight gradient drive. weight=0 disables it
+        # (default path unchanged); the recommended test value is 0.5.
+        # Ablation: results/MLP_LATENT_ABLATION_2026-06-13.md.
+        self.spec_loss_weight = 0.0
+        self.spec_loss_quantile = 0.97
+
+        # v2.5: opt-in alternative specular architecture (utils/spec_arch.py).
+        # JSON dict, e.g. '{"activation":"relu","latent_mode":"lowrank","rank":8}'.
+        # Empty string keeps the original SpecularNetwork. Can also be set via the
+        # SPEC_ARCH env var. The ablation found low-rank latent best (quality+compact);
+        # SIREN/WIRE do NOT help — keep relu.
+        self.spec_arch = ""
+
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):
