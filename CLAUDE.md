@@ -103,6 +103,23 @@ env (wired in `SpecularModel`), e.g. `{"activation":"relu","latent_mode":"lowran
 Defaults leave the v2.4 path unchanged. CODE_VERSION bumped to v2.5; new params logged to
 train_info.json.
 
+**v2.5 results (2026-06-14, Kaggle counter) — BOTH NEGATIVE.** R1 (spec_loss_weight 0.5,
+luminance mask): PSNR 30.41→29.72, SSIM 0.9232→0.918, energyRatio 0.388→0.363, NCC
+0.529→0.475, Gaussians 587k→**768k (+31%)**. Root cause of failure: the mask is GT-LUMINANCE
+top-3% → catches bright DIFFUSE (counter/walls), not specular → drives bad densification.
+R2 (R1 + low-rank rank-8 latent): WORSE still (PSNR 29.59, energyRatio **0.322**, NCC
+**0.437** — lowest of all). The synthetic ablation's "low-rank is best" did NOT transfer:
+architecture can't compensate for a bad supervision signal + noisy normals. **v2.3 stays
+strict Pareto-best.** Report tables (tab:sf_quant/sf_spec) + analysis bullets updated.
+
+**v2.6 (2026-06-14) implemented — re-targeted specular loss (fixes R1's flaw).** New opt
+`--spec_loss_mode residual` (default; "luminance" kept for repro): mask = top-(1−quantile)
+of **|GT − diffuse|** (no-grad SH-only render), the same locator the diagnostic uses → true
+specular, ignores bright-flat diffuse. Run via `run_spec-fastgs_big_r3.sh`
+(`--spec_loss_weight 0.15 --spec_loss_quantile 0.95 --spec_loss_mode residual`, arch
+unchanged to isolate). CODE_VERSION→v2.6; spec_loss_mode logged. Defaults still no-op
+(weight 0). Prediction: energyRatio/NCC up, gain a*→1, no Gaussian blow-up. Pending Kaggle run.
+
 Sources: Residual Connections (arXiv:1710.04773), Hyper-Connections (arXiv:2409.19606),
 SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454),
 SIREN (arXiv:2006.09661), WIRE (arXiv:2301.05187), LoRA (arXiv:2106.09685),

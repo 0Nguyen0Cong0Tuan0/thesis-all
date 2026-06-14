@@ -510,9 +510,9 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
     trùng khít (chênh lệch PSNR $<0.03$ dB, SSIM/LPIPS trùng đến chữ số thứ tư), nên
     Bảng~\ref{tab:sf_quant} và \ref{tab:sf_spec} trình bày lần chạy đại diện. Hai dòng
     \textbf{v2.5-R1} (chỉ thêm mất mát có trọng số cho phản xạ --- nguyên nhân A) và
-    \textbf{v2.5-R2} (thêm cả latent ASG hạng thấp) tương ứng với hai kịch bản kiểm
-    chứng đang chạy trên Kaggle (\texttt{run\_spec-fastgs\_big\_r1.sh} /
-    \texttt{r2.sh}); số liệu sẽ được điền sau khi hoàn tất.
+    \textbf{v2.5-R2} (thêm cả latent ASG hạng thấp trên nền R1) là hai kịch bản kiểm
+    chứng (\texttt{run\_spec-fastgs\_big\_r1.sh} / \texttt{r2.sh}, commit
+    \texttt{fa0d1d1}) đã chạy xong; số liệu được phân tích bên dưới.
 
     \begin{table}[h]
     \centering
@@ -527,7 +527,7 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
     v2.3 (tối ưu)     & \textbf{75m55s} & \textbf{560{,}549} & \textbf{8892} & 30.44 & 0.9231 & 0.169 \\
     v2.4 (nới lỏng)   & 75m40s & 587{,}575 & 9072 & 30.41 & 0.9232 & 0.169 \\
     v2.5-R1 (mất mát phản xạ) & 95m44s & 768{,}030 & 9993 & 29.72 & 0.9182 & 0.171 \\
-    v2.5-R2 (\,+\,latent hạng thấp) & 93m37s & 769{,}222 & 10014 & --- & --- & --- \\
+    v2.5-R2 (\,+\,latent hạng thấp) & 94m50s & 767{,}536 & 10003 & 29.59 & 0.9164 & 0.173 \\
     \bottomrule
     \end{tabular}
     \end{table}
@@ -547,7 +547,7 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
     v2.3 (tối ưu)   & 0.428 & 0.541 & 4.90 \\
     v2.4 (nới lỏng) & 0.388 & 0.529 & 4.90 \\
     v2.5-R1 (mất mát phản xạ) & 0.363 & 0.475 & 5.00 \\
-    v2.5-R2 (\,+\,latent hạng thấp) & --- & --- & --- \\
+    v2.5-R2 (\,+\,latent hạng thấp) & 0.322 & 0.437 & 5.00 \\
     \bottomrule
     \end{tabular}
     \end{table}
@@ -583,6 +583,37 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
         thiếu hụt phản xạ; nới lỏng chúng chỉ tốn ngân sách Gaussian và VRAM mà không
         mua lại được độ trung thực highlight nào. Do đó v2.4 \textit{kém hơn} v2.3 một
         cách chặt chẽ (cùng chất lượng, nhiều Gaussian hơn, nhiều VRAM hơn).
+        \item \textbf{v2.5-R1 --- mất mát có trọng số cho phản xạ: nguyên nhân A bị
+        bác bỏ ở dạng hiện tại.} Thêm số hạng L1 có trọng số trên top-3\% pixel sáng
+        nhất (\texttt{spec\_loss\_weight}$=0.5$) \textit{không} cải thiện phản xạ mà
+        còn làm xấu mọi chỉ số: PSNR $30.41\to 29.72$ ($-0.69$ dB), SSIM
+        $0.9232\to 0.9182$, energyRatio $0.388\to 0.363$, NCC $0.529\to 0.475$. Đáng
+        chú ý nhất, số Gaussian \textbf{tăng vọt} $588\text{k}\to 768\text{k}$
+        ($+31\%$) và thời gian huấn luyện tăng lên $95\text{m}44\text{s}$. Nguyên nhân
+        gốc của thất bại nằm ở \textit{cách định nghĩa mặt nạ}: mặt nạ dựa trên
+        \textbf{độ sáng (luminance) của ảnh GT}, nên nó bắt nhầm các vùng
+        \textit{khuếch tán sáng} (mặt bàn trắng, tường sáng) thay vì các highlight
+        phản xạ thực sự. Trọng số phụ vì thế ép densification nhồi thêm hình học
+        Lambertian vào vùng sáng --- đúng cơ chế đã thấy ở v2.4 nhưng mạnh hơn ---
+        khiến mô hình phình to mà năng lượng specular vẫn tụt. Đây là một kết quả
+        \textit{âm tính có giá trị}: nó cho thấy việc sửa nguyên nhân A đòi hỏi mặt nạ
+        phải nhắm vào \textbf{phần dư phản xạ} (render $-$ diffuse), không phải độ sáng
+        tuyệt đối.
+        \item \textbf{v2.5-R2 --- thêm latent ASG hạng thấp: không cứu được tín hiệu
+        giám sát sai.} Chồng thêm latent ASG hạng thấp (rank-8) lên cấu hình R1 cho
+        kết quả \textit{nhỉnh hơn về tệ}: PSNR $29.59$, SSIM $0.9164$, LPIPS $0.173$,
+        và đặc biệt energyRatio rơi xuống $0.322$ cùng NCC $0.437$ --- thấp nhất trong
+        toàn bộ các phiên bản. Điều này \textbf{trái với dự đoán} từ phân tích cô lập
+        không-GPU (Bảng~\ref{tab:sf_ablation}), nơi latent hạng thấp đạt NCC tốt nhất trên dữ liệu
+        \textit{tổng hợp sạch}. Khác biệt khẳng định luận điểm trung tâm: khi đầu vào
+        đã bị nhiễu (pháp tuyến trục-nhỏ ồn, nguyên nhân B) \textit{và} tín hiệu giám
+        sát bị nhắm sai (mặt nạ độ sáng, R1), thì \textbf{thay đổi kiến trúc latent
+        không thể bù đắp}; nén latent thậm chí làm giảm thêm dung lượng phụ thuộc góc
+        nhìn, kéo năng lượng specular xuống sâu hơn. Kết luận: v2.3 vẫn là cấu hình
+        \textbf{Pareto-tốt nhất} (chất lượng tương đương baseline, nhanh hơn $38\%$,
+        ít Gaussian nhất); hai hướng còn mở là (i) định nghĩa lại mặt nạ phản xạ theo
+        phần dư render$-$diffuse với trọng số nhỏ hơn ($0.1$--$0.2$), và (ii) bổ sung
+        tiên nghiệm pháp tuyến (DN-Splatter) cho nguyên nhân B.
     \end{itemize}
 
     \subsection{Kết quả định tính (Qualitative Results)}

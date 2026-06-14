@@ -131,15 +131,26 @@ class OptimizationParams(ParamGroup):
         self.sh_scale_min = 0.3
         self.sh_scale_after = 0.5
 
-        # v2.5 (2026-06-13): specular-targeted supervision (root cause A).
+        # v2.5/v2.6: specular-targeted supervision (root cause A).
         # The global L1+DSSIM loss drowns the ~5% highlight pixels under the 95%
         # diffuse region, so the MLP underfits and the residual comes out dim+blurry
-        # (gain a*>1, σ~4.9). This adds a weighted L1 on the top-(1-quantile) GT
-        # luminance pixels to restore highlight gradient drive. weight=0 disables it
-        # (default path unchanged); the recommended test value is 0.5.
+        # (gain a*>1, σ~4.9). This adds a weighted L1 on a highlight mask.
+        # weight=0 disables it (default path unchanged).
+        #
+        # spec_loss_mode selects HOW the mask is built:
+        #   "residual"  (v2.6, default): mask = top-(1-quantile) of |GT - diffuse|,
+        #       where diffuse is a no-grad SH-only render. This is the SAME locator the
+        #       diagnostic uses (results/analysis_out) — it targets energy NOT explained
+        #       by the diffuse base, i.e. true specular, and ignores bright-but-flat
+        #       diffuse surfaces.
+        #   "luminance" (v2.5, deprecated): mask = top-(1-quantile) of GT luminance.
+        #       FALSIFIED: it catches bright DIFFUSE (white counter/walls), drove +31%
+        #       Gaussians and REGRESSED every metric (v2.5-R1). Kept for reproducibility.
+        # Recommended for residual mode: weight 0.1-0.2, quantile ~0.95 (top 5%).
         # Ablation: results/MLP_LATENT_ABLATION_2026-06-13.md.
         self.spec_loss_weight = 0.0
         self.spec_loss_quantile = 0.97
+        self.spec_loss_mode = "residual"
 
         # v2.5: opt-in alternative specular architecture (utils/spec_arch.py).
         # JSON dict, e.g. '{"activation":"relu","latent_mode":"lowrank","rank":8}'.
