@@ -132,6 +132,20 @@ open). R3 doesn't strictly Pareto-dominate v2.3 (trades +14% Gaussians/slower/sl
 lower SSIM-NCC for much higher specular energy). **NEXT = root cause B: normal priors
 (DN-Splatter) / optimized per-Gaussian normals** to fix NCC/σ — the sole remaining limiter.
 
+**v2.7 (2026-06-15) implemented — monocular normal prior (root cause B, DN-Splatter style).**
+Opt-in `--normal_prior_weight` (default 0 → no-op). When active, train.py renders the
+per-Gaussian normals (via `render_fastgs(..., override_color=get_normal_axis(all))`, bg=0),
+transforms world→camera (`n_world @ Wv[:3,:3]`, OpenCV frame), and applies a cosine loss vs
+a precomputed monocular normal map — gradient flows through `get_normal_axis` into
+scaling/rotation, reshaping geometry toward true surface orientation to fix the specular
+PLACEMENT (NCC/σ) the residual loss left flat. Priors generated offline by
+`tools/gen_normal_priors.py` (default Marigold via diffusers, converted to OpenCV frame;
+DSINE alt), saved `<source>/normals/<image_name>.npy`. A one-time startup diagnostic prints
+mean cos(render,prior) (want >0; `--normal_prior_flip` if negative). Run via
+`run_spec-fastgs_big_r4.sh` (R3 config + `--normal_prior_weight 0.05`, isolates the normal
+prior). CODE_VERSION→v2.7; new params logged. Prediction: NCC up, σ down, energyRatio holds.
+Pending Kaggle run (needs the one-time preprocessing pass first).
+
 Sources: Residual Connections (arXiv:1710.04773), Hyper-Connections (arXiv:2409.19606),
 SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454),
 SIREN (arXiv:2006.09661), WIRE (arXiv:2301.05187), LoRA (arXiv:2106.09685),

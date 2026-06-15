@@ -30,7 +30,7 @@ except:
 
 # Bump whenever training behavior changes; printed at startup and written to
 # train_info.json so every result folder identifies the code that produced it.
-CODE_VERSION = "v2.6-2026-06-14 (v2.5 + re-targeted specular loss: mask on |GT-diffuse| residual not luminance [root cause A, fixes v2.5-R1])"
+CODE_VERSION = "v2.7-2026-06-15 (v2.6 + opt-in monocular normal prior [root cause B, DN-Splatter style]: cosine loss render-normal vs precomputed normal map -> fixes specular placement)"
 
 
 # ============================================================
@@ -47,6 +47,7 @@ def training(dataset, opt, pipe):
           f"sh_decay_steps={getattr(opt, 'sh_decay_steps', 'N/A')} | "
           f"spec_loss_weight={getattr(opt, 'spec_loss_weight', 'N/A')} | "
           f"spec_loss_mode={getattr(opt, 'spec_loss_mode', 'N/A')} | "
+          f"normal_prior_weight={getattr(opt, 'normal_prior_weight', 'N/A')} | "
           f"spec_arch={getattr(opt, 'spec_arch', '') or os.environ.get('SPEC_ARCH','')}")
     tb_writer = prepare_output_and_logger(dataset)
 
@@ -95,6 +96,33 @@ def training(dataset, opt, pipe):
     # After densification the Gaussian count changes → size mismatch is detected
     # and we fall back to evaluating the full set for that single step.
     vis_cache: dict = {}
+
+    # ── v2.7 (root cause B): monocular normal-prior cache ──
+    # Lazily load <source>/<normal_prior_dir>/<image_name>.npy maps (OpenCV camera
+    # frame, [H,W,3] in [-1,1]) keyed by image_name, kept on CPU to bound VRAM and
+    # moved to GPU per use. None = no prior file for this view (skipped). Only touched
+    # when normal_prior_weight > 0, so the default path allocates nothing.
+    normal_cache: dict = {}
+    _normal_diag_done = [False]  # one-time alignment diagnostic guard
+
+    def _load_normal_prior(image_name, H, W):
+        if image_name in normal_cache:
+            t = normal_cache[image_name]
+            return None if t is None else t.cuda()
+        path = os.path.join(dataset.source_path, opt.normal_prior_dir, image_name + ".npy")
+        if not os.path.exists(path):
+            normal_cache[image_name] = None
+            return None
+        arr = np.load(path).astype(np.float32)           # [h,w,3] OpenCV camera frame
+        t = torch.from_numpy(arr).permute(2, 0, 1)        # [3,h,w]
+        if t.shape[1] != H or t.shape[2] != W:            # match render resolution
+            t = torch.nn.functional.interpolate(
+                t.unsqueeze(0), size=(H, W), mode="nearest"
+            ).squeeze(0)
+        if getattr(opt, "normal_prior_flip", False):
+            t = -t
+        normal_cache[image_name] = t.cpu()
+        return t.cuda()
 
     for iteration in progress_bar:
 
@@ -245,6 +273,42 @@ def training(dataset, opt, pipe):
             spec_l1 = ((image - gt).abs().mean(dim=0) * hmask).sum() / denom
             loss = loss + opt.spec_loss_weight * spec_l1
 
+        # v2.7 (root cause B): monocular normal-prior supervision (DN-Splatter style).
+        # Render the per-Gaussian normals into an image (override_color path, bg=0 so
+        # uncovered pixels are the zero vector → masked out), transform world→camera
+        # (OpenCV: n_cam = n_world @ Wv[:3,:3], the row-vector convention used here),
+        # and align to the precomputed monocular prior via a cosine loss. Gradients flow
+        # through get_normal_axis into scaling/rotation, reshaping geometry toward true
+        # surface orientation → fixes the specular PLACEMENT (NCC/σ) that the residual
+        # loss could not. One extra normal render + one get_normal_axis over all N, only
+        # when active. weight=0 -> no-op.
+        if getattr(opt, "normal_prior_weight", 0.0) > 0.0 and iteration > opt.specular_start_iter:
+            prior = _load_normal_prior(cam.image_name, image.shape[1], image.shape[2])
+            if prior is not None:
+                # world-space per-Gaussian normals (flipped toward this view), all N
+                viewdir_all = gaussians.get_xyz - cam.camera_center
+                viewdir_all = viewdir_all / (viewdir_all.norm(dim=1, keepdim=True) + 1e-6)
+                n_world = gaussians.get_normal_axis(viewdir_all)            # [N,3]
+                bg_zero = torch.zeros(3, dtype=torch.float32, device="cuda")
+                normal_img = render_fastgs(
+                    cam, gaussians, pipe, bg_zero, opt.mult, override_color=n_world
+                )["render"]                                                # [3,H,W]
+                nw = normal_img.permute(1, 2, 0).reshape(-1, 3)            # [HW,3] world
+                R_w2c = cam.world_view_transform[:3, :3]                   # [3,3]
+                n_cam = nw @ R_w2c                                         # [HW,3] camera
+                n_cam = n_cam / (n_cam.norm(dim=1, keepdim=True) + 1e-6)
+                p = prior.permute(1, 2, 0).reshape(-1, 3)                  # [HW,3] camera
+                valid = p.norm(dim=1) > 0.5                                # drop bg/invalid
+                if valid.any():
+                    cos = (n_cam[valid] * p[valid]).sum(dim=1)
+                    normal_loss = (1.0 - cos).mean()
+                    loss = loss + opt.normal_prior_weight * normal_loss
+                    if not _normal_diag_done[0]:
+                        _normal_diag_done[0] = True
+                        print(f"\n[normal-prior] alignment check @iter {iteration}: "
+                              f"mean cos(render,prior)={cos.mean().item():+.3f} "
+                              f"(want >0; if strongly negative set --normal_prior_flip)")
+
         loss.backward()
 
         # --------------------------------------------------------
@@ -381,6 +445,9 @@ def training(dataset, opt, pipe):
         "spec_loss_weight": getattr(opt, "spec_loss_weight", None),
         "spec_loss_quantile": getattr(opt, "spec_loss_quantile", None),
         "spec_loss_mode": getattr(opt, "spec_loss_mode", None),
+        "normal_prior_weight": getattr(opt, "normal_prior_weight", None),
+        "normal_prior_dir": getattr(opt, "normal_prior_dir", None),
+        "normal_prior_flip": getattr(opt, "normal_prior_flip", None),
         "spec_arch": getattr(opt, "spec_arch", "") or os.environ.get("SPEC_ARCH", ""),
         "initial_gaussians": initial_gaussians,
         "final_gaussians": gaussians.get_xyz.shape[0],

@@ -152,6 +152,20 @@ class OptimizationParams(ParamGroup):
         self.spec_loss_quantile = 0.97
         self.spec_loss_mode = "residual"
 
+        # v2.7 (root cause B): monocular normal prior (DN-Splatter, arXiv:2403.17822).
+        # v2.6-R3 proved the residual-mask loss fixes specular MAGNITUDE (energy+gain)
+        # but NOT placement (NCC/σ flat) — the fingerprint of noisy min-axis normals.
+        # This supervises the rendered per-Gaussian normal against a precomputed
+        # monocular normal map (see tools/gen_normal_priors.py) via a cosine loss, so
+        # the geometry is reshaped toward true surface orientation. weight=0 disables it
+        # (default path unchanged). normal_prior_dir is a subfolder of the source path
+        # holding <image_name>.npy maps (OpenCV camera frame). normal_prior_flip negates
+        # the prior if the startup alignment diagnostic reports anti-correlation
+        # (convention mismatch). Recommended test value: weight 0.02-0.05.
+        self.normal_prior_weight = 0.0
+        self.normal_prior_dir = "normals"
+        self.normal_prior_flip = False
+
         # v2.5: opt-in alternative specular architecture (utils/spec_arch.py).
         # JSON dict, e.g. '{"activation":"relu","latent_mode":"lowrank","rank":8}'.
         # Empty string keeps the original SpecularNetwork. Can also be set via the
