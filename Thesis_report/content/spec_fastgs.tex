@@ -508,11 +508,13 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
     loại trừ khả năng nhầm lẫn với mã nguồn cũ. Riêng v2.4 được chạy \textbf{hai lần
     độc lập} với cùng cấu hình để kiểm tra độ ổn định; hai lần cho kết quả gần như
     trùng khít (chênh lệch PSNR $<0.03$ dB, SSIM/LPIPS trùng đến chữ số thứ tư), nên
-    Bảng~\ref{tab:sf_quant} và \ref{tab:sf_spec} trình bày lần chạy đại diện. Hai dòng
-    \textbf{v2.5-R1} (chỉ thêm mất mát có trọng số cho phản xạ --- nguyên nhân A) và
-    \textbf{v2.5-R2} (thêm cả latent ASG hạng thấp trên nền R1) là hai kịch bản kiểm
-    chứng (\texttt{run\_spec-fastgs\_big\_r1.sh} / \texttt{r2.sh}, commit
-    \texttt{fa0d1d1}) đã chạy xong; số liệu được phân tích bên dưới.
+    Bảng~\ref{tab:sf_quant} và \ref{tab:sf_spec} trình bày lần chạy đại diện. Ba dòng
+    cuối là chuỗi kiểm chứng nguyên nhân A: \textbf{v2.5-R1} (thêm mất mát có trọng số
+    cho phản xạ với mặt nạ \textit{độ sáng}), \textbf{v2.5-R2} (R1 $+$ latent ASG hạng
+    thấp), và \textbf{v2.6-R3} (sửa mặt nạ thành \textit{phần dư} $|$GT$-$diffuse$|$ ---
+    commit \texttt{95469d3}, \texttt{run\_spec-fastgs\_big\_r3.sh}). R3 là phiên bản
+    \textbf{xác nhận giả thuyết nguyên nhân A}: nó là lần đầu tiên kể từ v2.2 đảo chiều
+    được đà suy giảm năng lượng phản xạ. Số liệu được phân tích bên dưới.
 
     \begin{table}[h]
     \centering
@@ -528,6 +530,7 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
     v2.4 (nới lỏng)   & 75m40s & 587{,}575 & 9072 & 30.41 & 0.9232 & 0.169 \\
     v2.5-R1 (mất mát phản xạ) & 95m44s & 768{,}030 & 9993 & 29.72 & 0.9182 & 0.171 \\
     v2.5-R2 (\,+\,latent hạng thấp) & 94m50s & 767{,}536 & 10003 & 29.59 & 0.9164 & 0.173 \\
+    v2.6-R3 (mặt nạ phần dư) & 93m50s & 672{,}514 & 10014 & 30.43 & 0.9207 & 0.170 \\
     \bottomrule
     \end{tabular}
     \end{table}
@@ -548,6 +551,7 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
     v2.4 (nới lỏng) & 0.388 & 0.529 & 4.90 \\
     v2.5-R1 (mất mát phản xạ) & 0.363 & 0.475 & 5.00 \\
     v2.5-R2 (\,+\,latent hạng thấp) & 0.322 & 0.437 & 5.00 \\
+    v2.6-R3 (mặt nạ phần dư) & \underline{0.461} & 0.526 & 4.78 \\
     \bottomrule
     \end{tabular}
     \end{table}
@@ -614,7 +618,30 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
         ít Gaussian nhất); hai hướng còn mở là (i) định nghĩa lại mặt nạ phản xạ theo
         phần dư render$-$diffuse với trọng số nhỏ hơn ($0.1$--$0.2$), và (ii) bổ sung
         tiên nghiệm pháp tuyến (DN-Splatter) cho nguyên nhân B.
-    \end{itemize}
+        \item \textbf{v2.6-R3 --- mặt nạ phần dư: nguyên nhân A được xác nhận.} Khi đổi
+        mặt nạ sang \textbf{phần dư $|$GT$-$diffuse$|$} (cùng bộ định vị mà công cụ chẩn
+        đoán dùng) và hạ trọng số xuống $0.15$, \textbf{cả hai dự đoán đều đúng}.
+        (1)~\textbf{Năng lượng phản xạ phục hồi}: energyRatio $0.388\to \underline{0.461}$
+        ($+19\%$ tương đối) --- lần đầu tiên kể từ v2.2 chỉ số này \textit{tăng}, và đã
+        vượt cả v2.3 ($0.428$). (2)~\textbf{Độ sáng lớp phản xạ được hiệu chỉnh}: gain
+        $a^* = 1.033$, gần $1$ nhất trong mọi phiên bản (R1/R2 ở mức $\sim 1.07$, tức
+        quá mờ). (3)~\textbf{Không có hiện tượng phình Gaussian}: $672\text{k}$ so với
+        $768\text{k}$ của R1/R2 --- mức tăng so với v2.4 thu hẹp từ $+31\%$ xuống
+        $+14\%$, và PSNR toàn cục hồi phục hoàn toàn ($30.43 \approx$ v2.4 $30.41$),
+        khẳng định đúng chẩn đoán rằng mặt nạ độ sáng trước đó đã \textit{lái nhầm}
+        densification vào vùng khuếch tán sáng. \textbf{Điều \textit{không} cải thiện ---
+        và đây mới là phát hiện quan trọng:} NCC gần như đứng yên ($0.529\to 0.526$),
+        \texttt{structural\%} vẫn $98.9\%$, $\sigma$ chỉ nhích $4.90\to 4.78$. Nghĩa là
+        giám sát phần dư sửa được \textbf{cường độ} (năng lượng $+$ độ sáng) nhưng
+        \textit{không} sửa được \textbf{vị trí/độ sắc} của highlight. Đây chính là dấu
+        vân tay còn lại của \textbf{nguyên nhân B (pháp tuyến trục-nhỏ ồn)}: mất mát có
+        thể bảo MLP highlight \textit{phải sáng bao nhiêu}, nhưng nếu pháp tuyến từng
+        Gaussian sai thì thuỳ phản xạ vẫn đặt lệch chỗ và nhoè. Kết quả này \textbf{tách
+        bạch rạch ròi hai nguyên nhân về mặt thực nghiệm}: A đã giải quyết được bằng
+        giám sát, B vẫn mở và cần tiên nghiệm pháp tuyến (DN-Splatter). Về Pareto,
+        R3 \textit{không} áp đảo v2.3 (đổi $+14\%$ Gaussian, chậm hơn, SSIM/NCC giảm nhẹ
+        lấy năng lượng phản xạ cao hơn rõ rệt), nhưng nó là bằng chứng quyết định rằng
+        \textbf{giám sát có định hướng chẩn đoán là đòn bẩy đúng} cho thiếu hụt phản xạ.
 
     \subsection{Kết quả định tính (Qualitative Results)}
     Hình~\ref{fig:sf_speclayer} so sánh trực tiếp \textit{năng lượng lớp phản xạ}

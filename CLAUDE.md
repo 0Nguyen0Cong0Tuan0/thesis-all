@@ -118,7 +118,19 @@ of **|GT − diffuse|** (no-grad SH-only render), the same locator the diagnosti
 specular, ignores bright-flat diffuse. Run via `run_spec-fastgs_big_r3.sh`
 (`--spec_loss_weight 0.15 --spec_loss_quantile 0.95 --spec_loss_mode residual`, arch
 unchanged to isolate). CODE_VERSION→v2.6; spec_loss_mode logged. Defaults still no-op
-(weight 0). Prediction: energyRatio/NCC up, gain a*→1, no Gaussian blow-up. Pending Kaggle run.
+(weight 0).
+
+**v2.6-R3 results (2026-06-15, Kaggle counter) — FIRST POSITIVE; root cause A CONFIRMED.**
+energyRatio **0.388→0.461** (+19% rel, first rise since v2.2, beats v2.3's 0.428), gain
+a* **1.033** (closest-to-1 of any version; R1/R2 ~1.07 = too dim), Gaussians **672k** (vs
+R1/R2's 768k → inflation +31%→+14%), PSNR fully recovered 30.43≈v2.4, SSIM 0.9207, LPIPS
+0.170. **But NCC flat (0.529→0.526), structural% 98.9%, σ 4.90→4.78** — the residual-mask
+loss fixes MAGNITUDE (energy+brightness), NOT placement/sharpness. That residual is the
+fingerprint of **root cause B (noisy min-axis normals)**: supervision sets how-bright,
+normals set where. v2.6 empirically SEPARATES the two causes (A solved by supervision, B
+open). R3 doesn't strictly Pareto-dominate v2.3 (trades +14% Gaussians/slower/slightly
+lower SSIM-NCC for much higher specular energy). **NEXT = root cause B: normal priors
+(DN-Splatter) / optimized per-Gaussian normals** to fix NCC/σ — the sole remaining limiter.
 
 Sources: Residual Connections (arXiv:1710.04773), Hyper-Connections (arXiv:2409.19606),
 SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454),
