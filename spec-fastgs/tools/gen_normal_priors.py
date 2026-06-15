@@ -40,18 +40,38 @@ def list_images(img_dir):
     return sorted(files)
 
 
-def save_normal(out_dir, stem, n_cv):
-    """n_cv: [H,W,3] float in [-1,1], OpenCV camera frame. Saves .npy + .png preview."""
+def resize_to_max(img, max_size):
+    """PIL resize so the longest side <= max_size (no-op if already smaller)."""
+    if max_size <= 0:
+        return img
+    w, h = img.size
+    m = max(w, h)
+    if m <= max_size:
+        return img
+    s = max_size / float(m)
+    return img.resize((max(1, round(w * s)), max(1, round(h * s))), Image.BILINEAR)
+
+
+def save_normal(out_dir, stem, n_cv, save_preview=False):
+    """n_cv: [H,W,3] float in [-1,1], OpenCV camera frame. Saves .npy (+ optional .png).
+
+    The .npy (float16) is what train.py consumes; train.py resizes it to the render
+    resolution, so we deliberately store a DOWNSCALED map (see --max_size) to keep disk
+    usage sane — full-res maps are ~40 MB each and exhausted Kaggle's disk.
+    """
     os.makedirs(out_dir, exist_ok=True)
-    # re-normalize to unit length (guard against tiny drift), keep zeros as zeros
     norm = np.linalg.norm(n_cv, axis=2, keepdims=True)
     n_unit = np.where(norm > 1e-6, n_cv / np.maximum(norm, 1e-6), 0.0)
     np.save(os.path.join(out_dir, stem + ".npy"), n_unit.astype(np.float16))
-    prev = ((n_unit * 0.5 + 0.5) * 255.0).clip(0, 255).astype(np.uint8)
-    Image.fromarray(prev).save(os.path.join(out_dir, stem + ".png"))
+    if save_preview:
+        try:
+            prev = ((n_unit * 0.5 + 0.5) * 255.0).clip(0, 255).astype(np.uint8)
+            Image.fromarray(prev).save(os.path.join(out_dir, stem + ".png"))
+        except Exception as e:  # preview is non-essential; never abort the run for it
+            print(f"  [warn] preview save failed for {stem}: {e!r}")
 
 
-def run_marigold(images, out_dir, device="cuda"):
+def run_marigold(images, out_dir, device="cuda", max_size=1024, preview=3):
     import torch
     from diffusers import MarigoldNormalsPipeline
 
@@ -63,18 +83,18 @@ def run_marigold(images, out_dir, device="cuda"):
 
     for k, path in enumerate(images):
         stem = os.path.splitext(os.path.basename(path))[0]
-        img = Image.open(path).convert("RGB")
+        img = resize_to_max(Image.open(path).convert("RGB"), max_size)
         out = pipe(img)
         # diffusers returns prediction as np [1,H,W,3] in [-1,1], Marigold frame
         # (x right, y UP, z toward viewer). Convert to OpenCV (y down, z into scene).
         n = np.asarray(out.prediction)[0].astype(np.float32)  # [H,W,3]
         n_cv = np.stack([n[..., 0], -n[..., 1], -n[..., 2]], axis=2)
-        save_normal(out_dir, stem, n_cv)
+        save_normal(out_dir, stem, n_cv, save_preview=(k < preview))
         if (k + 1) % 10 == 0 or k == 0:
-            print(f"  [{k+1}/{len(images)}] {stem}")
+            print(f"  [{k+1}/{len(images)}] {stem} -> {n_cv.shape[1]}x{n_cv.shape[0]}")
 
 
-def run_dsine(images, out_dir, device="cuda"):
+def run_dsine(images, out_dir, device="cuda", max_size=1024, preview=3):
     # DSINE outputs OpenCV-frame normals directly (no conversion).
     import torch
     try:
@@ -87,13 +107,14 @@ def run_dsine(images, out_dir, device="cuda"):
     model = DSINE().to(device).eval()
     for k, path in enumerate(images):
         stem = os.path.splitext(os.path.basename(path))[0]
-        img = np.asarray(Image.open(path).convert("RGB")).astype(np.float32) / 255.0
+        pil = resize_to_max(Image.open(path).convert("RGB"), max_size)
+        img = np.asarray(pil).astype(np.float32) / 255.0
         t = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0).to(device)
         with torch.no_grad():
             n = model(t)[0].permute(1, 2, 0).cpu().numpy()  # [H,W,3], OpenCV
-        save_normal(out_dir, stem, n)
+        save_normal(out_dir, stem, n, save_preview=(k < preview))
         if (k + 1) % 10 == 0 or k == 0:
-            print(f"  [{k+1}/{len(images)}] {stem}")
+            print(f"  [{k+1}/{len(images)}] {stem} -> {n.shape[1]}x{n.shape[0]}")
 
 
 def main():
@@ -104,6 +125,12 @@ def main():
     ap.add_argument("-o", "--out", default="normals", help="output subfolder (under source)")
     ap.add_argument("--model", default="marigold", choices=["marigold", "dsine"])
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--max_size", type=int, default=1024,
+                    help="resize so the longest image side <= this before estimation; "
+                         "keeps .npy small (train.py resizes to render res anyway). "
+                         "0 = full resolution (large!).")
+    ap.add_argument("--preview", type=int, default=3,
+                    help="save a PNG preview for the first N images only (disk-friendly)")
     args = ap.parse_args()
 
     img_dir = os.path.join(args.source, args.images)
@@ -111,12 +138,13 @@ def main():
     images = list_images(img_dir)
     if not images:
         raise SystemExit(f"No images found in {img_dir}")
-    print(f"[normal-priors] {len(images)} images | model={args.model} | -> {out_dir}")
+    print(f"[normal-priors] {len(images)} images | model={args.model} | "
+          f"max_size={args.max_size} | -> {out_dir}")
 
     if args.model == "marigold":
-        run_marigold(images, out_dir, args.device)
+        run_marigold(images, out_dir, args.device, args.max_size, args.preview)
     else:
-        run_dsine(images, out_dir, args.device)
+        run_dsine(images, out_dir, args.device, args.max_size, args.preview)
     print("[normal-priors] done.")
 
 
