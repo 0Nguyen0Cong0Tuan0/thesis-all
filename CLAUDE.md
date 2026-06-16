@@ -143,8 +143,18 @@ PLACEMENT (NCC/σ) the residual loss left flat. Priors generated offline by
 DSINE alt), saved `<source>/normals/<image_name>.npy`. A one-time startup diagnostic prints
 mean cos(render,prior) (want >0; `--normal_prior_flip` if negative). Run via
 `run_spec-fastgs_big_r4.sh` (R3 config + `--normal_prior_weight 0.05`, isolates the normal
-prior). CODE_VERSION→v2.7; new params logged. Prediction: NCC up, σ down, energyRatio holds.
-Pending Kaggle run (needs the one-time preprocessing pass first).
+prior). CODE_VERSION→v2.7; new params logged.
+
+**v2.7-R4 results (2026-06-16) — normal prior WEAK-POSITIVE but underpowered.** Clean A/B
+(r3 weight 0 vs r4 weight 0.05): NCC 0.524→0.532, σ 4.82→4.80, energyRatio 0.457→0.466,
+structural% 98.74→98.54 — all four placement metrics nudged the RIGHT way (≈2× run-to-run
+noise) so the mechanism is correct, but far too small to matter, and +26% train time
+(93m→117m). Cause: weight 0.05 too low AND gated at iter 7000 (too late — geometry already
+converged). **v2.8 (2026-06-16) implemented:** new `normal_prior_start_iter` (−1 = fall back
+to specular_start_iter) lets the prior apply EARLY. `run_spec-fastgs_big_r5.sh` = R4 but
+weight 0.05→0.15 + `--normal_prior_start_iter 500` (shapes geometry during densification).
+CODE_VERSION→v2.8. Prediction: NCC clearly up / σ down if root cause B is fixable this way;
+if still flat, the Marigold prior signal itself is the limiter (switch to DSINE). Pending run.
 
 Sources: Residual Connections (arXiv:1710.04773), Hyper-Connections (arXiv:2409.19606),
 SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454),

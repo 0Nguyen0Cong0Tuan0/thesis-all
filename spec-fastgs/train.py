@@ -30,7 +30,7 @@ except:
 
 # Bump whenever training behavior changes; printed at startup and written to
 # train_info.json so every result folder identifies the code that produced it.
-CODE_VERSION = "v2.7-2026-06-15 (v2.6 + opt-in monocular normal prior [root cause B, DN-Splatter style]: cosine loss render-normal vs precomputed normal map -> fixes specular placement)"
+CODE_VERSION = "v2.8-2026-06-16 (v2.7 + normal_prior_start_iter: apply the monocular normal prior EARLY [from iter ~500] so it can reshape geometry during densification; v2.7-R4 gated it too late)"
 
 
 # ============================================================
@@ -48,6 +48,7 @@ def training(dataset, opt, pipe):
           f"spec_loss_weight={getattr(opt, 'spec_loss_weight', 'N/A')} | "
           f"spec_loss_mode={getattr(opt, 'spec_loss_mode', 'N/A')} | "
           f"normal_prior_weight={getattr(opt, 'normal_prior_weight', 'N/A')} | "
+          f"normal_prior_start_iter={getattr(opt, 'normal_prior_start_iter', 'N/A')} | "
           f"spec_arch={getattr(opt, 'spec_arch', '') or os.environ.get('SPEC_ARCH','')}")
     tb_writer = prepare_output_and_logger(dataset)
 
@@ -282,7 +283,16 @@ def training(dataset, opt, pipe):
         # surface orientation → fixes the specular PLACEMENT (NCC/σ) that the residual
         # loss could not. One extra normal render + one get_normal_axis over all N, only
         # when active. weight=0 -> no-op.
-        if getattr(opt, "normal_prior_weight", 0.0) > 0.0 and iteration > opt.specular_start_iter:
+        #
+        # v2.8: normal_prior_start_iter controls WHEN it kicks in. v2.7-R4 gated it at
+        # specular_start_iter (7000) — by then geometry is largely converged, so a 0.05
+        # cosine only nudged placement (NCC +0.008). Applying it EARLY (e.g. 500), while
+        # densification can still reshape geometry, gives it real authority. Sentinel
+        # -1 => fall back to specular_start_iter (preserves the v2.7-R4 behavior).
+        _np_start = (opt.normal_prior_start_iter
+                     if getattr(opt, "normal_prior_start_iter", -1) >= 0
+                     else opt.specular_start_iter)
+        if getattr(opt, "normal_prior_weight", 0.0) > 0.0 and iteration > _np_start:
             prior = _load_normal_prior(cam.image_name, image.shape[1], image.shape[2])
             if prior is not None:
                 # world-space per-Gaussian normals (flipped toward this view), all N
@@ -448,6 +458,7 @@ def training(dataset, opt, pipe):
         "normal_prior_weight": getattr(opt, "normal_prior_weight", None),
         "normal_prior_dir": getattr(opt, "normal_prior_dir", None),
         "normal_prior_flip": getattr(opt, "normal_prior_flip", None),
+        "normal_prior_start_iter": getattr(opt, "normal_prior_start_iter", None),
         "spec_arch": getattr(opt, "spec_arch", "") or os.environ.get("SPEC_ARCH", ""),
         "initial_gaussians": initial_gaussians,
         "final_gaussians": gaussians.get_xyz.shape[0],

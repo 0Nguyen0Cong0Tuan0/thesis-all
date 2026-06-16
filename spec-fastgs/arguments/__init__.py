@@ -165,6 +165,11 @@ class OptimizationParams(ParamGroup):
         self.normal_prior_weight = 0.0
         self.normal_prior_dir = "normals"
         self.normal_prior_flip = False
+        # v2.8: iteration at which the normal prior starts. v2.7-R4 applied it only
+        # after specular_start_iter (7000), which was too late to reshape converged
+        # geometry (NCC moved only +0.008). Apply it EARLY (e.g. 500) so it has
+        # authority during densification. -1 = fall back to specular_start_iter.
+        self.normal_prior_start_iter = -1
 
         # v2.5: opt-in alternative specular architecture (utils/spec_arch.py).
         # JSON dict, e.g. '{"activation":"relu","latent_mode":"lowrank","rank":8}'.
