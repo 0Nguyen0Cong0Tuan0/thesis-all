@@ -67,7 +67,7 @@ class SpecularModel:
     - learning rate schedule
     """
 
-    def __init__(self, is_real=False, is_indoor=False, arch_cfg=None):
+    def __init__(self, is_real=False, is_indoor=False, arch_cfg=None, normal_refine=False):
         """
         Args:
             is_real (bool): use real-scene variant
@@ -77,6 +77,9 @@ class SpecularModel:
                 SPEC_ARCH env var (JSON). If still None, the ORIGINAL network is
                 used — i.e. the default training path is unchanged. See the ablation
                 in results/MLP_LATENT_ABLATION_2026-06-13.md for which configs help.
+            normal_refine (bool): v2.9 — add a bounded learnable per-Gaussian normal
+                refinement inside the ASG renderer (root cause B, disk-free). Only
+                applies to the ORIGINAL network path (not the V2 arch).
         """
         if arch_cfg is None:
             env = os.environ.get("SPEC_ARCH")
@@ -86,6 +89,7 @@ class SpecularModel:
         self.arch_cfg = arch_cfg          # remembered so save_weights can persist it
         self.is_real = is_real
         self.is_indoor = is_indoor
+        self.normal_refine = normal_refine
 
         if arch_cfg:
             from utils.spec_arch import SpecularNetworkV2, count_params
@@ -93,9 +97,11 @@ class SpecularModel:
             print(f"[Specular] V2 arch enabled: {arch_cfg} | "
                   f"shared params = {count_params(self.specular)}")
         elif is_real:
-            self.specular = SpecularNetworkReal(is_indoor).cuda()
+            self.specular = SpecularNetworkReal(is_indoor, normal_refine=normal_refine).cuda()
         else:
-            self.specular = SpecularNetwork().cuda()
+            self.specular = SpecularNetwork(normal_refine=normal_refine).cuda()
+        if normal_refine:
+            print("[Specular] normal_refine ENABLED (learnable bounded normal correction)")
 
         self.optimizer = None
         self.spatial_lr_scale = 5
@@ -214,6 +220,20 @@ class SpecularModel:
             from utils.spec_arch import SpecularNetworkV2
             print(f"[Specular] Rebuilding V2 arch for load: {arch_cfg}")
             self.specular = SpecularNetworkV2(**arch_cfg).cuda()
+        else:
+            # ORIGINAL network: self-describe whether the v2.9 normal-refine layers
+            # were trained, by inspecting the checkpoint keys — so render/metrics don't
+            # need to be told (they construct SpecularModel without the flag).
+            refine_in_ckpt = any(k.startswith("render_module.refine_mlp")
+                                 for k in state_dict.keys())
+            if refine_in_ckpt and not self.normal_refine:
+                print("[Specular] checkpoint has normal_refine layers -> rebuilding with it")
+                self.normal_refine = True
+                if self.is_real:
+                    self.specular = SpecularNetworkReal(
+                        self.is_indoor, normal_refine=True).cuda()
+                else:
+                    self.specular = SpecularNetwork(normal_refine=True).cuda()
 
         self.specular.load_state_dict(state_dict)
 

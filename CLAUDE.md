@@ -156,6 +156,20 @@ weight 0.05→0.15 + `--normal_prior_start_iter 500` (shapes geometry during den
 CODE_VERSION→v2.8. Prediction: NCC clearly up / σ down if root cause B is fixable this way;
 if still flat, the Marigold prior signal itself is the limiter (switch to DSINE). Pending run.
 
+**v2.9 (2026-06-20) implemented — DISK-FREE root cause B (the normal prior OOM'd on Kaggle).**
+The monocular-prior route (R4/R5) cost ~1GB of per-image normal maps → "No space left on
+device", and was only weak-positive. Replaced with a self-contained fix: opt-in
+`--normal_refine` adds a tiny BOUNDED MLP inside `ASGRender` (`utils/spec_utils.py`) that
+predicts a per-Gaussian normal correction from the existing 24-d ASG latent —
+`normal' = normalize(normal + 0.3*tanh(refine_mlp(pts)))` before `reflect(...)`. The working
+v2.6 multi-view specular loss identifies the true normal (Ref-NeRF / 3DGS-DR principle), so
+NO external normal maps, NO extra disk, NO densification surgery. Zero-init output → exact
+no-op at start (low-risk). Checkpoint is self-describing (`scene/specular_model.py` load
+detects `render_module.refine_mlp.*` keys → render/metrics need no change). Run via
+`run_spec-fastgs_big_r6.sh` (= R3 residual specular loss + `--normal_refine`, isolates it;
+stale-code guard requires the `normal_refine` token). Notebook R6 cell added (no prereq,
+disk-free). CODE_VERSION→v2.9. Prediction: NCC up / σ down at zero disk cost. Pending run.
+
 Sources: Residual Connections (arXiv:1710.04773), Hyper-Connections (arXiv:2409.19606),
 SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454),
 SIREN (arXiv:2006.09661), WIRE (arXiv:2301.05187), LoRA (arXiv:2106.09685),

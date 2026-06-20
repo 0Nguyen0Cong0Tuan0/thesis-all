@@ -171,6 +171,15 @@ class OptimizationParams(ParamGroup):
         # authority during densification. -1 = fall back to specular_start_iter.
         self.normal_prior_start_iter = -1
 
+        # v2.9 (root cause B, DISK-FREE alternative to the monocular normal prior):
+        # self-supervised learnable normal refinement. Adds a tiny BOUNDED MLP inside
+        # the ASG renderer that predicts a per-Gaussian normal correction from the
+        # existing ASG latent; the (working) multi-view specular loss identifies the
+        # true normal (Ref-NeRF / 3DGS-DR principle) — no external normal maps, no disk.
+        # Zero-initialised + 0.3*tanh bounded => starts as a no-op, can only gently
+        # refine. False = default path unchanged. Pairs with spec_loss (root cause A).
+        self.normal_refine = False
+
         # Free-text label for the experiment (e.g. "r5"). Logged to train_info.json and
         # printed at startup so an output folder SELF-IDENTIFIES which run produced it,
         # independent of how the folder was named/copied (caught a mislabeled v2.8 dir).

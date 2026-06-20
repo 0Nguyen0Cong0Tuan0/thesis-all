@@ -62,7 +62,8 @@ class RenderingEquationEncoding(nn.Module):
 # ------------------------------------------------------------
 
 class ASGRender(nn.Module):
-    def __init__(self, viewpe=2, featureC=128, num_theta=4, num_phi=8):
+    def __init__(self, viewpe=2, featureC=128, num_theta=4, num_phi=8,
+                 normal_refine=False, refine_in_dim=24):
         super().__init__()
 
         self.num_theta = num_theta
@@ -84,6 +85,23 @@ class ASGRender(nn.Module):
 
         nn.init.constant_(self.fc3.bias, 0)
 
+        # v2.9 (root cause B, disk-free): self-supervised learnable normal refinement.
+        # The highlight PLACEMENT is governed entirely by `normal` (it sets reflect_dir
+        # below). The geometric min-axis normal is noisy → low NCC. Instead of an
+        # external monocular prior (disk-heavy, only weak-positive), predict a per-
+        # Gaussian normal correction from the existing ASG latent and let the (now
+        # working) multi-view specular loss identify the true normal — the Ref-NeRF /
+        # 3DGS-DR principle. The correction is BOUNDED (0.3*tanh) and the output layer
+        # is zero-initialised, so it starts as a no-op (== current behavior) and can
+        # only gently refine — low-risk by construction.
+        self.normal_refine = normal_refine
+        if normal_refine:
+            self.refine_mlp = nn.Sequential(
+                nn.Linear(refine_in_dim, 32), nn.ReLU(), nn.Linear(32, 3)
+            )
+            nn.init.zeros_(self.refine_mlp[-1].weight)
+            nn.init.zeros_(self.refine_mlp[-1].bias)
+
     def reflect(self, viewdir, normal):
         return 2 * (viewdir * normal).sum(dim=-1, keepdim=True) * normal - viewdir
 
@@ -95,6 +113,11 @@ class ASGRender(nn.Module):
         # --- ASG parameters ---
         asg_params = features.view(-1, self.num_theta, self.num_phi, 4)
         a, la, mu = torch.split(asg_params, [2, 1, 1], dim=-1)
+
+        # --- optional learnable normal refinement (v2.9) ---
+        if self.normal_refine:
+            delta = 0.3 * torch.tanh(self.refine_mlp(pts))   # bounded correction
+            normal = self.safe_normalize(normal + delta)
 
         # --- reflect direction ---
         reflect_dir = self.safe_normalize(
@@ -129,7 +152,7 @@ class ASGRender(nn.Module):
 # ------------------------------------------------------------
 
 class SpecularNetwork(nn.Module):
-    def __init__(self):
+    def __init__(self, normal_refine=False):
         super().__init__()
 
         # SG design
@@ -147,7 +170,9 @@ class SpecularNetwork(nn.Module):
             viewpe=2,
             featureC=128,
             num_theta=self.num_theta,
-            num_phi=self.num_phi
+            num_phi=self.num_phi,
+            normal_refine=normal_refine,
+            refine_in_dim=self.asg_feature,
         )
 
     def forward(self, x, view, normal):
@@ -161,7 +186,7 @@ class SpecularNetwork(nn.Module):
 # ------------------------------------------------------------
 
 class SpecularNetworkReal(nn.Module):
-    def __init__(self, is_indoor=False):
+    def __init__(self, is_indoor=False, normal_refine=False):
         super().__init__()
 
         # Capacity bump (fix #1): the previous real variant used featureC=32 and
@@ -181,7 +206,9 @@ class SpecularNetworkReal(nn.Module):
             viewpe=2,
             featureC=128,
             num_theta=self.num_theta,
-            num_phi=self.num_phi
+            num_phi=self.num_phi,
+            normal_refine=normal_refine,
+            refine_in_dim=self.asg_feature,
         )
 
     def forward(self, x, view, normal):

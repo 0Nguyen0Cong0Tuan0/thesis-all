@@ -30,7 +30,7 @@ except:
 
 # Bump whenever training behavior changes; printed at startup and written to
 # train_info.json so every result folder identifies the code that produced it.
-CODE_VERSION = "v2.8-2026-06-16 (v2.7 + normal_prior_start_iter: apply the monocular normal prior EARLY [from iter ~500] so it can reshape geometry during densification; v2.7-R4 gated it too late)"
+CODE_VERSION = "v2.9-2026-06-20 (v2.8 + DISK-FREE root cause B: opt-in learnable bounded normal refinement inside ASGRender [--normal_refine], specular-supervised, replaces the disk-heavy monocular normal prior)"
 
 
 # ============================================================
@@ -50,6 +50,7 @@ def training(dataset, opt, pipe):
           f"spec_loss_mode={getattr(opt, 'spec_loss_mode', 'N/A')} | "
           f"normal_prior_weight={getattr(opt, 'normal_prior_weight', 'N/A')} | "
           f"normal_prior_start_iter={getattr(opt, 'normal_prior_start_iter', 'N/A')} | "
+          f"normal_refine={getattr(opt, 'normal_refine', 'N/A')} | "
           f"spec_arch={getattr(opt, 'spec_arch', '') or os.environ.get('SPEC_ARCH','')}")
     tb_writer = prepare_output_and_logger(dataset)
 
@@ -68,7 +69,8 @@ def training(dataset, opt, pipe):
     if _arch_str.strip():
         import json as _json
         _arch_cfg = _json.loads(_arch_str)
-    specular_mlp = SpecularModel(dataset.is_real, dataset.is_indoor, arch_cfg=_arch_cfg)
+    specular_mlp = SpecularModel(dataset.is_real, dataset.is_indoor, arch_cfg=_arch_cfg,
+                                 normal_refine=getattr(opt, "normal_refine", False))
     specular_mlp.train_setting(opt)
 
     # ------------------------------------------------------------
@@ -461,6 +463,7 @@ def training(dataset, opt, pipe):
         "normal_prior_dir": getattr(opt, "normal_prior_dir", None),
         "normal_prior_flip": getattr(opt, "normal_prior_flip", None),
         "normal_prior_start_iter": getattr(opt, "normal_prior_start_iter", None),
+        "normal_refine": getattr(opt, "normal_refine", None),
         "spec_arch": getattr(opt, "spec_arch", "") or os.environ.get("SPEC_ARCH", ""),
         "initial_gaussians": initial_gaussians,
         "final_gaussians": gaussians.get_xyz.shape[0],
