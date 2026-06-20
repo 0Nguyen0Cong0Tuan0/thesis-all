@@ -41,6 +41,7 @@ def training(dataset, opt, pipe):
 
     start_time = time.time()
     print(f"[SPEC-FASTGS] code: {CODE_VERSION}")
+    print(f"[SPEC-FASTGS] run_tag: {getattr(opt, 'run_tag', '') or '(none)'}")
     print(f"[SPEC-FASTGS] git: {get_git_branch()}@{get_git_commit()} | "
           f"specular_start_iter={opt.specular_start_iter} | "
           f"highlight_mask_quantile={getattr(opt, 'highlight_mask_quantile', 'N/A')} | "
@@ -444,6 +445,7 @@ def training(dataset, opt, pipe):
 
     metadata = {
         "scene": dataset.source_path.split("/")[-1],
+        "run_tag": getattr(opt, "run_tag", ""),
         "code_version": CODE_VERSION,
         "git_branch": get_git_branch(),
         "git_commit": get_git_commit(),

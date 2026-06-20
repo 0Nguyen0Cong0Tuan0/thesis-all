@@ -171,6 +171,11 @@ class OptimizationParams(ParamGroup):
         # authority during densification. -1 = fall back to specular_start_iter.
         self.normal_prior_start_iter = -1
 
+        # Free-text label for the experiment (e.g. "r5"). Logged to train_info.json and
+        # printed at startup so an output folder SELF-IDENTIFIES which run produced it,
+        # independent of how the folder was named/copied (caught a mislabeled v2.8 dir).
+        self.run_tag = ""
+
         # v2.5: opt-in alternative specular architecture (utils/spec_arch.py).
         # JSON dict, e.g. '{"activation":"relu","latent_mode":"lowrank","rank":8}'.
         # Empty string keeps the original SpecularNetwork. Can also be set via the

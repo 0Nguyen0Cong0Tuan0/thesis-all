@@ -26,6 +26,15 @@ IMAGES=images
 RUN=r3                      # keep run outputs separate for comparison
 MODEL=${OUTPUT_ROOT}/${SCENE}_${RUN}
 
+# 0. STALE-CODE GUARD — abort if this checkout lacks the residual specular loss.
+if ! grep -q "spec_loss_mode" arguments/__init__.py; then
+    echo "❌ STALE CODE: 'spec_loss_mode' missing from arguments/__init__.py."
+    echo "   This checkout is older than v2.6. Run 'git pull' before R3."
+    exit 1
+fi
+echo "🔖 CODE_VERSION: $(grep -m1 '^CODE_VERSION' train.py | cut -d'\"' -f2)"
+echo "🔖 RUN tag: ${RUN}"
+
 # 1. TRAIN
 python train.py \
     -s ${DATA_ROOT}/${SCENE} \
@@ -43,7 +52,8 @@ python train.py \
     --grad_abs_thresh 0.0004 \
     --spec_loss_weight 0.15 \
     --spec_loss_quantile 0.95 \
-    --spec_loss_mode residual
+    --spec_loss_mode residual \
+    --run_tag ${RUN}
 
 # 2. RENDER
 python render.py \
