@@ -34,11 +34,29 @@ B) as an allocation problem** — the angle the normal experiments could not cra
 measurable with our existing specular diagnostic (energyRatio / NCC / σ / structural%).
 
 ## 3. Non-negotiable foundation
-- **Benchmarks:** specular-heavy sets where the win is visible — Shiny Blender, Ref-NeRF real, glossy
-  Mip360 (kitchen, garden, bonsai) — plus standard Mip360. counter ALONE hid every result (specular ~5% px).
-- **Baselines on the SAME GPU:** vanilla 3DGS, FastGS (no specular), Spec-Gaussian, ours.
-- **Headline:** Pareto triangle — PSNR/LPIPS ↑, training time ↓, #Gaussians ↓, with specular-diagnostic
-  breakdown showing *why*.
+- **Benchmarks = Spec-Gaussian's own suite** (decided 2026-06-21 — use the baseline's exact datasets for
+  direct comparability; we can drop our row into their published Tables 1-4). From the paper
+  (`papers/3dgs_papers/_work/2402.15870v2_SpecGaussian.txt`):
+  1. **Anisotropic Synthetic** — Spec-Gaussian's OWN dataset, purpose-built for specular/anisotropic
+     (their Table 1). The specular stage `counter` never was. Released with their code.
+  2. **NeRF Synthetic** (Blender 8: chair/drums/ficus/hotdog/materials/mic/ship/lego) — Table 3.
+  3. **NSVF Synthetic** — Table 4.
+  4. **Mip-NeRF 360** (real, indoor+outdoor) — Table 2. (We already have `counter`.)
+  Spec-Gaussian did NOT use Shiny Blender / Ref-NeRF / T&T — dropped. Synthetic scenes are small
+  (~800^2, ~100 imgs) → disk-light + fast on Kaggle. Prioritise Anisotropic Synthetic + NeRF Synthetic.
+- **Code already supports both:** synthetic = `is_real=False` (SpecularNetwork); real = `--is_real
+  --is_indoor` (SpecularNetworkReal). `--spec_densify` is scene-agnostic (operates on render error).
+- **Baselines:** run 3DGS / FastGS / Spec-Gaussian / ours on the same GPU, OR cite Spec-Gaussian's
+  published numbers directly (datasets match → fair, and cheaper).
+- **Headline:** Pareto triangle — PSNR/LPIPS up, training time down, #Gaussians down, with specular-
+  diagnostic breakdown showing *why*. On Anisotropic Synthetic the gain should be large (highlights are a
+  big fraction of pixels, unlike counter's ~5%).
+
+## 3a. P0 harness implication
+Run scripts/notebook are hardcoded for `counter` (`--is_real --is_indoor`,
+`./datasets/mipnerf360/counter`). P0 must generalise to a scene list with per-scene config (synthetic:
+no `--is_real`; real: `--is_real --is_indoor`) and aggregate into the Table-1..4 layout. Gating item:
+get **Anisotropic Synthetic** + **NeRF Synthetic** onto Kaggle (Spec-Gaussian released them).
 
 ## 4. Phased plan
 - **P0 — harness:** per-scene runner + a results aggregator (table: PSNR/SSIM/LPIPS/time/#GS + diagnostic).
