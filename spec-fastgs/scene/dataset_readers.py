@@ -311,16 +311,18 @@ def readNSVFSceneInfo(path, white_background, eval):
             uid=idx, R=R, T=T, FovY=focal2fov(focal, H), FovX=focal2fov(focal, W),
             image=image, image_path=rgb_files[stem], image_name=stem,
             width=W, height=H, depth=None))
-    # split by NSVF prefix
+    # split by NSVF prefix: 0=train, 1=val, 2=test (canonical NSVF protocol: train on
+    # 0, evaluate on 2; val is dropped to match published numbers).
     def pref(c): return c.image_name.split("_")[0]
     if eval:
-        train = [c for c in cam_infos if pref(c) in ("0", "1")]
+        train = [c for c in cam_infos if pref(c) == "0"]
         test = [c for c in cam_infos if pref(c) == "2"]
         if not test:                      # fall back if prefixes absent
             train = [c for i, c in enumerate(cam_infos) if i % 8 != 0]
             test = [c for i, c in enumerate(cam_infos) if i % 8 == 0]
     else:
-        train, test = cam_infos, []
+        train = [c for c in cam_infos if pref(c) in ("0", "1")] or cam_infos
+        test = []
     norm = getNerfppNorm(train)
     pcd = _random_pcd(os.path.join(path, "points3d.ply"), scale=3.0, offset=1.5)
     return SceneInfo(point_cloud=pcd, train_cameras=train, test_cameras=test,
