@@ -72,6 +72,13 @@ class Scene:
                 args.source_path, args.white_background, args.eval
             )
 
+        elif os.path.exists(os.path.join(args.source_path, "intrinsics.txt")) and \
+                os.path.isdir(os.path.join(args.source_path, "pose")):
+            print("Detected NSVF dataset")
+            scene_info = sceneLoadTypeCallbacks["NSVF"](
+                args.source_path, args.white_background, args.eval
+            )
+
         else:
             raise RuntimeError("Unknown dataset format!")
 
