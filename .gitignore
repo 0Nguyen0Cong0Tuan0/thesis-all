@@ -41,3 +41,8 @@ output/
 # (GitHub's hard push limit) — never commit them.
 *.ply
 *.pt
+
+# Local copies of datasets (large; live on Kaggle, not in git)
+Anisotropic-Synthetic-Dataset/
+Synthetic_NSVF/
+*.zip
