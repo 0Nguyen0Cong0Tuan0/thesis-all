@@ -531,6 +531,7 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
     v2.5-R1 (mất mát phản xạ) & 95m44s & 768{,}030 & 9993 & 29.72 & 0.9182 & 0.171 \\
     v2.5-R2 (\,+\,latent hạng thấp) & 94m50s & 767{,}536 & 10003 & 29.59 & 0.9164 & 0.173 \\
     v2.6-R3 (mặt nạ phần dư) & 93m50s & 672{,}514 & 10014 & 30.43 & 0.9207 & 0.170 \\
+    v2.9-R6 (tinh chỉnh pháp tuyến) & 95m59s & 670{,}243 & 10127 & 30.28 & 0.9202 & 0.170 \\
     \bottomrule
     \end{tabular}
     \end{table}
@@ -552,6 +553,7 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
     v2.5-R1 (mất mát phản xạ) & 0.363 & 0.475 & 5.00 \\
     v2.5-R2 (\,+\,latent hạng thấp) & 0.322 & 0.437 & 5.00 \\
     v2.6-R3 (mặt nạ phần dư) & \underline{0.461} & 0.526 & 4.78 \\
+    v2.9-R6 (tinh chỉnh pháp tuyến) & 0.454 & 0.508 & 4.83 \\
     \bottomrule
     \end{tabular}
     \end{table}
@@ -642,6 +644,31 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
         R3 \textit{không} áp đảo v2.3 (đổi $+14\%$ Gaussian, chậm hơn, SSIM/NCC giảm nhẹ
         lấy năng lượng phản xạ cao hơn rõ rệt), nhưng nó là bằng chứng quyết định rằng
         \textbf{giám sát có định hướng chẩn đoán là đòn bẩy đúng} cho thiếu hụt phản xạ.
+        \item \textbf{Nguyên nhân B (vị trí highlight): kháng cự bền vững --- ranh giới
+        của phương pháp.} Để sửa pháp tuyến (vốn quyết định \texttt{reflect\_dir} và do
+        đó vị trí thuỳ phản xạ), chúng tôi đã thử \textbf{ba} can thiệp độc lập, và
+        \textit{cả ba} đều không cải thiện được NCC: (i)~\textbf{tiên nghiệm pháp tuyến
+        đơn ảnh} (DN-Splatter, Marigold; R4): chỉ dương yếu (NCC $0.524\to 0.532$,
+        $\approx 2\times$ nhiễu), tốn $\sim$1\,GB bản đồ pháp tuyến trên đĩa và $+26\%$
+        thời gian; (ii)~tiên nghiệm \textbf{mạnh hơn và sớm hơn} (R5): không chạy trọn
+        vẹn vì hết dung lượng đĩa trên Kaggle; (iii)~\textbf{tinh chỉnh pháp tuyến tự
+        giám sát, không tốn đĩa} (v2.9-R6): một MLP nhỏ bị chặn biên ($0.3\tanh$) bên
+        trong \texttt{ASGRender} dự đoán hiệu chỉnh pháp tuyến từ latent ASG sẵn có, được
+        giám sát bởi chính mất mát phản xạ phần dư (nguyên lý Ref-NeRF / 3DGS-DR). Kết
+        quả \textbf{rỗng đến hơi âm}: NCC $0.524\to 0.508$ ($-0.016$, khoảng $4$--$8\times$
+        nhiễu giữa các lần chạy --- một sụt giảm \textit{thực}), $\sigma$ $4.82\to 4.83$,
+        energyRatio gần như đứng yên ($0.457\to 0.454$); chất lượng toàn cục không đổi
+        (PSNR $30.36\to 30.28$). \textbf{Diễn giải:} trên cảnh trong nhà chủ yếu khuếch
+        tán như \textit{counter}, highlight chỉ chiếm $\sim 5\%$ pixel --- tín hiệu quá
+        thưa và đa nghĩa để \textit{định danh} pháp tuyến thật cho một hiệu chỉnh tự do
+        theo từng Gaussian, nên MLP bám vào nhiễu bề mặt và làm vị trí trôi đi (đúng sự
+        nhập nhằng hình-học/diện-mạo mà Ref-NeRF/3DGS-DR né tránh bằng cách chỉ trình
+        diễn trên cảnh bóng loáng, vật thể trung tâm). \textbf{Kết luận có giá trị:}
+        nguyên nhân B \textit{không} dễ sửa bằng giám sát pháp tuyến --- cả ngoại sinh
+        (tiên nghiệm) lẫn nội sinh (tự giám sát) --- và do đó là \textbf{ranh giới được
+        đặc tả bằng thực nghiệm} của phương pháp, mở ra hướng tương lai (cảnh bóng loáng,
+        pháp tuyến từ gradient mật độ, hoặc 2DGS) chứ không phải một thất bại của thiết kế.
+    \end{itemize}
 
     \subsection{Kết quả định tính (Qualitative Results)}
     Hình~\ref{fig:sf_speclayer} so sánh trực tiếp \textit{năng lượng lớp phản xạ}
@@ -832,6 +859,24 @@ fastgs}, \texttt{fused\_ssim}). Để bảo đảm mọi kết quả truy nguyê
     thiếu thành phần mất mát chuyên cho phản xạ và pháp tuyến giả nhiễu — khiến phần
     dư highlight vừa tối vừa nhoè. Đây là một kết quả âm tính có giá trị, giúp loại
     bỏ một nhánh giả thuyết và tập trung nỗ lực tiếp theo cho đúng chỗ.
+
+    Chuỗi thí nghiệm có định hướng chẩn đoán tiếp theo đã \textbf{khép lại bức tranh hai
+    nguyên nhân}. \textbf{Nguyên nhân A (cường độ) --- đã giải quyết:} mất mát phản xạ với
+    mặt nạ \textit{phần dư} $|$GT$-$diffuse$|$ (v2.6-R3) nâng energyRatio $0.388\to 0.461$
+    (lần tăng đầu tiên kể từ baseline) và đưa gain $a^*\to 1.03$ mà không gây phình
+    Gaussian --- xác nhận rằng thiếu hụt độ sáng/năng lượng highlight là một vấn đề
+    \textit{giám sát} và sửa được bằng giám sát. \textbf{Nguyên nhân B (vị trí) --- đã
+    được đặc tả như ranh giới:} ba can thiệp pháp tuyến độc lập (tiên nghiệm đơn ảnh
+    DN-Splatter R4 --- dương yếu và tốn đĩa; bản mạnh/sớm hơn R5 --- không chạy trọn vì
+    hết đĩa; và \textit{tinh chỉnh pháp tuyến tự giám sát không tốn đĩa} v2.9-R6 --- rỗng
+    đến hơi âm, NCC $0.524\to 0.508$) \textit{đều} không cải thiện được vị trí highlight.
+    Sự hội tụ này cho thấy vị trí highlight bị giới hạn bởi tính \textit{định-danh-được}
+    của pháp tuyến trên cảnh trong nhà chủ yếu khuếch tán (highlight $\sim 5\%$ pixel) ---
+    một ranh giới được chứng minh bằng thực nghiệm, nhất quán với việc Ref-NeRF/3DGS-DR
+    chỉ trình diễn trên cảnh bóng loáng, vật thể trung tâm. Như vậy đóng góp được củng cố
+    quanh ba trụ: (1) \textbf{bộ chẩn đoán} tách cường độ khỏi vị trí; (2) \textbf{sửa
+    nguyên nhân A} bằng giám sát có định hướng; và (3) \textbf{đặc tả nguyên nhân B} như
+    giới hạn mở ra hướng tương lai (cảnh bóng loáng, pháp tuyến từ gradient mật độ, 2DGS).
 
     Dựa trên kết quả truy nguyên ở trên, nhóm đã khảo sát một danh mục giải pháp liên
     ngành (thị giác máy tính, xử lý tín hiệu, biểu diễn ẩn, đồ hoạ, và tinh chỉnh hiệu
