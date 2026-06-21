@@ -170,6 +170,30 @@ detects `render_module.refine_mlp.*` keys → render/metrics need no change). Ru
 stale-code guard requires the `normal_refine` token). Notebook R6 cell added (no prereq,
 disk-free). CODE_VERSION→v2.9. Prediction: NCC up / σ down at zero disk cost. Pending run.
 
+**v2.9-R6 result (2026-06-21) — NULL / slightly NEGATIVE.** Clean A/B vs R3 control: NCC
+0.524→0.508 (−0.016, real small decline), σ/energyRatio flat. The disk-free self-supervised
+refinement did NOT fix placement. Combined with R4 (weak+) and R5 (OOM), THREE normal
+interventions all fail → root cause B (placement) is identifiability-limited on sparse-specular
+indoor scenes. Written into the report as the method's characterized boundary.
+
+**STRATEGIC PIVOT → CVPR contribution = SPECULAR-AWARE DENSIFICATION (v3.0, 2026-06-21).**
+Stop incrementing on `counter` (diffuse, hides specular wins). Plan:
+`results/CVPR_SPECULAR_DENSIFICATION_PLAN.md`. FastGS's multi-view consistency vote is
+Lambertian-biased; make it specular-aware in `utils/fast_utils.compute_gaussian_score_fastgs`
+via a diffuse(SH-only)-vs-full(SH+ASG) residual decomposition: e_full=|gt-full|,
+spec_explained=|gt-diffuse|-|gt-full|, spec_frac=spec_explained/(e_diff+eps). (1) residual-gated
+vote: geometric densify on `base_hi & ~(spec_frac>frac)` (keeps bright-diffuse, drops specular
+the branch explains — replaces the luminance hack); (2) specular-deficit allocation: also clone
+on `base_hi & (spec_frac>frac)`, weighted by `spec_densify_weight` (λ=0.5), to anchor sharper
+highlights. Pruning driven by GEOMETRIC error only. This reframes placement (root cause B) as an
+ALLOCATION problem — the angle normal supervision couldn't crack. Opt-in `--spec_densify`
+(+`--spec_densify_weight`, `--spec_densify_explained_frac`), default off → exact FastGS vote.
+Active window: densify iters 7000-15000 (specular branch live). CODE_VERSION→v3.0; logged to
+banner+train_info. Run `run_spec-fastgs_big_r7.sh` (= R3 + `--spec_densify`, stale-code guard on
+`spec_densify` token); notebook now runs ONLY R7. py_compile clean. NON-NEGOTIABLE NEXT: multi-
+scene + specular benchmarks (Shiny Blender / Ref-NeRF real / glossy Mip360) with same-GPU
+baselines (3DGS, FastGS, Spec-Gaussian) — counter alone cannot show the win. Pending Kaggle run.
+
 Sources: Residual Connections (arXiv:1710.04773), Hyper-Connections (arXiv:2409.19606),
 SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454),
 SIREN (arXiv:2006.09661), WIRE (arXiv:2301.05187), LoRA (arXiv:2106.09685),

@@ -171,6 +171,23 @@ class OptimizationParams(ParamGroup):
         # authority during densification. -1 = fall back to specular_start_iter.
         self.normal_prior_start_iter = -1
 
+        # v3.0 (CVPR contribution): SPECULAR-AWARE DENSIFICATION. FastGS's multi-view
+        # consistency vote is Lambertian-biased — specular highlights are view-
+        # inconsistent, so the vote either fakes them with diffuse geometry (Gaussian
+        # bloat) or under-resolves them. Instead of the crude luminance exclusion
+        # (highlight_mask_quantile), decompose the per-pixel error with a diffuse (SH-
+        # only) vs full (SH+ASG) render: e_full=|gt-full|, spec_explained=|gt-diffuse|
+        # -|gt-full|. (1) residual-gated vote: geometric densify on high e_full that is
+        # NOT specular-explained (keeps bright-diffuse under-fit, drops specular the
+        # branch handles); (2) specular-deficit allocation: also clone where e_full high
+        # AND specular present-but-under-resolved, weighted by spec_densify_weight, to
+        # anchor sharper highlights (fixes placement via ALLOCATION — the angle normal
+        # supervision could not). Requires the specular branch active. Default off ->
+        # exact FastGS vote. See results/CVPR_SPECULAR_DENSIFICATION_PLAN.md.
+        self.spec_densify = False
+        self.spec_densify_weight = 0.5          # lambda: weight of the specular-deficit clone vote
+        self.spec_densify_explained_frac = 0.5  # a pixel is "specular" if spec removed > this frac of error
+
         # v2.9 (root cause B, DISK-FREE alternative to the monocular normal prior):
         # self-supervised learnable normal refinement. Adds a tiny BOUNDED MLP inside
         # the ASG renderer that predicts a per-Gaussian normal correction from the

@@ -97,6 +97,12 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = 
     full_metric_counts = None
     full_metric_score = None
 
+    # v3.0: specular-aware densification is active only when the flag is set AND the
+    # specular branch exists (we need a diffuse-vs-full decomposition).
+    spec_densify = getattr(args, "spec_densify", False) and (specular_mlp is not None)
+    lam = getattr(args, "spec_densify_weight", 0.5)
+    frac_thresh = getattr(args, "spec_densify_explained_frac", 0.5)
+
     for view in range(len(camlist)):
         my_viewpoint_cam = camlist[view]
 
@@ -115,14 +121,41 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = 
         gt_image = my_viewpoint_cam.original_image.cuda()
         get_flag = True
 
-        metric_map = compute_metric_map(
-            render_image, gt_image, args.loss_thresh,
-            highlight_quantile=getattr(args, "highlight_mask_quantile", 1.0)
-        )
+        if spec_densify:
+            # --- residual decomposition: diffuse (SH-only) vs full (SH+ASG) render ---
+            diffuse_image = render_fastgs(
+                my_viewpoint_cam, gaussians, pipe, bg, args.mult, mlp_color=None
+            )["render"]
+            e_full = (render_image - gt_image).abs().mean(0)     # [H,W] error left after specular
+            e_diff = (diffuse_image - gt_image).abs().mean(0)    # [H,W] error of diffuse base
+            spec_explained = torch.relu(e_diff - e_full)         # error the ASG branch removed
+            spec_frac = spec_explained / (e_diff + 1e-6)         # scene-independent, in [0,1]
+            spec_pixel = spec_frac > frac_thresh                 # genuinely specular pixel
 
-        render_pkg = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult, get_flag = get_flag, metric_map = metric_map, mlp_color=mlp_color)
+            base_hi = get_loss(render_image, gt_image) > args.loss_thresh  # high UNexplained error
+            # (1) geometric vote: high error NOT attributable to specular (keeps bright-diffuse)
+            geo_map = (base_hi & (~spec_pixel)).int()
+            # (2) specular-deficit vote: specular present but still under-resolved
+            spec_map = (base_hi & spec_pixel).int()
 
-        accum_loss_counts = render_pkg["accum_metric_counts"]
+            geo_counts = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult,
+                                       get_flag=get_flag, metric_map=geo_map, mlp_color=mlp_color)["accum_metric_counts"]
+            spec_counts = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult,
+                                        get_flag=get_flag, metric_map=spec_map, mlp_color=mlp_color)["accum_metric_counts"]
+
+            # importance = geometric under-fit + weighted specular-deficit allocation
+            accum_loss_counts = geo_counts + lam * spec_counts
+            # pruning is driven by GEOMETRIC error only — never prune a Gaussian merely
+            # for carrying (correct) view-dependent specular variation.
+            score_counts = geo_counts
+        else:
+            metric_map = compute_metric_map(
+                render_image, gt_image, args.loss_thresh,
+                highlight_quantile=getattr(args, "highlight_mask_quantile", 1.0)
+            )
+            render_pkg = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult, get_flag = get_flag, metric_map = metric_map, mlp_color=mlp_color)
+            accum_loss_counts = render_pkg["accum_metric_counts"]
+            score_counts = accum_loss_counts
 
         if DENSIFY:
             if full_metric_counts is None:
@@ -131,9 +164,9 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = 
                 full_metric_counts += accum_loss_counts
 
         if full_metric_score is None:
-            full_metric_score = photometric_loss * accum_loss_counts.clone()
+            full_metric_score = photometric_loss * score_counts.clone()
         else:
-            full_metric_score += photometric_loss * accum_loss_counts
+            full_metric_score += photometric_loss * score_counts
 
     pruning_score = (full_metric_score - torch.min(full_metric_score)) / (torch.max(full_metric_score) - torch.min(full_metric_score))
     
