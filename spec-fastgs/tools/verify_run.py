@@ -52,7 +52,7 @@ def main():
         if args.expect is not None:
             tag = info.get("run_tag", "")
             ok = (tag == args.expect)
-            print(f"  -> EXPECT run_tag='{args.expect}': {'✅ MATCH' if ok else '❌ MISMATCH'}")
+            print(f"  -> EXPECT run_tag='{args.expect}': {'MATCH' if ok else 'MISMATCH'}")
             if not ok:
                 mismatches += 1
 
