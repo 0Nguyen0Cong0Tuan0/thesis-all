@@ -194,6 +194,22 @@ banner+train_info. Run `run_spec-fastgs_big_r7.sh` (= R3 + `--spec_densify`, sta
 scene + specular benchmarks (Shiny Blender / Ref-NeRF real / glossy Mip360) with same-GPU
 baselines (3DGS, FastGS, Spec-Gaussian) — counter alone cannot show the win. Pending Kaggle run.
 
+**v3.0 spec_densify RESULTS (2026-07-01) + Mip-NeRF pivot.** Benchmark = Spec-Gaussian's own
+suite (Anisotropic Synthetic + NSVF + Mip360); Blender/NSVF loaders added & verified
+(`scene/dataset_readers.py`). Results: **works on Shiny Blender/synthetic specular**, but
+**NEUTRAL on Mip-NeRF (counter A/B: PSNR 30.36→30.42, NCC 0.524→0.532, σ/energyRatio flat)**
+and slightly-neg on teapot (no headroom, base NCC already 0.935). Root bottleneck = the
+model-residual LOCATOR (`spec_frac`) can't isolate true specular from diffuse texture/geometry
+clutter on real scenes. **FIX (in progress) = model-free, geometry-gated multi-view Reflection
+Score (RS)** — colleague's idea (`v3_new_architecture/extract_reflection_prior.py`, PGSR-derived
+arXiv:2406.06521, but that draft is non-runnable: missing helpers). Built our own: verified
+PGSR geometry helpers in `utils/graphics_utils.py` (cam_intrinsics/unproject/project/patch_*,
+CPU round-trip 3e-4px) + `tools/extract_reflection_score.py` (loads trained model → exact point
+reprojection + DEPTH-CONSISTENCY gate → RS PNGs in `<source>/ref_priors/`; cleaner than the
+fronto-parallel draft). GATE: run extractor on counter, EYEBALL RS maps (real highlights vs
+edges?) BEFORE wiring RS into spec_densify + loss. Plans: results/MIPNERF_BOTTLENECK_PLAN_2026-07-01.md,
+results/REFLECTION_SCORE_ASSESSMENT_2026-07-01.md.
+
 Sources: Residual Connections (arXiv:1710.04773), Hyper-Connections (arXiv:2409.19606),
 SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454),
 SIREN (arXiv:2006.09661), WIRE (arXiv:2301.05187), LoRA (arXiv:2106.09685),
