@@ -31,7 +31,7 @@ except:
 
 # Bump whenever training behavior changes; printed at startup and written to
 # train_info.json so every result folder identifies the code that produced it.
-CODE_VERSION = "v3.1-2026-07-04 (v3.0 + PRECOMPUTED classical Shafer specular prior [tools/gen_shafer_priors.py]: --spec_loss_mode shafer / --spec_densify_locator shafer, a model-independent locator available from iter 0, validated with a morphological top-hat blob gate to reject bright-diffuse false positives)"
+CODE_VERSION = "v3.2-2026-07-04 (v3.1 + swapped classical locator from Shafer to Tan-Ikeuchi [tools/gen_tanikeuchi_priors.py]: --spec_loss_mode tanikeuchi / --spec_densify_locator tanikeuchi, top-hat blob gate + near-saturation recovery [Algorithm 2b], validated in test_specular_algorithms_comparison.ipynb; flags ~5x more of the image than Shafer did per the full-sweep numbers, chosen per project decision after visual review)"
 
 
 # ============================================================
@@ -132,20 +132,20 @@ def training(dataset, opt, pipe):
         normal_cache[image_name] = t.cpu()
         return t.cuda()
 
-    # ── v3.1: precomputed classical (Shafer) specular-prior cache ──
-    # Lazily load <source>/<shafer_prior_dir>/<image_name>.png (uint8 grayscale, [0,1]
+    # ── v3.1/v3.2: precomputed classical (Tan-Ikeuchi) specular-prior cache ──
+    # Lazily load <source>/<tanikeuchi_prior_dir>/<image_name>.png (uint8 grayscale, [0,1]
     # after /255) keyed by image_name, kept on CPU to bound VRAM. None = no prior file
-    # for this view. Only touched when spec_loss_mode/spec_densify_locator == "shafer",
-    # so the default path allocates nothing. See tools/gen_shafer_priors.py.
-    shafer_cache: dict = {}
+    # for this view. Only touched when spec_loss_mode/spec_densify_locator == "tanikeuchi",
+    # so the default path allocates nothing. See tools/gen_tanikeuchi_priors.py.
+    tanikeuchi_cache: dict = {}
 
-    def _load_shafer_prior(image_name, H, W):
-        if image_name in shafer_cache:
-            t = shafer_cache[image_name]
+    def _load_tanikeuchi_prior(image_name, H, W):
+        if image_name in tanikeuchi_cache:
+            t = tanikeuchi_cache[image_name]
             return None if t is None else t.cuda()
-        path = os.path.join(dataset.source_path, opt.shafer_prior_dir, image_name + ".png")
+        path = os.path.join(dataset.source_path, opt.tanikeuchi_prior_dir, image_name + ".png")
         if not os.path.exists(path):
-            shafer_cache[image_name] = None
+            tanikeuchi_cache[image_name] = None
             return None
         arr = np.array(Image.open(path)).astype(np.float32) / 255.0  # [h,w] in [0,1]
         t = torch.from_numpy(arr)
@@ -153,12 +153,12 @@ def training(dataset, opt, pipe):
             t = torch.nn.functional.interpolate(
                 t.unsqueeze(0).unsqueeze(0), size=(H, W), mode="nearest"
             ).squeeze(0).squeeze(0)
-        shafer_cache[image_name] = t.cpu()
+        tanikeuchi_cache[image_name] = t.cpu()
         return t.cuda()
 
-    # Resolved once for the densification-side "shafer" locator (fast_utils.py); harmless
-    # if unused (spec_densify_locator defaults to "model_residual", which never reads it).
-    _shafer_dir_abs = os.path.join(dataset.source_path, opt.shafer_prior_dir)
+    # Resolved once for the densification-side "tanikeuchi" locator (fast_utils.py);
+    # harmless if unused (spec_densify_locator defaults to "model_residual").
+    _tanikeuchi_dir_abs = os.path.join(dataset.source_path, opt.tanikeuchi_prior_dir)
 
     for iteration in progress_bar:
 
@@ -295,14 +295,15 @@ def training(dataset, opt, pipe):
         if getattr(opt, "spec_loss_weight", 0.0) > 0.0 and iteration > opt.specular_start_iter:
             with torch.no_grad():
                 mode = getattr(opt, "spec_loss_mode", "residual")
-                if mode == "shafer":
-                    # v3.1: precomputed, MODEL-INDEPENDENT classical prior (available from
-                    # iteration 0) — see tools/gen_shafer_priors.py / classical_specular_mask.py.
-                    # Already gated by the top-hat blob filter, so threshold directly rather
-                    # than by quantile (the score is an absolute confidence, not a raw
-                    # residual needing relative extraction).
-                    prior = _load_shafer_prior(cam.image_name, gt.shape[1], gt.shape[2])
-                    hmask = (prior >= opt.shafer_prior_thresh).float() if prior is not None else None
+                if mode == "tanikeuchi":
+                    # v3.1/v3.2: precomputed, MODEL-INDEPENDENT classical prior (available
+                    # from iteration 0) — see tools/gen_tanikeuchi_priors.py /
+                    # classical_specular_mask.py. Already gated by the top-hat blob filter
+                    # + near-saturation recovery, so threshold directly rather than by
+                    # quantile (the score is an absolute confidence, not a raw residual
+                    # needing relative extraction).
+                    prior = _load_tanikeuchi_prior(cam.image_name, gt.shape[1], gt.shape[2])
+                    hmask = (prior >= opt.tanikeuchi_prior_thresh).float() if prior is not None else None
                 else:
                     if mode == "residual":
                         # SH-only (diffuse) render of the SAME scene/view, no grad.
@@ -455,7 +456,7 @@ def training(dataset, opt, pipe):
                 with torch.no_grad():
                     importance_score, pruning_score = compute_gaussian_score_fastgs(
                         camlist, gaussians, pipe, background, opt, DENSIFY=True,
-                        specular_mlp=spec_for_score, shafer_dir=_shafer_dir_abs
+                        specular_mlp=spec_for_score, tanikeuchi_dir=_tanikeuchi_dir_abs
                     )
 
                 gaussians.densify_and_prune_fastgs(
@@ -510,8 +511,8 @@ def training(dataset, opt, pipe):
         "spec_densify_weight": getattr(opt, "spec_densify_weight", None),
         "spec_densify_explained_frac": getattr(opt, "spec_densify_explained_frac", None),
         "spec_densify_locator": getattr(opt, "spec_densify_locator", None),
-        "shafer_prior_dir": getattr(opt, "shafer_prior_dir", None),
-        "shafer_prior_thresh": getattr(opt, "shafer_prior_thresh", None),
+        "tanikeuchi_prior_dir": getattr(opt, "tanikeuchi_prior_dir", None),
+        "tanikeuchi_prior_thresh": getattr(opt, "tanikeuchi_prior_thresh", None),
         "spec_arch": getattr(opt, "spec_arch", "") or os.environ.get("SPEC_ARCH", ""),
         "initial_gaussians": initial_gaussians,
         "final_gaussians": gaussians.get_xyz.shape[0],

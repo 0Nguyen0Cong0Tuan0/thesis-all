@@ -146,9 +146,17 @@ class OptimizationParams(ParamGroup):
         #   "luminance" (v2.5, deprecated): mask = top-(1-quantile) of GT luminance.
         #       FALSIFIED: it catches bright DIFFUSE (white counter/walls), drove +31%
         #       Gaussians and REGRESSED every metric (v2.5-R1). Kept for reproducibility.
-        #   "shafer" (v3.1): mask = precomputed classical Shafer-model prior thresholded at
-        #       shafer_prior_thresh (see shafer_prior_dir below) — model-independent,
-        #       available from iteration 0. Requires tools/gen_shafer_priors.py run first.
+        #   "tanikeuchi" (v3.2): mask = precomputed classical Tan-Ikeuchi prior thresholded
+        #       at tanikeuchi_prior_thresh (see tanikeuchi_prior_dir below) — model-
+        #       independent, available from iteration 0. Requires
+        #       tools/gen_tanikeuchi_priors.py run first. (v3.1 used Shafer's dichromatic
+        #       model here; replaced in v3.2 after a side-by-side comparison in
+        #       test_specular_algorithms_comparison.ipynb — Tan-Ikeuchi + top-hat +
+        #       near-saturation recovery [Algorithm 2b] judged most correct on visual
+        #       inspection, though it flags substantially more of the image than Shafer
+        #       did on the full-sweep numbers [~7.9% vs ~1.4% mean on counter] — monitor
+        #       real training runs for the v2.5-R1-style dilution risk. "shafer" mode is
+        #       no longer available.)
         # Recommended for residual mode: weight 0.1-0.2, quantile ~0.95 (top 5%).
         # Ablation: results/MLP_LATENT_ABLATION_2026-06-13.md.
         self.spec_loss_weight = 0.0
@@ -191,26 +199,31 @@ class OptimizationParams(ParamGroup):
         self.spec_densify_weight = 0.5          # lambda: weight of the specular-deficit clone vote
         self.spec_densify_explained_frac = 0.5  # a pixel is "specular" if spec removed > this frac of error
 
-        # v3.1: PRECOMPUTED classical (Shafer dichromatic model) specular locator, as an
-        # alternative to the on-the-fly model-residual locator used above. Sweep the
-        # dataset ONCE offline (tools/gen_shafer_priors.py, pure CPU/scipy — no GPU, no
-        # trained model needed) to save a per-image specular-candidate score (bright +
-        # desaturated, gated by a morphological white-top-hat blob filter to reject flat
-        # backgrounds/bright-diffuse false positives — see tools/classical_specular_mask.py
-        # for the full validated derivation) into <source>/<shafer_prior_dir>/. This is
+        # v3.1/v3.2: PRECOMPUTED classical specular locator, as an alternative to the
+        # on-the-fly model-residual locator used above. Sweep the dataset ONCE offline
+        # (tools/gen_tanikeuchi_priors.py, pure CPU/scipy — no GPU, no trained model
+        # needed) to save a per-image specular-candidate score (Tan-Ikeuchi's per-pixel
+        # min-channel specular pedestal, gated by a morphological white-top-hat blob
+        # filter + near-saturation recovery — see tools/classical_specular_mask.py for
+        # the full validated derivation) into <source>/<tanikeuchi_prior_dir>/. This is
         # available from iteration 0 (no chicken-and-egg dependency on the model already
         # working) and is MODEL-INDEPENDENT, unlike spec_frac above.
-        #   spec_loss_mode = "shafer"        -> the specular LOSS mask (train.py) uses the
-        #                                        precomputed prior instead of |gt-diffuse|.
-        #   spec_densify_locator = "shafer"  -> the DENSIFICATION vote (fast_utils.py) uses
-        #                                        the precomputed prior instead of spec_frac
-        #                                        (only takes effect when spec_densify=True).
-        # shafer_prior_thresh binarizes the continuous [0,1] saved score into a specular/
-        # not-specular decision at USE time (not baked into the saved prior), so it can be
-        # retuned without regenerating priors — same pattern as spec_densify_explained_frac.
+        #   spec_loss_mode = "tanikeuchi"        -> the specular LOSS mask (train.py) uses
+        #                                            the precomputed prior instead of
+        #                                            |gt-diffuse|.
+        #   spec_densify_locator = "tanikeuchi"  -> the DENSIFICATION vote (fast_utils.py)
+        #                                            uses the precomputed prior instead of
+        #                                            spec_frac (only takes effect when
+        #                                            spec_densify=True).
+        # tanikeuchi_prior_thresh binarizes the continuous [0,1] saved score into a
+        # specular/not-specular decision at USE time (not baked into the saved prior), so
+        # it can be retuned without regenerating priors — same pattern as
+        # spec_densify_explained_frac.
+        # (v3.1 used Shafer's dichromatic model here; replaced by Tan-Ikeuchi in v3.2 —
+        # see the spec_loss_mode note above.)
         self.spec_densify_locator = "model_residual"
-        self.shafer_prior_dir = "shafer_priors"
-        self.shafer_prior_thresh = 0.3
+        self.tanikeuchi_prior_dir = "tanikeuchi_priors"
+        self.tanikeuchi_prior_thresh = 0.3
 
         # v2.9 (root cause B, DISK-FREE alternative to the monocular normal prior):
         # self-supervised learnable normal refinement. Adds a tiny BOUNDED MLP inside

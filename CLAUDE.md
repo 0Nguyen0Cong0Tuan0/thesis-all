@@ -247,6 +247,36 @@ Dataset`/`Synthetic_NSVF` subfolder NAMES happened to match existing rules; adde
 explicitly. Status: implemented + CPU/data-validated, NOT yet GPU-tested — pending Kaggle R8
 run. Plan updated: results/MIPNERF_BOTTLENECK_PLAN_2026-07-01.md §7.
 
+**v3.2 (2026-07-04) — classical locator SWAPPED from Shafer to Tan-Ikeuchi + top-hat +
+near-saturation recovery (Algorithm 2b).** Built `test_specular_algorithms_comparison.ipynb`
+(4 classical algorithm families side by side: Shafer/Klinker, Tan-Ikeuchi, Shen
+ColorLines, Kim/Guo DarkChannel). Initial finding: raw Tan-Ikeuchi (Imin thresholded
+directly) floods bright/flat surfaces exactly like pre-tophat Shafer did; porting the
+identical top-hat gate to Imin helps but a full 240-image production-resolution sweep
+still gave mean=7.47%/max=17.96% vs Shafer's 1.44%/4.22% — traced to this notebook's
+Tan-Ikeuchi being a simplified single-pass proxy of the paper's core insight, not the
+real iterative algorithm. Separately found (via screenshots) that top-hat ALSO produces a
+false negative — suppresses genuine highlights spatially WIDER than the structuring disk
+(measured: a 105×46px glare blob vs a 24px-diameter disk) exactly like it suppresses flat
+backgrounds, since top-hat's rule is purely about size. Two aggressive fixes failed
+(multi-scale top-hat exploded flagged% to 35-65%; connected-component area filtering on
+the raw candidate mask failed since the missed blob is already merged into the
+surrounding wall's connected component). Fix that worked: OR the existing top-hat gate
+with `Imin > 0.85` (near the sensor's clipping point) — full-sweep validated: mean
+7.47%→7.89% (+0.42pp only), max unchanged at 17.96%. This is "Algorithm 2b" in the
+comparison notebook. **Decision (after visual review): swapped production from Shafer to
+Tan-Ikeuchi+top-hat+near-saturation (2b)**, despite it flagging ~5.5x more of the image
+than Shafer did on the full-sweep numbers — Imin alone lacks Shafer's saturation
+condition, which independently helped reject colored-but-bright diffuse pixels. Same
+opt-in wiring pattern as v3.1, renamed throughout: `tools/gen_tanikeuchi_priors.py`
+(replaces `gen_shafer_priors.py`), `--spec_loss_mode tanikeuchi` /
+`--spec_densify_locator tanikeuchi`, `tanikeuchi_prior_dir`/`tanikeuchi_prior_thresh`
+args, `run_spec-fastgs_big_r8.sh` updated. CODE_VERSION→v3.2. **RISK FLAGGED**: since this
+locator is measurably looser than Shafer, watch the R8 run for a v2.5-R1-style
+regression (Gaussian bloat / PSNR-SSIM drop) — the likely fix if it regresses is
+raising `tanikeuchi_prior_thresh` above its current 0.3 default. Status: implemented +
+CPU/data-validated, NOT yet GPU-tested — pending Kaggle R8 run.
+
 Sources: Residual Connections (arXiv:1710.04773), Hyper-Connections (arXiv:2409.19606),
 SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454),
 SIREN (arXiv:2006.09661), WIRE (arXiv:2301.05187), LoRA (arXiv:2106.09685),
