@@ -1,10 +1,36 @@
+import os
 import torch
-from PIL import ImageFilter
+import numpy as np
+from PIL import Image, ImageFilter
 from gaussian_renderer import render_fastgs
 from .loss_utils import l1_loss
 from fused_ssim import fused_ssim as fast_ssim
 import torchvision.transforms as transforms
 import random
+
+# v3.1: tiny per-process cache for precomputed Shafer specular priors used by
+# compute_gaussian_score_fastgs's "shafer" locator (module-level so it persists across
+# the many calls during training without threading extra state through the caller).
+_shafer_prior_cache: dict = {}
+
+
+def _load_shafer_prior_for_densify(shafer_dir, image_name, H, W):
+    key = (shafer_dir, image_name)
+    if key in _shafer_prior_cache:
+        t = _shafer_prior_cache[key]
+        return None if t is None else t.cuda()
+    path = os.path.join(shafer_dir, image_name + ".png")
+    if not os.path.exists(path):
+        _shafer_prior_cache[key] = None
+        return None
+    arr = np.array(Image.open(path)).astype(np.float32) / 255.0
+    t = torch.from_numpy(arr)
+    if t.shape[0] != H or t.shape[1] != W:
+        t = torch.nn.functional.interpolate(
+            t.unsqueeze(0).unsqueeze(0), size=(H, W), mode="nearest"
+        ).squeeze(0).squeeze(0)
+    _shafer_prior_cache[key] = t.cpu()
+    return t.cuda()
 
 
 def sampling_cameras(my_viewpoint_stack):
@@ -63,7 +89,8 @@ def normalize(config_value, value_tensor):
 
     return ret_value
 
-def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = False, specular_mlp = None):
+def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = False,
+                                  specular_mlp = None, shafer_dir = None):
     """Compute multi-view consistency scores for Gaussians to guide densification.
 
     For each camera in `camlist` the function renders the scene and computes a
@@ -85,6 +112,10 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = 
             MLP correctly explains is counted as cross-view "error" — biasing
             densification toward specular regions. Caller is expected to run this
             under torch.no_grad() (train.py does).
+        shafer_dir: absolute path to the precomputed Shafer specular-prior directory
+            (tools/gen_shafer_priors.py), or None. Only used when
+            args.spec_densify_locator == "shafer" (and spec_densify is active); falls
+            back to the model-residual locator for any camera missing a prior file.
 
     Returns:
         importance_score (Tensor): per-Gaussian integer counts of how many views
@@ -102,6 +133,10 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = 
     spec_densify = getattr(args, "spec_densify", False) and (specular_mlp is not None)
     lam = getattr(args, "spec_densify_weight", 0.5)
     frac_thresh = getattr(args, "spec_densify_explained_frac", 0.5)
+    # v3.1: which locator decides "is this pixel specular" for the densification vote.
+    use_shafer_locator = (getattr(args, "spec_densify_locator", "model_residual") == "shafer"
+                          and shafer_dir is not None)
+    shafer_prior_thresh = getattr(args, "shafer_prior_thresh", 0.3)
 
     for view in range(len(camlist)):
         my_viewpoint_cam = camlist[view]
@@ -122,15 +157,27 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = 
         get_flag = True
 
         if spec_densify:
-            # --- residual decomposition: diffuse (SH-only) vs full (SH+ASG) render ---
-            diffuse_image = render_fastgs(
-                my_viewpoint_cam, gaussians, pipe, bg, args.mult, mlp_color=None
-            )["render"]
-            e_full = (render_image - gt_image).abs().mean(0)     # [H,W] error left after specular
-            e_diff = (diffuse_image - gt_image).abs().mean(0)    # [H,W] error of diffuse base
-            spec_explained = torch.relu(e_diff - e_full)         # error the ASG branch removed
-            spec_frac = spec_explained / (e_diff + 1e-6)         # scene-independent, in [0,1]
-            spec_pixel = spec_frac > frac_thresh                 # genuinely specular pixel
+            spec_pixel = None
+            if use_shafer_locator:
+                # v3.1: MODEL-INDEPENDENT locator — precomputed classical prior, no online
+                # diffuse render needed (cheaper: one fewer render pass than model_residual).
+                prior = _load_shafer_prior_for_densify(
+                    shafer_dir, my_viewpoint_cam.image_name,
+                    render_image.shape[1], render_image.shape[2])
+                if prior is not None:
+                    spec_pixel = prior >= shafer_prior_thresh
+
+            if spec_pixel is None:
+                # default / fallback: on-the-fly residual decomposition, diffuse (SH-only)
+                # vs full (SH+ASG) render.
+                diffuse_image = render_fastgs(
+                    my_viewpoint_cam, gaussians, pipe, bg, args.mult, mlp_color=None
+                )["render"]
+                e_full = (render_image - gt_image).abs().mean(0)     # [H,W] error left after specular
+                e_diff = (diffuse_image - gt_image).abs().mean(0)    # [H,W] error of diffuse base
+                spec_explained = torch.relu(e_diff - e_full)         # error the ASG branch removed
+                spec_frac = spec_explained / (e_diff + 1e-6)         # scene-independent, in [0,1]
+                spec_pixel = spec_frac > frac_thresh                 # genuinely specular pixel
 
             base_hi = get_loss(render_image, gt_image) > args.loss_thresh  # high UNexplained error
             # (1) geometric vote: high error NOT attributable to specular (keeps bright-diffuse)

@@ -5,6 +5,7 @@
 import torch
 import numpy as np
 import os, time, sys, json
+from PIL import Image
 from random import randint
 from tqdm import tqdm
 import uuid
@@ -30,7 +31,7 @@ except:
 
 # Bump whenever training behavior changes; printed at startup and written to
 # train_info.json so every result folder identifies the code that produced it.
-CODE_VERSION = "v3.0-2026-06-21 (CVPR contribution: SPECULAR-AWARE DENSIFICATION [--spec_densify] — residual-decomposition vote in fast_utils: don't-fake (residual-gated) + specular-deficit allocation; reframes specular placement as an allocation problem)"
+CODE_VERSION = "v3.1-2026-07-04 (v3.0 + PRECOMPUTED classical Shafer specular prior [tools/gen_shafer_priors.py]: --spec_loss_mode shafer / --spec_densify_locator shafer, a model-independent locator available from iter 0, validated with a morphological top-hat blob gate to reject bright-diffuse false positives)"
 
 
 # ============================================================
@@ -52,7 +53,8 @@ def training(dataset, opt, pipe):
           f"normal_prior_start_iter={getattr(opt, 'normal_prior_start_iter', 'N/A')} | "
           f"normal_refine={getattr(opt, 'normal_refine', 'N/A')} | "
           f"spec_densify={getattr(opt, 'spec_densify', 'N/A')} "
-          f"(w={getattr(opt, 'spec_densify_weight', 'N/A')}) | "
+          f"(w={getattr(opt, 'spec_densify_weight', 'N/A')}, "
+          f"locator={getattr(opt, 'spec_densify_locator', 'N/A')}) | "
           f"spec_arch={getattr(opt, 'spec_arch', '') or os.environ.get('SPEC_ARCH','')}")
     tb_writer = prepare_output_and_logger(dataset)
 
@@ -129,6 +131,34 @@ def training(dataset, opt, pipe):
             t = -t
         normal_cache[image_name] = t.cpu()
         return t.cuda()
+
+    # ── v3.1: precomputed classical (Shafer) specular-prior cache ──
+    # Lazily load <source>/<shafer_prior_dir>/<image_name>.png (uint8 grayscale, [0,1]
+    # after /255) keyed by image_name, kept on CPU to bound VRAM. None = no prior file
+    # for this view. Only touched when spec_loss_mode/spec_densify_locator == "shafer",
+    # so the default path allocates nothing. See tools/gen_shafer_priors.py.
+    shafer_cache: dict = {}
+
+    def _load_shafer_prior(image_name, H, W):
+        if image_name in shafer_cache:
+            t = shafer_cache[image_name]
+            return None if t is None else t.cuda()
+        path = os.path.join(dataset.source_path, opt.shafer_prior_dir, image_name + ".png")
+        if not os.path.exists(path):
+            shafer_cache[image_name] = None
+            return None
+        arr = np.array(Image.open(path)).astype(np.float32) / 255.0  # [h,w] in [0,1]
+        t = torch.from_numpy(arr)
+        if t.shape[0] != H or t.shape[1] != W:            # match render resolution
+            t = torch.nn.functional.interpolate(
+                t.unsqueeze(0).unsqueeze(0), size=(H, W), mode="nearest"
+            ).squeeze(0).squeeze(0)
+        shafer_cache[image_name] = t.cpu()
+        return t.cuda()
+
+    # Resolved once for the densification-side "shafer" locator (fast_utils.py); harmless
+    # if unused (spec_densify_locator defaults to "model_residual", which never reads it).
+    _shafer_dir_abs = os.path.join(dataset.source_path, opt.shafer_prior_dir)
 
     for iteration in progress_bar:
 
@@ -265,19 +295,29 @@ def training(dataset, opt, pipe):
         if getattr(opt, "spec_loss_weight", 0.0) > 0.0 and iteration > opt.specular_start_iter:
             with torch.no_grad():
                 mode = getattr(opt, "spec_loss_mode", "residual")
-                if mode == "residual":
-                    # SH-only (diffuse) render of the SAME scene/view, no grad.
-                    diffuse = render_fastgs(
-                        cam, gaussians, pipe, background, opt.mult, mlp_color=None
-                    )["render"]
-                    locator = (gt - diffuse).abs().mean(dim=0)  # [H,W] specular residual
-                else:  # "luminance" (v2.5, deprecated — falsified)
-                    locator = gt.mean(dim=0)
-                thr = torch.quantile(locator.flatten(), opt.spec_loss_quantile)
-                hmask = (locator >= thr).float()  # [H,W]
-            denom = hmask.sum() + 1e-8
-            spec_l1 = ((image - gt).abs().mean(dim=0) * hmask).sum() / denom
-            loss = loss + opt.spec_loss_weight * spec_l1
+                if mode == "shafer":
+                    # v3.1: precomputed, MODEL-INDEPENDENT classical prior (available from
+                    # iteration 0) — see tools/gen_shafer_priors.py / classical_specular_mask.py.
+                    # Already gated by the top-hat blob filter, so threshold directly rather
+                    # than by quantile (the score is an absolute confidence, not a raw
+                    # residual needing relative extraction).
+                    prior = _load_shafer_prior(cam.image_name, gt.shape[1], gt.shape[2])
+                    hmask = (prior >= opt.shafer_prior_thresh).float() if prior is not None else None
+                else:
+                    if mode == "residual":
+                        # SH-only (diffuse) render of the SAME scene/view, no grad.
+                        diffuse = render_fastgs(
+                            cam, gaussians, pipe, background, opt.mult, mlp_color=None
+                        )["render"]
+                        locator = (gt - diffuse).abs().mean(dim=0)  # [H,W] specular residual
+                    else:  # "luminance" (v2.5, deprecated — falsified)
+                        locator = gt.mean(dim=0)
+                    thr = torch.quantile(locator.flatten(), opt.spec_loss_quantile)
+                    hmask = (locator >= thr).float()  # [H,W]
+            if hmask is not None:
+                denom = hmask.sum() + 1e-8
+                spec_l1 = ((image - gt).abs().mean(dim=0) * hmask).sum() / denom
+                loss = loss + opt.spec_loss_weight * spec_l1
 
         # v2.7 (root cause B): monocular normal-prior supervision (DN-Splatter style).
         # Render the per-Gaussian normals into an image (override_color path, bg=0 so
@@ -415,7 +455,7 @@ def training(dataset, opt, pipe):
                 with torch.no_grad():
                     importance_score, pruning_score = compute_gaussian_score_fastgs(
                         camlist, gaussians, pipe, background, opt, DENSIFY=True,
-                        specular_mlp=spec_for_score
+                        specular_mlp=spec_for_score, shafer_dir=_shafer_dir_abs
                     )
 
                 gaussians.densify_and_prune_fastgs(
@@ -469,6 +509,9 @@ def training(dataset, opt, pipe):
         "spec_densify": getattr(opt, "spec_densify", None),
         "spec_densify_weight": getattr(opt, "spec_densify_weight", None),
         "spec_densify_explained_frac": getattr(opt, "spec_densify_explained_frac", None),
+        "spec_densify_locator": getattr(opt, "spec_densify_locator", None),
+        "shafer_prior_dir": getattr(opt, "shafer_prior_dir", None),
+        "shafer_prior_thresh": getattr(opt, "shafer_prior_thresh", None),
         "spec_arch": getattr(opt, "spec_arch", "") or os.environ.get("SPEC_ARCH", ""),
         "initial_gaussians": initial_gaussians,
         "final_gaussians": gaussians.get_xyz.shape[0],

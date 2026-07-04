@@ -34,6 +34,7 @@ results/output/**/input.ply
 # Run-output folders carry version suffixes (spec_fastgs_output_v2.3-..., __v2.4-..._1),
 # so match the prefix, not just the bare name. Also the training "output/" dir.
 spec_fastgs_output*/
+spec_fastgs_teapot_*/
 spec-fastgs/output/
 output/
 
@@ -46,3 +47,8 @@ output/
 Anisotropic-Synthetic-Dataset/
 Synthetic_NSVF/
 *.zip
+# Consolidated local dataset mirror (dataset/mipnerf360, dataset/Anisotropic-..., etc.) —
+# was NOT covered by the rules above (those only match by subfolder NAME, not this root
+# folder), so dataset/mipnerf360/*.JPG real photos were untracked-but-NOT-ignored. Anchor
+# to repo root explicitly.
+/dataset/

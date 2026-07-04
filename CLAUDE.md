@@ -210,6 +210,43 @@ fronto-parallel draft). GATE: run extractor on counter, EYEBALL RS maps (real hi
 edges?) BEFORE wiring RS into spec_densify + loss. Plans: results/MIPNERF_BOTTLENECK_PLAN_2026-07-01.md,
 results/REFLECTION_SCORE_ASSESSMENT_2026-07-01.md.
 
+**CNN/classical specular-detection survey (2026-07-01) — verdict: don't adopt a pretrained
+CNN, DO use the classical Shafer detector as a cross-check/prior (with a fix).** Surveyed
+released CNN highlight detectors (SHIQ/CVPR21, SHDNet, SpecSeg, M2-Net, StableDelight) —
+same domain-gap risk profile as the Marigold normal prior. The classical dichromatic
+(Shafer 1985) bright+desaturated threshold correctly flags true highlights but
+false-positives hard on bright DIFFUSE surfaces: 78.6% of teapot flagged (its white
+background). Tool: `spec-fastgs/tools/classical_specular_mask.py`.
+
+**v3.1 (2026-07-04) — the classical detector FIXED (morphological top-hat) and wired into
+training as an opt-in locator.** A linear-high-pass "local contrast" fix removed the
+background false-positive but added a NEW artifact (a false ring along object silhouette
+edges — any strong edge is also high local-contrast). Fixed with morphological WHITE
+TOP-HAT (image − grey_opening(image, disk(radius)), pure scipy, no new dependency,
+verified equivalent to skimage): teapot 78.6%→1.97% (no ring), counter 3.48%→1.72% (still
+finds true glints). Full-dataset validation (not cherry-picked): counter 240 imgs
+mean 1.44%/max 4.22%, teapot 600 imgs mean 1.55%/max 2.68% — no image near the old
+78.6% failure. Known residual limitation: a small bright convex object comparable in size
+to `tophat_radius` can still false-positive (e.g. a white candle) — rarer/lower-impact
+than the background problem, but the prior is a heuristic, not ground truth.
+
+Wired in as TWO independent opt-in locators (both default off, exact old behavior
+otherwise): `tools/gen_shafer_priors.py` sweeps a scene offline (pure CPU, no GPU/model,
+~0.6s/image) → `--spec_loss_mode shafer` (specular loss mask) and
+`--spec_densify_locator shafer` (densification vote in `fast_utils.compute_gaussian_score_fastgs`
+— actually CHEAPER than model_residual: skips the online diffuse render). Falls back to
+model_residual per-camera if a prior file is missing. `run_spec-fastgs_big_r8.sh` = R7 +
+both locators swapped to shafer, isolating the locator source as the single change vs R7
+(which was neutral on counter — see the Mip-NeRF pivot entry above). CODE_VERSION→v3.1.
+Also fixed a real bug found along the way: `gen_normal_priors.py`/`gen_shafer_priors.py`'s
+image globbing didn't dedupe `*.png`/`*.PNG` matches, silently double-processing every
+image on case-insensitive filesystems (Windows) — harmless on Kaggle's Linux fs, fixed in
+both. Also closed a `.gitignore` gap: the local `dataset/` mirror (containing real
+`mipnerf360/*.JPG` photos) was untracked-but-NOT-ignored — only the `Anisotropic-Synthetic-
+Dataset`/`Synthetic_NSVF` subfolder NAMES happened to match existing rules; added `/dataset/`
+explicitly. Status: implemented + CPU/data-validated, NOT yet GPU-tested — pending Kaggle R8
+run. Plan updated: results/MIPNERF_BOTTLENECK_PLAN_2026-07-01.md §7.
+
 Sources: Residual Connections (arXiv:1710.04773), Hyper-Connections (arXiv:2409.19606),
 SpecNeRF (arXiv:2312.13102), 3DGS with Deferred Reflection (arXiv:2404.18454),
 SIREN (arXiv:2006.09661), WIRE (arXiv:2301.05187), LoRA (arXiv:2106.09685),

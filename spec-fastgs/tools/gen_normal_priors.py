@@ -34,9 +34,12 @@ from PIL import Image
 
 def list_images(img_dir):
     exts = ("*.jpg", "*.JPG", "*.jpeg", "*.png", "*.PNG")
-    files = []
+    files = set()  # set() dedupes: on case-insensitive filesystems (Windows), "*.png"
+                   # and "*.PNG" both match and return the SAME path string, doubling
+                   # every image if not deduped (harmless on Kaggle's case-sensitive
+                   # Linux fs, but silently doubles the sweep's runtime locally).
     for e in exts:
-        files.extend(glob.glob(os.path.join(img_dir, e)))
+        files.update(glob.glob(os.path.join(img_dir, e)))
     return sorted(files)
 
 

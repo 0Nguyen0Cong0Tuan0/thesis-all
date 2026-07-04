@@ -60,6 +60,52 @@ densification driven by a geometry-gated model-free reflection prior, for real s
 - Diagnosis complete (this doc). Foundation port = next concrete step (CPU-verifiable).
 - counter R7 diag: results/analysis_out/v3_counter_r7; teapot A/B: v3_teapot_base|r7.
 
+## 7. v3.1 (2026-07-04) — PRECOMPUTED SHAFER LOCATOR wired into training
+
+Following the §6 verdict, the classical detector was upgraded (morphological white top-hat
+gate — see `tools/classical_specular_mask.py` for the full derivation: naive detector
+78.6% false-positive on teapot's white background -> a linear-high-pass fix removed the
+background but added a silhouette-edge-ring artifact -> white top-hat (equivalent to
+skimage's, implemented in pure scipy, no new dependency) fixed both: teapot 78.6%->1.97%,
+counter 3.48%->1.72%, no edge artifact) and wired into the training pipeline as an
+opt-in, model-independent locator alongside the existing model-residual one:
+
+- **`tools/gen_shafer_priors.py`** — offline sweep, pure CPU (numpy/scipy/PIL, no GPU, no
+  trained model, ~0.6s/image). Saves a continuous [0,1] specular-candidate score (uint8
+  PNG) to `<source>/shafer_priors/<image_name>.png`, thresholded at USE time
+  (`shafer_prior_thresh`) rather than baked into the file, so retuning doesn't need a
+  re-sweep. Full-dataset validation: counter (240 imgs) flagged mean 1.44%/max 4.22%;
+  teapot (600 imgs) mean 1.55%/max 2.68% — no image anywhere near the old 78.6% failure.
+- **`--spec_loss_mode shafer`** (train.py) — the specular LOSS mask uses the precomputed
+  prior instead of the on-the-fly `|GT-diffuse|` residual.
+- **`--spec_densify_locator shafer`** (fast_utils.py `compute_gaussian_score_fastgs`) — the
+  DENSIFICATION vote's specular/not-specular split uses the precomputed prior instead of
+  `spec_frac`. This is actually CHEAPER than the model-residual path: no online diffuse
+  render needed (one fewer render pass per scoring view). Falls back to model_residual
+  per-camera if a prior file is missing (defensive, no silent degradation).
+- Both are opt-in (`spec_densify_locator` defaults to `"model_residual"`, `spec_loss_mode`
+  defaults to `"residual"`) — default path is completely unchanged.
+- `run_spec-fastgs_big_r8.sh` = R7 (spec_densify on) + swap BOTH locators to shafer,
+  isolating the locator source as the single change vs R7 (which was neutral on counter).
+  Stale-code guard + a safety check that priors exist before training.
+- CODE_VERSION -> v3.1. Notebook: new prereq cell runs the sweep (before the conda
+  teardown, though technically not required there since no GPU is needed) then R8 trains.
+
+**Known residual limitation** (spot-checked on the production sweep, not just cherry-picked
+images): a small, uniformly bright, CONVEX object comparable in size to `tophat_radius`
+(e.g. a white candle on the counter scene) can still be flagged solid, since top-hat can't
+distinguish "a highlight blob on a larger surface" from "a whole small bright object." Rarer
+and much lower-impact than the background problem, but the prior remains a heuristic, not
+ground truth — this is exactly why it's wired in as an OPT-IN alternative locator, evaluated
+by an A/B (R8 vs R7), not a blind default swap.
+
+**Status: implemented + CPU/data-validated, NOT yet GPU-tested.** Next: run R8 on Kaggle;
+compare against R7's neutral counter result — if NCC/sigma/energyRatio move, the LOCATOR
+(not the mechanism) was the Mip-NeRF bottleneck; if still flat, the classical prior lacks
+signal on this scene's specular content and the geometry-gated Reflection Score
+(`tools/extract_reflection_score.py`) is the next locator to try (same wiring pattern
+could be reused: it also just needs to produce a per-image [0,1] score PNG).
+
 ## 6. CNN / classical specular-region detection — survey + verdict (2026-07-01)
 
 **Question asked:** could a CNN (or an existing filter/kernel) detect specular regions in
