@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
 """
 Offline preprocessing sweep: precompute a Tan & Ikeuchi (PAMI 2005) specular-candidate
-score for every training image in a scene, BEFORE training starts.
+mask for every training image in a scene, BEFORE training starts.
 
 Unlike the monocular normal prior (tools/gen_normal_priors.py, needs a GPU diffusion
 model) or the Reflection Score (tools/extract_reflection_score.py, needs a TRAINED model
 + rendered depth), this sweep is pure classical CV (Tan-Ikeuchi's specular-pedestal
-(Imin) score + morphological white top-hat + near-saturation recovery, see
-tools/classical_specular_mask.py) — no GPU, no trained model, no external dependency
-beyond numpy/scipy/PIL. It can run locally on a laptop in under a second per image, or on
-Kaggle before/without spending any GPU time.
+(Imin) score + morphological white top-hat + near-saturation recovery + desaturation
+gate, see tools/classical_specular_mask.py) — no GPU, no trained model, no external
+dependency beyond numpy/scipy/PIL. It can run locally on a laptop in under a second per
+image, or on Kaggle before/without spending any GPU time.
 
-For every image in <source>/<images>, writes a continuous specular-candidate score
-(uint8 PNG, single channel, already gated — see classical_specular_mask.specular_score)
-to <source>/<out>/<image_name>.png. A small RGB preview (red overlay on the thresholded
-mask) is written for the first N images only, to keep disk light while still giving a
-fast visual sanity check.
+For every image in <source>/<images>, writes the BOOLEAN specular mask (uint8 PNG,
+single channel, 0 or 255 — see classical_specular_mask.specular_score) to
+<source>/<out>/<image_name>.png. A small RGB preview (red overlay on the same mask) is
+written for the first N images only, to keep disk light while still giving a fast
+visual sanity check.
+
+FIX (2026-07-04, code review): this file used to save `specular_score`'s CONTINUOUS,
+PER-IMAGE-NORMALIZED `score` (divided by that image's own max) instead of the boolean
+`mask` — meaning (a) the SAME downstream threshold (`tanikeuchi_prior_thresh`) meant a
+different absolute selectivity on every image purely as an artifact of each image's own
+normalization, and (b) the actually-persisted-and-reloaded prior was a DIFFERENT
+quantity than the `mask` this tool's own "flagged%" sweep statistics were computed from
+and than what got full-sweep validated — i.e. validation numbers and production
+behavior had silently diverged. Saving `mask` directly (built from fixed, absolute,
+cross-image-comparable thresholds inside `specular_score`) fixes both: there is now only
+ONE decision boundary, computed once, consistently, per image.
 
 Usage:
   python tools/gen_tanikeuchi_priors.py -s ./datasets/mipnerf360/counter -i images
@@ -53,6 +64,7 @@ def main():
     ap.add_argument("--tophat_radius", type=int, default=12)
     ap.add_argument("--tophat_thresh", type=float, default=0.08)
     ap.add_argument("--near_white_thresh", type=float, default=0.85)
+    ap.add_argument("--sat_thresh", type=float, default=0.25)
     ap.add_argument("--max_size", type=int, default=1600,
                     help="resize so the longest side <= this before scoring; keeps disk/"
                          "compute light on full-res real photos (0 = full resolution)")
@@ -80,11 +92,14 @@ def main():
                 img = img.resize((max(1, round(w * s)), max(1, round(h * s))), Image.BILINEAR)
         arr01 = np.array(img).astype(np.float32) / 255.0
         mask, score = specular_score(arr01, args.bright_floor, args.tophat_radius,
-                                      args.tophat_thresh, args.near_white_thresh)
+                                      args.tophat_thresh, args.near_white_thresh, args.sat_thresh)
         flagged_pcts.append(100.0 * mask.mean())
 
-        score_u8 = (score * 255).clip(0, 255).astype(np.uint8)
-        Image.fromarray(score_u8).save(os.path.join(out_dir, stem + ".png"))
+        # Save the boolean MASK (0/255), not the per-image-normalized continuous score —
+        # this is the exact quantity validated by this sweep's own flagged% stats below,
+        # and the exact quantity train.py/fast_utils.py threshold at load time.
+        mask_u8 = (mask.astype(np.uint8) * 255)
+        Image.fromarray(mask_u8).save(os.path.join(out_dir, stem + ".png"))
 
         if k < args.preview:
             overlay = (arr01 * 255).astype(np.uint8).copy()

@@ -157,26 +157,50 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY = 
         get_flag = True
 
         if spec_densify:
-            spec_pixel = None
+            appearance_flag = None
             if use_tanikeuchi_locator:
-                # v3.1/v3.2: MODEL-INDEPENDENT locator — precomputed classical prior, no
-                # online diffuse render needed (cheaper: one fewer render pass than
-                # model_residual).
+                # v3.1/v3.2: MODEL-INDEPENDENT locator — precomputed classical prior.
                 prior = _load_tanikeuchi_prior_for_densify(
                     tanikeuchi_dir, my_viewpoint_cam.image_name,
                     render_image.shape[1], render_image.shape[2])
                 if prior is not None:
-                    spec_pixel = prior >= tanikeuchi_prior_thresh
+                    appearance_flag = prior >= tanikeuchi_prior_thresh
 
-            if spec_pixel is None:
-                # default / fallback: on-the-fly residual decomposition, diffuse (SH-only)
-                # vs full (SH+ASG) render.
-                diffuse_image = render_fastgs(
-                    my_viewpoint_cam, gaussians, pipe, bg, args.mult, mlp_color=None
-                )["render"]
-                e_full = (render_image - gt_image).abs().mean(0)     # [H,W] error left after specular
-                e_diff = (diffuse_image - gt_image).abs().mean(0)    # [H,W] error of diffuse base
-                spec_explained = torch.relu(e_diff - e_full)         # error the ASG branch removed
+            # Always compute the on-the-fly diffuse-vs-full residual decomposition when
+            # spec_densify is active: needed either AS the "model_residual" locator
+            # itself, or (when the tanikeuchi locator is in use) as a CORROBORATION
+            # check before letting an appearance-only flag exclude a pixel from
+            # geometric densification credit — see the comment below. This reintroduces
+            # the extra render pass the tanikeuchi locator was originally chosen to
+            # avoid, but that is the necessary cost of the correctness fix (code
+            # review 2026-07-04, findings #2 and #5).
+            diffuse_image = render_fastgs(
+                my_viewpoint_cam, gaussians, pipe, bg, args.mult, mlp_color=None
+            )["render"]
+            e_full = (render_image - gt_image).abs().mean(0)     # [H,W] error left after specular
+            e_diff = (diffuse_image - gt_image).abs().mean(0)    # [H,W] error of diffuse base
+            spec_explained = torch.relu(e_diff - e_full)         # error the ASG branch removed
+
+            if appearance_flag is not None:
+                # CORROBORATION fixes two related risks: (a) early in specular
+                # training (right after specular_start_iter), the ASG branch hasn't
+                # learned anything yet, so appearance-flagged pixels would otherwise be
+                # excluded from geo_map immediately — starving them of geometric
+                # densification during exactly the window they need it most; (b) a
+                # genuinely diffuse object the classical locator misclassifies as
+                # specular (its own documented "small bright convex object"
+                # limitation) would otherwise be silently protected from correction
+                # forever, since the ASG branch can never actually explain a truly
+                # diffuse defect. In both cases spec_explained stays ~0 (the branch
+                # isn't/can't reduce error there), so requiring it to be measurably
+                # positive before trusting the appearance flag routes the pixel back
+                # to ordinary geometric treatment instead of silently excluding it.
+                model_corroborates = spec_explained > 1e-4
+                spec_pixel = appearance_flag & model_corroborates
+            else:
+                # default / fallback: pure on-the-fly residual decomposition (used
+                # when spec_densify_locator == "model_residual", or when the
+                # tanikeuchi prior file is missing for this camera).
                 spec_frac = spec_explained / (e_diff + 1e-6)         # scene-independent, in [0,1]
                 spec_pixel = spec_frac > frac_thresh                 # genuinely specular pixel
 

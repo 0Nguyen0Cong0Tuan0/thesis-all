@@ -56,6 +56,23 @@ def training(dataset, opt, pipe):
           f"(w={getattr(opt, 'spec_densify_weight', 'N/A')}, "
           f"locator={getattr(opt, 'spec_densify_locator', 'N/A')}) | "
           f"spec_arch={getattr(opt, 'spec_arch', '') or os.environ.get('SPEC_ARCH','')}")
+
+    # Diagnostic (code review 2026-07-04, finding #6): a specular locator is only
+    # useful for the DENSIFICATION vote if spec_densify=True — that is what makes
+    # pruning driven by geo_counts only (never pruning a Gaussian merely for carrying
+    # correct view-dependent specular variation, see compute_gaussian_score_fastgs).
+    # With spec_densify=False, an explicitly-configured spec_densify_locator has no
+    # effect at all and the vanilla FastGS vote (which does NOT distinguish specular
+    # from geometric error) is what actually runs — silently, unless flagged here.
+    if (getattr(opt, "spec_densify_locator", "model_residual") != "model_residual"
+            and not getattr(opt, "spec_densify", False)):
+        print(f"[SPEC-FASTGS] WARNING: spec_densify_locator="
+              f"'{opt.spec_densify_locator}' is set but spec_densify=False — this "
+              f"locator has NO EFFECT on densification. The vanilla FastGS vote runs "
+              f"instead, which does not protect Gaussians carrying correct specular "
+              f"variation from being pruned/under-densified (add --spec_densify to "
+              f"enable that protection).")
+
     tb_writer = prepare_output_and_logger(dataset)
 
     # ------------------------------------------------------------
@@ -295,16 +312,27 @@ def training(dataset, opt, pipe):
         if getattr(opt, "spec_loss_weight", 0.0) > 0.0 and iteration > opt.specular_start_iter:
             with torch.no_grad():
                 mode = getattr(opt, "spec_loss_mode", "residual")
+                hmask = None
                 if mode == "tanikeuchi":
                     # v3.1/v3.2: precomputed, MODEL-INDEPENDENT classical prior (available
                     # from iteration 0) — see tools/gen_tanikeuchi_priors.py /
                     # classical_specular_mask.py. Already gated by the top-hat blob filter
-                    # + near-saturation recovery, so threshold directly rather than by
-                    # quantile (the score is an absolute confidence, not a raw residual
-                    # needing relative extraction).
+                    # + near-saturation recovery + desaturation, so threshold directly
+                    # rather than by quantile (the score is an absolute confidence, not a
+                    # raw residual needing relative extraction).
                     prior = _load_tanikeuchi_prior(cam.image_name, gt.shape[1], gt.shape[2])
-                    hmask = (prior >= opt.tanikeuchi_prior_thresh).float() if prior is not None else None
-                else:
+                    if prior is not None:
+                        hmask = (prior >= opt.tanikeuchi_prior_thresh).float()
+                    else:
+                        # FALLBACK (fixes an inconsistency vs the densification-side
+                        # locator in utils/fast_utils.py, which already falls back to the
+                        # on-the-fly residual computation when a prior file is missing for
+                        # a camera): degrade to "residual" mode below instead of silently
+                        # skipping the specular loss term for this camera, so coverage
+                        # gaps in the precomputed sweep don't produce per-camera-
+                        # inconsistent training signal.
+                        mode = "residual"
+                if mode != "tanikeuchi":
                     if mode == "residual":
                         # SH-only (diffuse) render of the SAME scene/view, no grad.
                         diffuse = render_fastgs(
