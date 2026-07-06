@@ -67,7 +67,6 @@ class GaussianModel:
         self.denom = torch.empty(0)
         self.optimizer = None
         self.shoptimizer = None
-        self.asgoptimizer = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
 
@@ -79,6 +78,7 @@ class GaussianModel:
         # Ensure ASG features and optimizer states are always included for robust checkpointing
         opt_state = self.optimizer.state_dict() if self.optimizer is not None else None
         shopt_state = self.shoptimizer.state_dict() if getattr(self, 'shoptimizer', None) is not None else None
+        asgopt_state = self.asg_optimizer.state_dict() if getattr(self, 'asg_optimizer', None) is not None else None
 
         return (
             self.active_sh_degree,
@@ -96,24 +96,44 @@ class GaussianModel:
             opt_state,
             shopt_state,
             self.spatial_lr_scale,
+            asgopt_state,
         )
 
     def restore(self, model_args, training_args):
-        (self.active_sh_degree,
-         self._xyz,
-         self._features_dc,
-         self._features_rest,
-         self._features_asg,
-         self._scaling,
-         self._rotation,
-         self._opacity,
-         self.max_radii2D,
-         xyz_gradient_accum,
-         xyz_gradient_accum_abs,
-         denom,
-         opt_dict,
-         shopt_dict,
-         self.spatial_lr_scale) = model_args
+        asgopt_dict = None
+        if len(model_args) == 16:
+            (self.active_sh_degree,
+             self._xyz,
+             self._features_dc,
+             self._features_rest,
+             self._features_asg,
+             self._scaling,
+             self._rotation,
+             self._opacity,
+             self.max_radii2D,
+             xyz_gradient_accum,
+             xyz_gradient_accum_abs,
+             denom,
+             opt_dict,
+             shopt_dict,
+             self.spatial_lr_scale,
+             asgopt_dict) = model_args
+        else:
+            (self.active_sh_degree,
+             self._xyz,
+             self._features_dc,
+             self._features_rest,
+             self._features_asg,
+             self._scaling,
+             self._rotation,
+             self._opacity,
+             self.max_radii2D,
+             xyz_gradient_accum,
+             xyz_gradient_accum_abs,
+             denom,
+             opt_dict,
+             shopt_dict,
+             self.spatial_lr_scale) = model_args
 
         # Recreate optimizers / param groups with training_args then load states if present
         self.training_setup(training_args)
@@ -131,6 +151,12 @@ class GaussianModel:
         try:
             if shopt_dict is not None and getattr(self, 'shoptimizer', None) is not None:
                 self.shoptimizer.load_state_dict(shopt_dict)
+        except Exception:
+            pass
+
+        try:
+            if asgopt_dict is not None and getattr(self, 'asg_optimizer', None) is not None:
+                self.asg_optimizer.load_state_dict(asgopt_dict)
         except Exception:
             pass
 
@@ -171,13 +197,8 @@ class GaussianModel:
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
     
-    def get_normal_axis(self, dir_pp_normalized=None, return_delta=False, indices=None):
-        # `indices` restricts the (argsort + build_rotation) work to a subset of
-        # Gaussians — used by the visibility-gated specular path in train.py.
-        if indices is None:
-            normal_axis = self.get_minimum_axis
-        else:
-            normal_axis = get_minimum_axis(self.get_scaling[indices], self.get_rotation[indices])
+    def get_normal_axis(self, dir_pp_normalized=None, return_delta=False):
+        normal_axis = self.get_minimum_axis
         normal_axis, positive = flip_align_view(normal_axis, dir_pp_normalized)
         normal = normal_axis / normal_axis.norm(dim=1, keepdim=True)  # (N, 3)
         return normal
@@ -227,30 +248,31 @@ class GaussianModel:
 
         l = [
             {'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
-            {'params': [self._features_dc], 'lr': training_args.lowfeature_lr, "name": "f_dc"},
+            {'params': [self._features_dc], 'lr': training_args.lowfeature_lr, "name": "f_dc"}, 
             {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"}
         ]
         sh_l = [{'params': [self._features_rest], 'lr': training_args.highfeature_lr / 20.0, "name": "f_rest"}]
-        # ASG latents get their own optimizer: post-densification the main optimizer
-        # steps only every 32/64 iters (gradient accumulation), but the specular MLP
-        # steps every iter it runs — keeping f_asg in the main optimizer starved the
-        # per-Gaussian specular capacity (~470 steps over 15k-30k). The ASG optimizer
-        # is stepped from train.py on every iter the specular MLP actually ran.
         asg_l = [{'params': [self._features_asg], 'lr': training_args.feature_lr, "name": "f_asg"}]
-        self.sh_base_lr = training_args.highfeature_lr / 20.0
 
         if self.optimizer_type == "default":
             self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
             self.shoptimizer = torch.optim.Adam(sh_l, lr=0.0, eps=1e-15)
-            self.asgoptimizer = torch.optim.Adam(asg_l, lr=0.0, eps=1e-15)
+            self.asg_optimizer = torch.optim.Adam(asg_l, lr=0.0, eps=1e-15)
         elif self.optimizer_type == "sparse_adam":
-            self.optimizer = SparseGaussianAdam(l + sh_l + asg_l, lr=0.0, eps=1e-15)
+            self.optimizer = SparseGaussianAdam(l + sh_l, lr=0.0, eps=1e-15)
+            self.shoptimizer = None
+            self.asg_optimizer = torch.optim.Adam(asg_l, lr=0.0, eps=1e-15)
+
         self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
-                                                    lr_final=training_args.position_lr_final*self.spatial_lr_scale,
-                                                    lr_delay_mult=training_args.position_lr_delay_mult,
-                                                    max_steps=training_args.position_lr_max_steps)
+                                                     lr_final=training_args.position_lr_final*self.spatial_lr_scale,
+                                                     lr_delay_mult=training_args.position_lr_delay_mult,
+                                                     max_steps=training_args.position_lr_max_steps)
+        self.f_rest_warmup_until = training_args.f_rest_warmup_until
+        self.f_rest_interval_early = training_args.f_rest_interval_early
+        self.f_rest_interval_mid = training_args.f_rest_interval_mid
+        self.f_rest_interval_late = training_args.f_rest_interval_late
 
     def update_learning_rate(self, iteration):
         ''' Learning rate scheduling per step '''
@@ -260,44 +282,54 @@ class GaussianModel:
                 param_group['lr'] = lr
                 return lr
 
-    def optimizer_step(self, iteration):
-        ''' An optimization schdeuler. The goal is similar to the sparse Adam of taming 3dgs.'''
+    def optimizer_step(self, iteration, skip_sh=False):
+        ''' An optimization scheduler. The goal is similar to the sparse Adam of taming 3dgs.'''
+        if getattr(self, 'asg_optimizer', None) is not None:
+            self.asg_optimizer.step()
+            self.asg_optimizer.zero_grad(set_to_none = True)
+
+        stepped_f_rest = False
         if iteration <= 15000:
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none = True)
-            if iteration % 16 == 0:
-                self.shoptimizer.step()
-                self.shoptimizer.zero_grad(set_to_none = True)
+            if self._should_step_f_rest(iteration, skip_sh):
+                self._step_f_rest_optimizer()
+                stepped_f_rest = True
         elif iteration <= 20000:
             if iteration % 32 == 0:
                 self.optimizer.step()
                 self.optimizer.zero_grad(set_to_none = True)
-                self.shoptimizer.step()
-                self.shoptimizer.zero_grad(set_to_none = True)
+                if self._should_step_f_rest(iteration, skip_sh):
+                    self._step_f_rest_optimizer()
+                    stepped_f_rest = True
         else:
             if iteration % 64 == 0:
                 self.optimizer.step()
                 self.optimizer.zero_grad(set_to_none = True)
-                self.shoptimizer.step()
-                self.shoptimizer.zero_grad(set_to_none = True)
+                if self._should_step_f_rest(iteration, skip_sh):
+                    self._step_f_rest_optimizer()
+                    stepped_f_rest = True
 
-    def asg_optimizer_step(self):
-        ''' Stepped from train.py on every iter the specular MLP ran, so the ASG
-            latents learn at the same cadence as the MLP (not the 32/64-iter
-            throttle of the main optimizer). '''
-        if self.asgoptimizer is not None:
-            self.asgoptimizer.step()
-            self.asgoptimizer.zero_grad(set_to_none=True)
+        if not stepped_f_rest and self._should_step_f_rest(iteration, skip_sh):
+            self._step_f_rest_optimizer()
 
-    def set_sh_lr_scale(self, scale):
-        ''' Soft SH shielding: scales the f_rest learning rate instead of mutating
-            gradient buffers. Mutating grads interacted badly with the accumulation
-            in optimizer_step (a grad contributed j iters before the step ended up
-            scaled by 0.01^j) and also froze f_dc unintentionally. '''
-        if self.shoptimizer is None:
-            return
-        for group in self.shoptimizer.param_groups:
-            group['lr'] = self.sh_base_lr * scale
+    def _should_step_f_rest(self, iteration, skip_sh=False):
+        if skip_sh or self.shoptimizer is None:
+            return False
+        if iteration <= self.f_rest_warmup_until:
+            return True
+        if iteration <= 15000:
+            interval = self.f_rest_interval_early
+        elif iteration <= 20000:
+            interval = self.f_rest_interval_mid
+        else:
+            interval = self.f_rest_interval_late
+        return interval > 0 and iteration % interval == 0
+
+    def _step_f_rest_optimizer(self):
+        if self.shoptimizer is not None:
+            self.shoptimizer.step()
+            self.shoptimizer.zero_grad(set_to_none=True)
 
     def construct_list_of_attributes(self):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
@@ -398,8 +430,8 @@ class GaussianModel:
     def _prune_optimizer(self, mask):
         optimizable_tensors = {}
         optimizers = [self.optimizer]
-        if self.shoptimizer: optimizers.append(self.shoptimizer)
-        if self.asgoptimizer: optimizers.append(self.asgoptimizer)
+        if getattr(self, 'shoptimizer', None): optimizers.append(self.shoptimizer)
+        if getattr(self, 'asg_optimizer', None): optimizers.append(self.asg_optimizer)
 
         for opt in optimizers:
             for group in opt.param_groups:
@@ -441,8 +473,8 @@ class GaussianModel:
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
         optimizers = [self.optimizer]
-        if self.shoptimizer: optimizers.append(self.shoptimizer)
-        if self.asgoptimizer: optimizers.append(self.asgoptimizer)
+        if getattr(self, 'shoptimizer', None): optimizers.append(self.shoptimizer)
+        if getattr(self, 'asg_optimizer', None): optimizers.append(self.asg_optimizer)
 
         for opt in optimizers:
             for group in opt.param_groups:
@@ -553,11 +585,13 @@ class GaussianModel:
         all_splits = torch.logical_and(split_qualifiers, grad_qualifiers_abs)
 
         # This is our multi-view consisent metric for densification
-        # We use this metric to further filter the candidates for densification, which is similar to taming 3dgs.
         metric_mask = importance_score > 5
+        
+        final_clones = torch.logical_and(clone_qualifiers, grad_qualifiers)
+        final_splits = torch.logical_and(split_qualifiers, grad_qualifiers_abs)
 
-        self.densify_and_clone_fastgs(metric_mask, all_clones)
-        self.densify_and_split_fastgs(metric_mask, all_splits)
+        self.densify_and_clone_fastgs(metric_mask, final_clones)
+        self.densify_and_split_fastgs(metric_mask, final_splits)
 
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         if max_screen_size:

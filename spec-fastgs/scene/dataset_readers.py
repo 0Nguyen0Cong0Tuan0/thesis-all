@@ -207,13 +207,11 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
 
     # ---- point cloud ----
     ply_path = os.path.join(path, "sparse/0/points3D.ply")
-
     if not os.path.exists(ply_path):
         try:
             xyz, rgb, _ = read_points3D_binary(os.path.join(path, "sparse/0/points3D.bin"))
         except:
             xyz, rgb, _ = read_points3D_text(os.path.join(path, "sparse/0/points3D.txt"))
-
         storePly(ply_path, xyz, rgb)
 
     pcd = fetchPly(ply_path)
@@ -228,105 +226,90 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
 
 
 # ------------------------------------------------------------
-# SYNTHETIC LOADERS (for Spec-Gaussian's eval datasets)
+# CAMERA LOADER (BLENDER / SYNTHETIC)
 # ------------------------------------------------------------
-# The repo shipped Colmap-only, but scene/__init__.py already branches to a
-# "Blender" callback for transforms_train.json scenes (it just wasn't registered).
-# Spec-Gaussian evaluates on: Anisotropic Synthetic + NeRF Synthetic (Blender json
-# format) and NSVF Synthetic (pose/ + rgb/ + intrinsics.txt). Added here so we can
-# reproduce their Tables 1/3/4. R/T use the SAME convention as readColmapCameras
-# (R = c2w rotation, T = w2c translation); images are alpha-blended to the chosen
-# background and returned as RGB PIL (loadCam expects PIL).
-
-def _blend_to_rgb(image, white_background):
-    im = np.array(image.convert("RGBA")).astype(np.float32) / 255.0
-    bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
-    rgb = im[:, :, :3] * im[:, :, 3:4] + bg * (1 - im[:, :, 3:4])
-    return Image.fromarray((rgb * 255.0).astype(np.uint8), "RGB")
-
-
-def _random_pcd(ply_path, n=100_000, scale=2.6, offset=1.3):
-    if not os.path.exists(ply_path):
-        xyz = np.random.random((n, 3)) * scale - offset
-        shs = np.random.random((n, 3)) / 255.0
-        storePly(ply_path, xyz, SH2RGB(shs) * 255)
-    return fetchPly(ply_path)
-
 
 def readCamerasFromTransforms(path, transformsfile, white_background, extension=".png"):
     cam_infos = []
-    with open(os.path.join(path, transformsfile)) as f:
-        contents = json.load(f)
-    fovx = contents["camera_angle_x"]
-    for idx, frame in enumerate(contents["frames"]):
-        cam_name = os.path.join(path, frame["file_path"] + extension)
-        c2w = np.array(frame["transform_matrix"])
-        c2w[:3, 1:3] *= -1                      # OpenGL/Blender -> COLMAP
-        w2c = np.linalg.inv(c2w)
-        R = np.transpose(w2c[:3, :3])
-        T = w2c[:3, 3]
-        image = _blend_to_rgb(Image.open(cam_name), white_background)
-        W, H = image.size
-        fovy = focal2fov(fov2focal(fovx, W), H)
-        cam_infos.append(CameraInfo(
-            uid=idx, R=R, T=T, FovY=fovy, FovX=fovx, image=image,
-            image_path=cam_name, image_name=Path(cam_name).stem,
-            width=W, height=H, depth=None))
+
+    with open(os.path.join(path, transformsfile)) as json_file:
+        contents = json.load(json_file)
+        fovx = contents["camera_angle_x"]
+
+        frames = contents["frames"]
+        for idx, frame in enumerate(frames):
+            cam_name = os.path.join(path, frame["file_path"] + extension)
+
+            # NeRF 'transform_matrix' is a camera-to-world transform
+            c2w = np.array(frame["transform_matrix"])
+            # change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP (Y down, Z forward)
+            c2w[:3, 1:3] *= -1
+
+            # get the world-to-camera transform and set R, T
+            w2c = np.linalg.inv(c2w)
+            R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
+            T = w2c[:3, 3]
+
+            image_path = os.path.join(path, cam_name)
+            # Retain subfolder name (train or test) to keep original folder structure
+            subfolder = Path(frame["file_path"]).parent.name
+            stem = Path(cam_name).stem
+            image_name = f"{subfolder}/{stem}" if subfolder else stem
+            
+            image = Image.open(image_path)
+
+            im_data = np.array(image.convert("RGBA"))
+
+            bg = np.array([1,1,1]) if white_background else np.array([0, 0, 0])
+
+            norm_data = im_data / 255.0
+            arr = norm_data[:,:,:3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
+            image = Image.fromarray(np.array(arr*255.0, dtype=np.byte), "RGB")
+
+            fovy = focal2fov(fov2focal(fovx, image.size[0]), image.size[1])
+            FovY = fovy 
+            FovX = fovx
+
+            cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+                            image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1]))
+            
     return cam_infos
 
-
 def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
-    train = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
-    test = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension)
+    print("Reading Training Transforms")
+    train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
+    print("Reading Test Transforms")
+    test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension)
+    
     if not eval:
-        train = train + test
-        test = []
-    norm = getNerfppNorm(train)
-    pcd = _random_pcd(os.path.join(path, "points3d.ply"))
-    return SceneInfo(point_cloud=pcd, train_cameras=train, test_cameras=test,
-                     nerf_normalization=norm, ply_path=os.path.join(path, "points3d.ply"))
+        train_cam_infos.extend(test_cam_infos)
+        test_cam_infos = []
 
+    nerf_normalization = getNerfppNorm(train_cam_infos)
 
-def readNSVFSceneInfo(path, white_background, eval):
-    """NSVF format: intrinsics.txt (focal on line 1), pose/<split>_*.txt (4x4 c2w),
-    rgb/<split>_*.(png|jpg). Split prefix: 0=train, 1=val, 2=test."""
-    with open(os.path.join(path, "intrinsics.txt")) as f:
-        focal = float(f.readline().split()[0])
-    pose_dir, rgb_dir = os.path.join(path, "pose"), os.path.join(path, "rgb")
-    rgb_files = {os.path.splitext(n)[0]: os.path.join(rgb_dir, n)
-                 for n in os.listdir(rgb_dir)}
-    cam_infos = []
-    for idx, pf in enumerate(sorted(os.listdir(pose_dir))):
-        stem = os.path.splitext(pf)[0]
-        if stem not in rgb_files:
-            continue
-        c2w = np.loadtxt(os.path.join(pose_dir, pf)).reshape(4, 4)
-        c2w[:3, 1:3] *= -1
-        w2c = np.linalg.inv(c2w)
-        R = np.transpose(w2c[:3, :3])
-        T = w2c[:3, 3]
-        image = _blend_to_rgb(Image.open(rgb_files[stem]), white_background)
-        W, H = image.size
-        cam_infos.append(CameraInfo(
-            uid=idx, R=R, T=T, FovY=focal2fov(focal, H), FovX=focal2fov(focal, W),
-            image=image, image_path=rgb_files[stem], image_name=stem,
-            width=W, height=H, depth=None))
-    # split by NSVF prefix: 0=train, 1=val, 2=test (canonical NSVF protocol: train on
-    # 0, evaluate on 2; val is dropped to match published numbers).
-    def pref(c): return c.image_name.split("_")[0]
-    if eval:
-        train = [c for c in cam_infos if pref(c) == "0"]
-        test = [c for c in cam_infos if pref(c) == "2"]
-        if not test:                      # fall back if prefixes absent
-            train = [c for i, c in enumerate(cam_infos) if i % 8 != 0]
-            test = [c for i, c in enumerate(cam_infos) if i % 8 == 0]
-    else:
-        train = [c for c in cam_infos if pref(c) in ("0", "1")] or cam_infos
-        test = []
-    norm = getNerfppNorm(train)
-    pcd = _random_pcd(os.path.join(path, "points3d.ply"), scale=3.0, offset=1.5)
-    return SceneInfo(point_cloud=pcd, train_cameras=train, test_cameras=test,
-                     nerf_normalization=norm, ply_path=os.path.join(path, "points3d.ply"))
+    ply_path = os.path.join(path, "points3d.ply")
+    if not os.path.exists(ply_path):
+        # Since this data set has no colmap data, we start with random points
+        num_pts = 100_000
+        print(f"Generating random point cloud ({num_pts})...")
+        
+        # We create random points inside the bounds of the synthetic Blender scenes
+        xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
+        shs = np.random.random((num_pts, 3)) / 255.0
+        pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
+
+        storePly(ply_path, xyz, SH2RGB(shs) * 255)
+    try:
+        pcd = fetchPly(ply_path)
+    except:
+        pcd = None
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
 
 
 # ------------------------------------------------------------
@@ -335,7 +318,6 @@ def readNSVFSceneInfo(path, white_background, eval):
 
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender": readNerfSyntheticInfo,
-    "NSVF": readNSVFSceneInfo,
+    "Blender": readNerfSyntheticInfo
 }
 

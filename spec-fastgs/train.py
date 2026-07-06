@@ -5,7 +5,6 @@
 import torch
 import numpy as np
 import os, time, sys, json
-from PIL import Image
 from random import randint
 from tqdm import tqdm
 import uuid
@@ -17,7 +16,7 @@ from utils.image_utils import psnr
 from gaussian_renderer import render_fastgs
 from scene import Scene, GaussianModel, SpecularModel
 
-from utils.general_utils import safe_state, sh_lr_scale_cosine
+from utils.general_utils import safe_state
 from utils.fast_utils import compute_gaussian_score_fastgs, sampling_cameras
 
 from argparse import ArgumentParser, Namespace
@@ -29,10 +28,6 @@ try:
 except:
     TENSORBOARD_FOUND = False
 
-# Bump whenever training behavior changes; printed at startup and written to
-# train_info.json so every result folder identifies the code that produced it.
-CODE_VERSION = "v3.2-2026-07-04 (v3.1 + swapped classical locator from Shafer to Tan-Ikeuchi [tools/gen_tanikeuchi_priors.py]: --spec_loss_mode tanikeuchi / --spec_densify_locator tanikeuchi, top-hat blob gate + near-saturation recovery [Algorithm 2b], validated in test_specular_algorithms_comparison.ipynb; flags ~5x more of the image than Shafer did per the full-sweep numbers, chosen per project decision after visual review)"
-
 
 # ============================================================
 # TRAINING LOOP
@@ -41,57 +36,18 @@ CODE_VERSION = "v3.2-2026-07-04 (v3.1 + swapped classical locator from Shafer to
 def training(dataset, opt, pipe):
 
     start_time = time.time()
-    print(f"[SPEC-FASTGS] code: {CODE_VERSION}")
-    print(f"[SPEC-FASTGS] run_tag: {getattr(opt, 'run_tag', '') or '(none)'}")
-    print(f"[SPEC-FASTGS] git: {get_git_branch()}@{get_git_commit()} | "
-          f"specular_start_iter={opt.specular_start_iter} | "
-          f"highlight_mask_quantile={getattr(opt, 'highlight_mask_quantile', 'N/A')} | "
-          f"sh_decay_steps={getattr(opt, 'sh_decay_steps', 'N/A')} | "
-          f"spec_loss_weight={getattr(opt, 'spec_loss_weight', 'N/A')} | "
-          f"spec_loss_mode={getattr(opt, 'spec_loss_mode', 'N/A')} | "
-          f"normal_prior_weight={getattr(opt, 'normal_prior_weight', 'N/A')} | "
-          f"normal_prior_start_iter={getattr(opt, 'normal_prior_start_iter', 'N/A')} | "
-          f"normal_refine={getattr(opt, 'normal_refine', 'N/A')} | "
-          f"spec_densify={getattr(opt, 'spec_densify', 'N/A')} "
-          f"(w={getattr(opt, 'spec_densify_weight', 'N/A')}, "
-          f"locator={getattr(opt, 'spec_densify_locator', 'N/A')}) | "
-          f"spec_arch={getattr(opt, 'spec_arch', '') or os.environ.get('SPEC_ARCH','')}")
-
-    # Diagnostic (code review 2026-07-04, finding #6): a specular locator is only
-    # useful for the DENSIFICATION vote if spec_densify=True — that is what makes
-    # pruning driven by geo_counts only (never pruning a Gaussian merely for carrying
-    # correct view-dependent specular variation, see compute_gaussian_score_fastgs).
-    # With spec_densify=False, an explicitly-configured spec_densify_locator has no
-    # effect at all and the vanilla FastGS vote (which does NOT distinguish specular
-    # from geometric error) is what actually runs — silently, unless flagged here.
-    if (getattr(opt, "spec_densify_locator", "model_residual") != "model_residual"
-            and not getattr(opt, "spec_densify", False)):
-        print(f"[SPEC-FASTGS] WARNING: spec_densify_locator="
-              f"'{opt.spec_densify_locator}' is set but spec_densify=False — this "
-              f"locator has NO EFFECT on densification. The vanilla FastGS vote runs "
-              f"instead, which does not protect Gaussians carrying correct specular "
-              f"variation from being pruned/under-densified (add --spec_densify to "
-              f"enable that protection).")
-
     tb_writer = prepare_output_and_logger(dataset)
 
     # ------------------------------------------------------------
     # INIT MODELS
     # ------------------------------------------------------------
 
-    gaussians = GaussianModel(dataset.sh_degree)
+    gaussians = GaussianModel(dataset.sh_degree, dataset.asg_degree, opt.optimizer_type)
     scene = Scene(dataset, gaussians)
     initial_gaussians = gaussians.get_xyz.shape[0]
     gaussians.training_setup(opt)
 
-    # v2.5: opt-in alternative specular architecture (utils/spec_arch.py).
-    _arch_cfg = None
-    _arch_str = getattr(opt, "spec_arch", "") or ""
-    if _arch_str.strip():
-        import json as _json
-        _arch_cfg = _json.loads(_arch_str)
-    specular_mlp = SpecularModel(dataset.is_real, dataset.is_indoor, arch_cfg=_arch_cfg,
-                                 normal_refine=getattr(opt, "normal_refine", False))
+    specular_mlp = SpecularModel(dataset.asg_degree, dataset.is_real, dataset.is_indoor)
     specular_mlp.train_setting(opt)
 
     # ------------------------------------------------------------
@@ -100,6 +56,40 @@ def training(dataset, opt, pipe):
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+
+    # ------------------------------------------------------------
+    # LOAD REFLECTION PRIORS (If available)
+    # ------------------------------------------------------------
+    import imageio
+    ref_prior_dir = os.path.join(dataset.source_path, "reflection_prior")
+    if opt.use_ref_score and os.path.exists(ref_prior_dir):
+        print("Loading Reflection Priors...")
+        loaded_ref_priors = 0
+        missing_ref_priors = 0
+        for cam in scene.getTrainCameras():
+            npath = os.path.join(ref_prior_dir, f"{cam.image_name}_ref_score.png")
+            if os.path.exists(npath):
+                try:
+                    ref_img = imageio.imread(npath)
+                    if len(ref_img.shape) == 3:
+                        ref_img = ref_img[..., 0]
+                    ref_tensor = torch.tensor(ref_img / 255.0, dtype=torch.float32).cuda()
+                    if ref_tensor.shape[0] != cam.image_height or ref_tensor.shape[1] != cam.image_width:
+                        ref_tensor = torch.nn.functional.interpolate(
+                            ref_tensor.unsqueeze(0).unsqueeze(0),
+                            size=(cam.image_height, cam.image_width),
+                            mode='bilinear',
+                            align_corners=False
+                        ).squeeze()
+                    cam.ref_score = ref_tensor
+                    loaded_ref_priors += 1
+                except Exception:
+                    pass
+            else:
+                missing_ref_priors += 1
+        print(f"Loaded {loaded_ref_priors} reflection priors; missing {missing_ref_priors}.")
+    elif opt.use_ref_score:
+        print(f"Reflection prior enabled, but directory not found: {ref_prior_dir}")
 
     # ------------------------------------------------------------
     # TRAIN LOOP
@@ -111,71 +101,10 @@ def training(dataset, opt, pipe):
     progress_bar = tqdm(range(1, opt.iterations + 1), desc="Training")
     ema_loss = 0.0
 
-    # ── Phase A: per-camera cached visibility mask for sparse MLP evaluation ──
-    # Fix #2: cameras are sampled RANDOMLY each iteration, so a single previous-
-    # iteration mask came from an unrelated view — the MLP was being run on the
-    # wrong Gaussians, starving specular supervision (measured low NCC vs GT).
-    # Instead we cache visibility PER CAMERA (keyed by cam.uid): the mask reused
-    # for a given view is from the last time that SAME view was rendered, which
-    # is a stable predictor since geometry drifts slowly.
-    # After densification the Gaussian count changes → size mismatch is detected
-    # and we fall back to evaluating the full set for that single step.
-    vis_cache: dict = {}
-
-    # ── v2.7 (root cause B): monocular normal-prior cache ──
-    # Lazily load <source>/<normal_prior_dir>/<image_name>.npy maps (OpenCV camera
-    # frame, [H,W,3] in [-1,1]) keyed by image_name, kept on CPU to bound VRAM and
-    # moved to GPU per use. None = no prior file for this view (skipped). Only touched
-    # when normal_prior_weight > 0, so the default path allocates nothing.
-    normal_cache: dict = {}
-    _normal_diag_done = [False]  # one-time alignment diagnostic guard
-
-    def _load_normal_prior(image_name, H, W):
-        if image_name in normal_cache:
-            t = normal_cache[image_name]
-            return None if t is None else t.cuda()
-        path = os.path.join(dataset.source_path, opt.normal_prior_dir, image_name + ".npy")
-        if not os.path.exists(path):
-            normal_cache[image_name] = None
-            return None
-        arr = np.load(path).astype(np.float32)           # [h,w,3] OpenCV camera frame
-        t = torch.from_numpy(arr).permute(2, 0, 1)        # [3,h,w]
-        if t.shape[1] != H or t.shape[2] != W:            # match render resolution
-            t = torch.nn.functional.interpolate(
-                t.unsqueeze(0), size=(H, W), mode="nearest"
-            ).squeeze(0)
-        if getattr(opt, "normal_prior_flip", False):
-            t = -t
-        normal_cache[image_name] = t.cpu()
-        return t.cuda()
-
-    # ── v3.1/v3.2: precomputed classical (Tan-Ikeuchi) specular-prior cache ──
-    # Lazily load <source>/<tanikeuchi_prior_dir>/<image_name>.png (uint8 grayscale, [0,1]
-    # after /255) keyed by image_name, kept on CPU to bound VRAM. None = no prior file
-    # for this view. Only touched when spec_loss_mode/spec_densify_locator == "tanikeuchi",
-    # so the default path allocates nothing. See tools/gen_tanikeuchi_priors.py.
-    tanikeuchi_cache: dict = {}
-
-    def _load_tanikeuchi_prior(image_name, H, W):
-        if image_name in tanikeuchi_cache:
-            t = tanikeuchi_cache[image_name]
-            return None if t is None else t.cuda()
-        path = os.path.join(dataset.source_path, opt.tanikeuchi_prior_dir, image_name + ".png")
-        if not os.path.exists(path):
-            tanikeuchi_cache[image_name] = None
-            return None
-        arr = np.array(Image.open(path)).astype(np.float32) / 255.0  # [h,w] in [0,1]
-        t = torch.from_numpy(arr)
-        if t.shape[0] != H or t.shape[1] != W:            # match render resolution
-            t = torch.nn.functional.interpolate(
-                t.unsqueeze(0).unsqueeze(0), size=(H, W), mode="nearest"
-            ).squeeze(0).squeeze(0)
-        tanikeuchi_cache[image_name] = t.cpu()
-        return t.cuda()
-
-    # Resolved once for the densification-side "tanikeuchi" locator (fast_utils.py);
-    # harmless if unused (spec_densify_locator defaults to "model_residual").
-    _tanikeuchi_dir_abs = os.path.join(dataset.source_path, opt.tanikeuchi_prior_dir)
+    # Cached boolean visibility mask for sparse ASG evaluation. This follows
+    # the original fast path: reuse the previous frame's mask and fall back to
+    # full ASG only when Gaussian count changes or an explicit refresh is due.
+    prev_vis_mask: torch.Tensor | None = None
 
     for iteration in progress_bar:
 
@@ -197,9 +126,21 @@ def training(dataset, opt, pipe):
         viewpoint_indices.pop(idx)
 
         # --------------------------------------------------------
-        # SPECULAR (SG STYLE) — Phase A: sparse MLP via cached visibility
+        # COMPUTE VIEWDIR + NORMAL
         # --------------------------------------------------------
-        # Only Gaussians visible in the PREVIOUS step feed the ASG MLP.
+
+        xyz = gaussians.get_xyz
+        cam_center = cam.camera_center
+
+        viewdir = xyz - cam_center
+        viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
+
+        normal = gaussians.get_normal_axis(viewdir)
+
+        # --------------------------------------------------------
+        # SPECULAR (SG STYLE) — sparse MLP via previous-frame visibility
+        # --------------------------------------------------------
+        # Only Gaussians visible in the previous frame feed the ASG MLP.
         # Typically 10–30 % of Gaussians are on-screen per frame, so this
         # cuts MLP forward+backward cost by 3–10×.
         # After densification the count changes → we detect size mismatch
@@ -208,54 +149,35 @@ def training(dataset, opt, pipe):
         spec_sparse: torch.Tensor | None = None  # sparse MLP output [M, 3]
         vis_indices: torch.Tensor | None = None   # indices of evaluated Gaussians
         mlp_color: torch.Tensor | None = None     # full-scene buffer  [N, 3]
-        ran_spec = False                          # did the MLP actually run this iter?
-
-        # Tier-1 fix #3 (throttle). When the per-camera visibility cache is VALID
-        # (stable Gaussian count → mostly the post-densification phase), the MLP runs
-        # on the small visible subset, so we evaluate it EVERY iter — cheap and
-        # view-correct. When the cache is INVALID (count just changed during
-        # densification, or first sight of this camera) the only option is the full
-        # set, which is expensive, so we throttle that to once every K iters. We do
-        # NOT reuse a cached specular across iters: it is view-dependent, and views
-        # are sampled randomly, so a stale buffer would be the wrong view.
-        spec_full_interval = 4  # K: full-set MLP cadence while cache is invalid
 
         if iteration > opt.specular_start_iter:
             n_gs = gaussians.get_xyz.shape[0]
+            asg_feat = gaussians.get_asg_features  # [N, asg_degree]
+            force_full_asg = (
+                opt.full_asg_interval > 0 and
+                iteration % opt.full_asg_interval == 0
+            )
 
-            cached_mask = vis_cache.get(cam.uid)
-            cache_valid = cached_mask is not None and cached_mask.shape[0] == n_gs
-
-            if cache_valid:
-                # cached_mask lives on CPU (saves VRAM across many cameras);
-                # move only the small index list to the GPU.
-                vis_indices = cached_mask.nonzero(as_tuple=False).squeeze(1).to("cuda")  # [M]
-                do_spec = True                                   # cheap subset → every iter
+            # Determine which Gaussians to evaluate
+            if not force_full_asg and prev_vis_mask is not None and prev_vis_mask.shape[0] == n_gs:
+                vis_indices = prev_vis_mask.nonzero(as_tuple=False).squeeze(1)  # [M]
             else:
-                # First time this camera is seen OR count changed after densification
-                vis_indices = torch.arange(n_gs, device="cuda")  # full set
-                do_spec = (iteration % spec_full_interval == 0)  # throttle the costly path
+                # First specular step, full refresh, or count changed after densification.
+                vis_indices = torch.arange(n_gs, device="cuda")
 
-            if do_spec and vis_indices.numel() > 0:
-                # viewdir/normal only for the evaluated subset: get_normal_axis
-                # (argsort + build_rotation) over all N every iter was pure waste
-                # on the 15k pre-specular iters and on throttled iters.
-                xyz_vis = gaussians.get_xyz[vis_indices]                  # [M, 3]
-                viewdir = xyz_vis - cam.camera_center
-                viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
-                normal = gaussians.get_normal_axis(viewdir, indices=vis_indices)
-
+            if vis_indices.numel() > 0:
                 spec_sparse = specular_mlp.step(
-                    gaussians.get_asg_features[vis_indices],
-                    viewdir,
-                    normal,
+                    asg_feat[vis_indices],
+                    viewdir[vis_indices],
+                    normal[vis_indices].detach(),
                 )  # [M, 3]
+
+
 
                 # Scatter back into a full-scene buffer; index_put preserves grad
                 mlp_color = torch.zeros(
                     (n_gs, 3), device="cuda"
                 ).index_put((vis_indices,), spec_sparse)
-                ran_spec = True
 
         # --------------------------------------------------------
         # RENDER  (single pass — Phase A removes redundant sh & spec-sharp passes)
@@ -275,174 +197,50 @@ def training(dataset, opt, pipe):
         visibility_filter     = render_pkg["visibility_filter"]
         radii                 = render_pkg["radii"]
 
-        # ── Update THIS camera's cached visibility mask ───────────────────
+        # ── Update cached visibility mask for the NEXT iteration ──────────
         # radii has shape [N]; (radii > 0) gives the boolean visibility mask.
-        # Stored per-camera (on CPU to bound VRAM) so the next time this exact
-        # view is sampled the MLP runs on the Gaussians actually visible from it.
-        vis_cache[cam.uid] = (radii > 0).cpu()  # [N] bool, CPU
+        prev_vis_mask = (radii > 0)  # [N] bool
 
         # --------------------------------------------------------
         # LOSS
         # --------------------------------------------------------
-        # Phase A design: photometric L1 + SSIM, unchanged from FastGS baseline.
-        # Gradients flow back through the renderer into mlp_color, so the
-        # specular MLP is already supervised by image reconstruction.
+        # Phase A design:
+        #   • photometric_loss  — L1 + SSIM, unchanged from FastGS baseline.
+        #     Gradients flow back through the renderer into mlp_color, so the
+        #     specular MLP is already supervised by image reconstruction.
+        #   • spec_reg          — lightweight L2 penalty on specular MLP outputs
+        #     (Gaussian-space). Prevents the MLP from producing unbounded colors
+        #     or collapsing to zero, without requiring a second render pass.
         # --------------------------------------------------------
 
         gt = cam.original_image.cuda()
 
         Ll1      = l1_loss(image, gt)
         ssim_val = fast_ssim(image.unsqueeze(0), gt.unsqueeze(0))
-
-        loss = (
+        photometric_loss = (
             (1.0 - opt.lambda_dssim) * Ll1
             + opt.lambda_dssim * (1.0 - ssim_val)
         )
-
-        # v2.5/v2.6 (root cause A): specular-targeted supervision. Highlights are ~5% of
-        # pixels and get drowned by the global L1+DSSIM, so the specular MLP underfits
-        # (dim+blurry residual). Add a weighted L1 on a highlight mask. weight=0 -> no-op.
-        #
-        # The mask MATTERS. v2.5-R1 used a GT-luminance mask, which catches bright
-        # DIFFUSE surfaces (white counter/walls) — it drove +31% Gaussians and regressed
-        # every metric. v2.6 (mode="residual", default) instead masks on |GT - diffuse|,
-        # the SAME locator the offline diagnostic uses: pixels whose energy is NOT
-        # explained by the SH-only (diffuse) base, i.e. actual specular. The diffuse
-        # render is a cheap extra forward under no_grad (no extra backward).
-        if getattr(opt, "spec_loss_weight", 0.0) > 0.0 and iteration > opt.specular_start_iter:
-            with torch.no_grad():
-                mode = getattr(opt, "spec_loss_mode", "residual")
-                hmask = None
-                if mode == "tanikeuchi":
-                    # v3.1/v3.2: precomputed, MODEL-INDEPENDENT classical prior (available
-                    # from iteration 0) — see tools/gen_tanikeuchi_priors.py /
-                    # classical_specular_mask.py. Already gated by the top-hat blob filter
-                    # + near-saturation recovery + desaturation, so threshold directly
-                    # rather than by quantile (the score is an absolute confidence, not a
-                    # raw residual needing relative extraction).
-                    prior = _load_tanikeuchi_prior(cam.image_name, gt.shape[1], gt.shape[2])
-                    if prior is not None:
-                        hmask = (prior >= opt.tanikeuchi_prior_thresh).float()
-                    else:
-                        # FALLBACK (fixes an inconsistency vs the densification-side
-                        # locator in utils/fast_utils.py, which already falls back to the
-                        # on-the-fly residual computation when a prior file is missing for
-                        # a camera): degrade to "residual" mode below instead of silently
-                        # skipping the specular loss term for this camera, so coverage
-                        # gaps in the precomputed sweep don't produce per-camera-
-                        # inconsistent training signal.
-                        mode = "residual"
-                if mode != "tanikeuchi":
-                    if mode == "residual":
-                        # SH-only (diffuse) render of the SAME scene/view, no grad.
-                        diffuse = render_fastgs(
-                            cam, gaussians, pipe, background, opt.mult, mlp_color=None
-                        )["render"]
-                        locator = (gt - diffuse).abs().mean(dim=0)  # [H,W] specular residual
-                    else:  # "luminance" (v2.5, deprecated — falsified)
-                        locator = gt.mean(dim=0)
-                    thr = torch.quantile(locator.flatten(), opt.spec_loss_quantile)
-                    hmask = (locator >= thr).float()  # [H,W]
-            if hmask is not None:
-                denom = hmask.sum() + 1e-8
-                spec_l1 = ((image - gt).abs().mean(dim=0) * hmask).sum() / denom
-                loss = loss + opt.spec_loss_weight * spec_l1
-
-        # v2.7 (root cause B): monocular normal-prior supervision (DN-Splatter style).
-        # Render the per-Gaussian normals into an image (override_color path, bg=0 so
-        # uncovered pixels are the zero vector → masked out), transform world→camera
-        # (OpenCV: n_cam = n_world @ Wv[:3,:3], the row-vector convention used here),
-        # and align to the precomputed monocular prior via a cosine loss. Gradients flow
-        # through get_normal_axis into scaling/rotation, reshaping geometry toward true
-        # surface orientation → fixes the specular PLACEMENT (NCC/σ) that the residual
-        # loss could not. One extra normal render + one get_normal_axis over all N, only
-        # when active. weight=0 -> no-op.
-        #
-        # v2.8: normal_prior_start_iter controls WHEN it kicks in. v2.7-R4 gated it at
-        # specular_start_iter (7000) — by then geometry is largely converged, so a 0.05
-        # cosine only nudged placement (NCC +0.008). Applying it EARLY (e.g. 500), while
-        # densification can still reshape geometry, gives it real authority. Sentinel
-        # -1 => fall back to specular_start_iter (preserves the v2.7-R4 behavior).
-        _np_start = (opt.normal_prior_start_iter
-                     if getattr(opt, "normal_prior_start_iter", -1) >= 0
-                     else opt.specular_start_iter)
-        if getattr(opt, "normal_prior_weight", 0.0) > 0.0 and iteration > _np_start:
-            prior = _load_normal_prior(cam.image_name, image.shape[1], image.shape[2])
-            if prior is not None:
-                # world-space per-Gaussian normals (flipped toward this view), all N
-                viewdir_all = gaussians.get_xyz - cam.camera_center
-                viewdir_all = viewdir_all / (viewdir_all.norm(dim=1, keepdim=True) + 1e-6)
-                n_world = gaussians.get_normal_axis(viewdir_all)            # [N,3]
-                bg_zero = torch.zeros(3, dtype=torch.float32, device="cuda")
-                normal_img = render_fastgs(
-                    cam, gaussians, pipe, bg_zero, opt.mult, override_color=n_world
-                )["render"]                                                # [3,H,W]
-                nw = normal_img.permute(1, 2, 0).reshape(-1, 3)            # [HW,3] world
-                R_w2c = cam.world_view_transform[:3, :3]                   # [3,3]
-                n_cam = nw @ R_w2c                                         # [HW,3] camera
-                n_cam = n_cam / (n_cam.norm(dim=1, keepdim=True) + 1e-6)
-                p = prior.permute(1, 2, 0).reshape(-1, 3)                  # [HW,3] camera
-                valid = p.norm(dim=1) > 0.5                                # drop bg/invalid
-                if valid.any():
-                    cos = (n_cam[valid] * p[valid]).sum(dim=1)
-                    normal_loss = (1.0 - cos).mean()
-                    loss = loss + opt.normal_prior_weight * normal_loss
-                    if not _normal_diag_done[0]:
-                        _normal_diag_done[0] = True
-                        print(f"\n[normal-prior] alignment check @iter {iteration}: "
-                              f"mean cos(render,prior)={cos.mean().item():+.3f} "
-                              f"(want >0; if strongly negative set --normal_prior_flip)")
+        
+        loss = photometric_loss
 
         loss.backward()
 
-        # --------------------------------------------------------
-        # DENSIFICATION STATS  (Tier-1 fix #1: single render pass)
-        # --------------------------------------------------------
-        # Previously a SECOND, SH-only render_fastgs + torch.autograd.grad ran every
-        # iter from specular_start→densify_until purely to source "decoupled" geometry
-        # gradients — roughly doubling per-iter cost in the densification phase. We
-        # drop it and reuse the main render's screen-space stats (standard 3DGS/FastGS
-        # densification). The specular residual is small (analysis: mean ~2.5 / std ~12
-        # on [0,255]), and with the throttled MLP most densify-phase iters already
-        # render SH-only, so the densification signal stays geometry-driven.
-        viewspace_point_tensor_final = viewspace_point_tensor
-        visibility_filter_final = visibility_filter
-        radii_final = radii
-
-        # --------------------------------------------------------
-        # Reduce SH competition: soft cosine decay of the f_rest LEARNING RATE
-        # around specular activation (Sol 6). LR scaling (not grad.mul_) because
-        # post-15k the optimizer accumulates grads over 32/64 iters: mutating the
-        # accumulated buffer every iter compounded to 0.01^j, and the old block
-        # also froze _features_dc (diffuse) unintentionally. f_dc learns normally.
-        # --------------------------------------------------------
-        gaussians.set_sh_lr_scale(
-            sh_lr_scale_cosine(
-                iteration,
-                opt.specular_start_iter,
-                decay_steps=opt.sh_decay_steps,
-                scale_min=opt.sh_scale_min,
-                scale_after=opt.sh_scale_after,
-            )
-        )
+        # --- NO SH DEGREE RESTRICTION ---
+        # Allow SH to train normally everywhere to form a smooth base color.
+        # ASG will naturally handle the specular highlights due to gradient boosting.
 
         # --------------------------------------------------------
         # OPTIMIZER STEP
         # --------------------------------------------------------
 
-        gaussians.optimizer_step(iteration)
+        # Set skip_sh=False because we now use fine-grained gradient scaling per-Gaussian
+        skip_sh = False
+        gaussians.optimizer_step(iteration, skip_sh=skip_sh)
 
-        # Update specular lr BEFORE stepping optimizer to ensure non-zero lr is used.
-        # Only step when the MLP actually ran this iter (ran_spec): on throttled iters
-        # the specular graph wasn't built, so its grads are None and a step would be a
-        # no-op at best. update_learning_rate must precede optimizer_step.
-        # The ASG latents step at the SAME cadence as the MLP — leaving them on the
-        # main optimizer's 32/64-iter throttle starved the specular branch's
-        # per-Gaussian capacity (~470 Adam steps over its whole training window).
-        if iteration > opt.specular_start_iter and ran_spec:
-            specular_mlp.update_learning_rate(iteration - opt.specular_start_iter)
-            specular_mlp.optimizer_step()
-            gaussians.asg_optimizer_step()
+        # Update specular lr BEFORE stepping optimizer to ensure non-zero lr is used
+        specular_mlp.update_learning_rate(iteration)
+        specular_mlp.optimizer_step()
 
         # --------------------------------------------------------
         # LOG
@@ -459,14 +257,24 @@ def training(dataset, opt, pipe):
 
         if iteration < opt.densify_until_iter:
 
-            gaussians.max_radii2D[visibility_filter_final] = torch.max(
-                gaussians.max_radii2D[visibility_filter_final],
-                radii_final[visibility_filter_final]
+            gaussians.max_radii2D[visibility_filter] = torch.max(
+                gaussians.max_radii2D[visibility_filter],
+                radii[visibility_filter]
             )
 
+            # --- GUIDED DENSIFICATION ---
+            # Trả lại quyền kiểm soát sinh hạt cho cơ chế ADC của FastGS
+            viewspace_grad = viewspace_point_tensor.grad.clone()
+            
+            class DummyTensor:
+                def __init__(self, grad):
+                    self.grad = grad
+            
+            dummy_viewspace = DummyTensor(viewspace_grad)
+
             gaussians.add_densification_stats(
-                viewspace_point_tensor_final,
-                visibility_filter_final
+                dummy_viewspace,
+                visibility_filter
             )
 
             if (
@@ -474,28 +282,34 @@ def training(dataset, opt, pipe):
                 iteration % opt.densification_interval == 0
             ):
                 size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                camlist = sampling_cameras(scene.getTrainCameras().copy())
-
-                # Once specular is active, score with specular-aware renders so the
-                # MLP's (view-dependent) contribution isn't counted as cross-view
-                # error by the consistency vote.
-                spec_for_score = specular_mlp if iteration > opt.specular_start_iter else None
+                camlist = sampling_cameras(scene.getTrainCameras().copy(), opt.num_score_cameras)
 
                 with torch.no_grad():
                     importance_score, pruning_score = compute_gaussian_score_fastgs(
-                        camlist, gaussians, pipe, background, opt, DENSIFY=True,
-                        specular_mlp=spec_for_score, tanikeuchi_dir=_tanikeuchi_dir_abs
+                        camlist, gaussians, pipe, background, opt, DENSIFY=True, iteration=iteration
                     )
 
                 gaussians.densify_and_prune_fastgs(
                     max_screen_size=size_threshold,
                     min_opacity=0.005,
                     extent=scene.cameras_extent,
-                    radii=radii_final,
+                    radii=radii,
                     args=opt,
                     importance_score=importance_score,
                     pruning_score=pruning_score
                 )
+
+            if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
+                gaussians.reset_opacity()
+
+        # The multiview consistent pruning of fastgs. We do it every 3k iterations after 15k
+        if iteration % 3000 == 0 and iteration > 15_000 and iteration < 30_000:
+            camlist = sampling_cameras(scene.getTrainCameras().copy(), opt.num_score_cameras)
+            with torch.no_grad():
+                _, pruning_score = compute_gaussian_score_fastgs(
+                    camlist, gaussians, pipe, background, opt, False, iteration=iteration
+                )
+            gaussians.final_prune_fastgs(min_opacity=0.1, pruning_score=pruning_score)
 
         # --------------------------------------------------------
         # SAVE
@@ -518,35 +332,25 @@ def training(dataset, opt, pipe):
 
     metadata = {
         "scene": dataset.source_path.split("/")[-1],
-        "run_tag": getattr(opt, "run_tag", ""),
-        "code_version": CODE_VERSION,
         "git_branch": get_git_branch(),
-        "git_commit": get_git_commit(),
         "image_scale": dataset.images,
         "iterations": opt.iterations,
-        "specular_start_iter": opt.specular_start_iter,
-        "highlight_mask_quantile": getattr(opt, "highlight_mask_quantile", None),
-        "sh_decay_steps": getattr(opt, "sh_decay_steps", None),
-        "spec_loss_weight": getattr(opt, "spec_loss_weight", None),
-        "spec_loss_quantile": getattr(opt, "spec_loss_quantile", None),
-        "spec_loss_mode": getattr(opt, "spec_loss_mode", None),
-        "normal_prior_weight": getattr(opt, "normal_prior_weight", None),
-        "normal_prior_dir": getattr(opt, "normal_prior_dir", None),
-        "normal_prior_flip": getattr(opt, "normal_prior_flip", None),
-        "normal_prior_start_iter": getattr(opt, "normal_prior_start_iter", None),
-        "normal_refine": getattr(opt, "normal_refine", None),
-        "spec_densify": getattr(opt, "spec_densify", None),
-        "spec_densify_weight": getattr(opt, "spec_densify_weight", None),
-        "spec_densify_explained_frac": getattr(opt, "spec_densify_explained_frac", None),
-        "spec_densify_locator": getattr(opt, "spec_densify_locator", None),
-        "tanikeuchi_prior_dir": getattr(opt, "tanikeuchi_prior_dir", None),
-        "tanikeuchi_prior_thresh": getattr(opt, "tanikeuchi_prior_thresh", None),
-        "spec_arch": getattr(opt, "spec_arch", "") or os.environ.get("SPEC_ARCH", ""),
         "initial_gaussians": initial_gaussians,
         "final_gaussians": gaussians.get_xyz.shape[0],
         "training_time_seconds": round(duration, 2),
         "training_time_formatted": f"{minutes}m {seconds}s",
         "peak_vram_mib": round(torch.cuda.max_memory_allocated() / (1024 ** 2), 2),
+        "asg_degree": dataset.asg_degree,
+        "specular_start_iter": opt.specular_start_iter,
+        "full_asg_interval": opt.full_asg_interval,
+        "num_score_cameras": opt.num_score_cameras,
+        "use_ref_score": opt.use_ref_score,
+        "sk_intensity": opt.sk_intensity,
+        "sk_saturation": opt.sk_saturation,
+        "f_rest_warmup_until": opt.f_rest_warmup_until,
+        "f_rest_interval_early": opt.f_rest_interval_early,
+        "f_rest_interval_mid": opt.f_rest_interval_mid,
+        "f_rest_interval_late": opt.f_rest_interval_late,
         "datetime_completed": time.strftime("%Y-%m-%d %H:%M:%S")
     }
 
@@ -564,13 +368,6 @@ def get_git_branch():
     try:
         import subprocess
         return subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).decode("utf-8").strip()
-    except Exception:
-        return "unknown"
-
-def get_git_commit():
-    try:
-        import subprocess
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode("utf-8").strip()
     except Exception:
         return "unknown"
 
@@ -646,4 +443,3 @@ if __name__ == "__main__":
     )
 
     print("Training complete.")
-

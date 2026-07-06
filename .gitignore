@@ -37,6 +37,7 @@ spec_fastgs_output*/
 spec_fastgs_teapot_*/
 spec-fastgs/output/
 output/
+pipeline-results/
 
 # 3DGS checkpoints / point clouds are always regenerable and often >100MB
 # (GitHub's hard push limit) — never commit them.

@@ -102,55 +102,39 @@ def render_set(
         rendering = render_pkg["render"]
         gt = view.original_image[0:3, :, :]
 
-        # Specular image = full - SH
-        spec_image = rendering - sh_image
+        # --------------------------------------------------------
+        # SAVE DIAGNOSTIC RENDERS (Academic Standard - No Scaling)
+        # --------------------------------------------------------
 
+        # 1) final.png: Render(SH + ASG)
+        torchvision.utils.save_image(
+            rendering.clamp(0.0, 1.0),
+            os.path.join(spec_path, f"{idx:05d}_final.png")
+        )
 
-        # 2) Normalized specular (min-max to [0,1])
-        minv = spec_image.min()
-        maxv = spec_image.max()
-        if (maxv - minv).abs() > 1e-8:
-            spec_norm = (spec_image - minv) / (maxv - minv)
-        else:
-            spec_norm = spec_image.clone()
-        spec_norm = spec_norm.clamp(0.0, 1.0)
-        # Create subfolder for this frame
-        frame_spec_dir = os.path.join(spec_path, f"{idx:05d}")
-        makedirs(frame_spec_dir, exist_ok=True)
-
-        # 1) Diffuse (SH-only)
+        # 2) only_sh.png: Render(SH)
         torchvision.utils.save_image(
             sh_image.clamp(0.0, 1.0),
-            os.path.join(frame_spec_dir, "1_diffuse.png")
+            os.path.join(spec_path, f"{idx:05d}_only_sh.png")
         )
 
-        # 2) Composite (diffuse + spec_norm)
-        composite = (sh_image + spec_norm).clamp(0.0, 1.0)
+        # 3) only_asg.png: Render(Full) - Render(SH)
+        spec_image = torch.clamp(rendering - sh_image, min=0.0)
         torchvision.utils.save_image(
-            composite,
-            os.path.join(frame_spec_dir, "2_composite.png")
+            spec_image,
+            os.path.join(spec_path, f"{idx:05d}_only_asg.png")
         )
 
-        # 3) Ground Truth (GT)
+        # 4) residual_real.png: clamp(GT - SH, min=0)
+        residual_real = torch.clamp(gt - sh_image, min=0.0)
         torchvision.utils.save_image(
-            gt,
-            os.path.join(frame_spec_dir, "3_gt.png")
+            residual_real,
+            os.path.join(spec_path, f"{idx:05d}_residual_real.png")
         )
 
-        # 4) Normalized specular
-        torchvision.utils.save_image(
-            spec_norm,
-            os.path.join(frame_spec_dir, "4_spec_norm.png")
-        )
-
-        # 5) Residual (absolute GT - SH) and scaled for visualization
-        residual = (gt - sh_image).abs()
-        residual_scale = 5.0
-        residual_vis = (residual * residual_scale).clamp(0.0, 1.0)
-        torchvision.utils.save_image(
-            residual_vis,
-            os.path.join(frame_spec_dir, "5_residual.png")
-        )
+        # --------------------------------------------------------
+        # SAVE RENDERS (original behavior)
+        # --------------------------------------------------------
 
         torchvision.utils.save_image(
             rendering,
@@ -161,8 +145,6 @@ def render_set(
             gt,
             os.path.join(gts_path, f"{idx:05d}.png")
         )
-
-
 
         # --------------------------------------------------------
         # end frame loop
@@ -194,8 +176,9 @@ def render_sets(
         # LOAD MODELS
         # --------------------------------------------------------
 
-        gaussians = GaussianModel(dataset.sh_degree)
+        gaussians = GaussianModel(dataset.sh_degree, dataset.asg_degree)
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
+
 
         # ✅ LOAD ASG FEATURE
         asg_path = os.path.join(
@@ -209,7 +192,7 @@ def render_sets(
 
         print("ASG loaded with shape:", gaussians._features_asg.shape)
         
-        specular_mlp = SpecularModel(dataset.is_real, dataset.is_indoor)
+        specular_mlp = SpecularModel(dataset.asg_degree, dataset.is_real, dataset.is_indoor)
         specular_mlp.load_weights(dataset.model_path, iteration=scene.loaded_iter)
 
         # --------------------------------------------------------
@@ -281,4 +264,3 @@ if __name__ == "__main__":
         args.skip_test,
         args
     )
-

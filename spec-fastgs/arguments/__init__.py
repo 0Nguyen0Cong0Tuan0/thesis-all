@@ -90,6 +90,9 @@ class OptimizationParams(ParamGroup):
         self.lambda_dssim = 0.2
         self.densification_interval = 100
         self.opacity_reset_interval = 3000
+        self.densification_refscore_interval = 500
+        self.max_refscore_gaussians = 400000
+        self.num_score_cameras = 10
         self.densify_from_iter = 500
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0002
@@ -107,145 +110,22 @@ class OptimizationParams(ParamGroup):
         self.optimizer_type = "default"
 
         self.specular_lr_max_steps = 30000
-        # Specular starts MID-densification (like Spec-Gaussian's iter-3000 start):
-        # densifying without a view-dependent model recruits geometry to fake
-        # highlights (Gaussian bloat + baked-in blur). The scorer is specular-aware
-        # from this iter on (see compute_gaussian_score_fastgs).
-        self.specular_start_iter = 7000
-
-        # Exclude GT pixels above this luminance quantile from the multi-view
-        # consistency vote (specular highlights violate its Lambertian assumption).
-        # 1.0 disables the mask.
-        # v2.4 (2026-06-12): DISABLED. The v2.3 run showed quantile=0.95 cut the
-        # Gaussian count only ~10% (negligible speed/VRAM gain) while starving
-        # highlight geometry — specular energyRatio fell 0.674→0.428, blur σ 3.15→4.9.
-        # It is a net-negative trade, so the mask is off pending a better targeting.
-        self.highlight_mask_quantile = 1.0
-
-        # soft SH shielding around specular activation (cosine LR decay on f_rest).
-        # v2.4 (2026-06-12): gentler handoff. The aggressive 1.0→0.1 decay turned
-        # down SH high-freq faster than the (under-producing) specular MLP could
-        # replace it, dimming highlights (gain a*=1.21, lum bias −7.6). Keep more
-        # SH high-freq during the ramp: floor 0.3 during decay, 0.5 afterwards.
-        self.sh_decay_steps = 2000
-        self.sh_scale_min = 0.3
-        self.sh_scale_after = 0.5
-
-        # v2.5/v2.6: specular-targeted supervision (root cause A).
-        # The global L1+DSSIM loss drowns the ~5% highlight pixels under the 95%
-        # diffuse region, so the MLP underfits and the residual comes out dim+blurry
-        # (gain a*>1, σ~4.9). This adds a weighted L1 on a highlight mask.
-        # weight=0 disables it (default path unchanged).
-        #
-        # spec_loss_mode selects HOW the mask is built:
-        #   "residual"  (v2.6, default): mask = top-(1-quantile) of |GT - diffuse|,
-        #       where diffuse is a no-grad SH-only render. This is the SAME locator the
-        #       diagnostic uses (results/analysis_out) — it targets energy NOT explained
-        #       by the diffuse base, i.e. true specular, and ignores bright-but-flat
-        #       diffuse surfaces.
-        #   "luminance" (v2.5, deprecated): mask = top-(1-quantile) of GT luminance.
-        #       FALSIFIED: it catches bright DIFFUSE (white counter/walls), drove +31%
-        #       Gaussians and REGRESSED every metric (v2.5-R1). Kept for reproducibility.
-        #   "tanikeuchi" (v3.2): mask = precomputed classical Tan-Ikeuchi prior thresholded
-        #       at tanikeuchi_prior_thresh (see tanikeuchi_prior_dir below) — model-
-        #       independent, available from iteration 0. Requires
-        #       tools/gen_tanikeuchi_priors.py run first. (v3.1 used Shafer's dichromatic
-        #       model here; replaced in v3.2 after a side-by-side comparison in
-        #       test_specular_algorithms_comparison.ipynb — Tan-Ikeuchi + top-hat +
-        #       near-saturation recovery [Algorithm 2b] judged most correct on visual
-        #       inspection, though it flags substantially more of the image than Shafer
-        #       did on the full-sweep numbers [~7.9% vs ~1.4% mean on counter] — monitor
-        #       real training runs for the v2.5-R1-style dilution risk. "shafer" mode is
-        #       no longer available.)
-        # Recommended for residual mode: weight 0.1-0.2, quantile ~0.95 (top 5%).
-        # Ablation: results/MLP_LATENT_ABLATION_2026-06-13.md.
-        self.spec_loss_weight = 0.0
-        self.spec_loss_quantile = 0.97
-        self.spec_loss_mode = "residual"
-
-        # v2.7 (root cause B): monocular normal prior (DN-Splatter, arXiv:2403.17822).
-        # v2.6-R3 proved the residual-mask loss fixes specular MAGNITUDE (energy+gain)
-        # but NOT placement (NCC/σ flat) — the fingerprint of noisy min-axis normals.
-        # This supervises the rendered per-Gaussian normal against a precomputed
-        # monocular normal map (see tools/gen_normal_priors.py) via a cosine loss, so
-        # the geometry is reshaped toward true surface orientation. weight=0 disables it
-        # (default path unchanged). normal_prior_dir is a subfolder of the source path
-        # holding <image_name>.npy maps (OpenCV camera frame). normal_prior_flip negates
-        # the prior if the startup alignment diagnostic reports anti-correlation
-        # (convention mismatch). Recommended test value: weight 0.02-0.05.
-        self.normal_prior_weight = 0.0
-        self.normal_prior_dir = "normals"
-        self.normal_prior_flip = False
-        # v2.8: iteration at which the normal prior starts. v2.7-R4 applied it only
-        # after specular_start_iter (7000), which was too late to reshape converged
-        # geometry (NCC moved only +0.008). Apply it EARLY (e.g. 500) so it has
-        # authority during densification. -1 = fall back to specular_start_iter.
-        self.normal_prior_start_iter = -1
-
-        # v3.0 (CVPR contribution): SPECULAR-AWARE DENSIFICATION. FastGS's multi-view
-        # consistency vote is Lambertian-biased — specular highlights are view-
-        # inconsistent, so the vote either fakes them with diffuse geometry (Gaussian
-        # bloat) or under-resolves them. Instead of the crude luminance exclusion
-        # (highlight_mask_quantile), decompose the per-pixel error with a diffuse (SH-
-        # only) vs full (SH+ASG) render: e_full=|gt-full|, spec_explained=|gt-diffuse|
-        # -|gt-full|. (1) residual-gated vote: geometric densify on high e_full that is
-        # NOT specular-explained (keeps bright-diffuse under-fit, drops specular the
-        # branch handles); (2) specular-deficit allocation: also clone where e_full high
-        # AND specular present-but-under-resolved, weighted by spec_densify_weight, to
-        # anchor sharper highlights (fixes placement via ALLOCATION — the angle normal
-        # supervision could not). Requires the specular branch active. Default off ->
-        # exact FastGS vote. See results/CVPR_SPECULAR_DENSIFICATION_PLAN.md.
-        self.spec_densify = False
-        self.spec_densify_weight = 0.5          # lambda: weight of the specular-deficit clone vote
-        self.spec_densify_explained_frac = 0.5  # a pixel is "specular" if spec removed > this frac of error
-
-        # v3.1/v3.2: PRECOMPUTED classical specular locator, as an alternative to the
-        # on-the-fly model-residual locator used above. Sweep the dataset ONCE offline
-        # (tools/gen_tanikeuchi_priors.py, pure CPU/scipy — no GPU, no trained model
-        # needed) to save a per-image specular-candidate score (Tan-Ikeuchi's per-pixel
-        # min-channel specular pedestal, gated by a morphological white-top-hat blob
-        # filter + near-saturation recovery — see tools/classical_specular_mask.py for
-        # the full validated derivation) into <source>/<tanikeuchi_prior_dir>/. This is
-        # available from iteration 0 (no chicken-and-egg dependency on the model already
-        # working) and is MODEL-INDEPENDENT, unlike spec_frac above.
-        #   spec_loss_mode = "tanikeuchi"        -> the specular LOSS mask (train.py) uses
-        #                                            the precomputed prior instead of
-        #                                            |gt-diffuse|.
-        #   spec_densify_locator = "tanikeuchi"  -> the DENSIFICATION vote (fast_utils.py)
-        #                                            uses the precomputed prior instead of
-        #                                            spec_frac (only takes effect when
-        #                                            spec_densify=True).
-        # tanikeuchi_prior_thresh binarizes the continuous [0,1] saved score into a
-        # specular/not-specular decision at USE time (not baked into the saved prior), so
-        # it can be retuned without regenerating priors — same pattern as
-        # spec_densify_explained_frac.
-        # (v3.1 used Shafer's dichromatic model here; replaced by Tan-Ikeuchi in v3.2 —
-        # see the spec_loss_mode note above.)
-        self.spec_densify_locator = "model_residual"
-        self.tanikeuchi_prior_dir = "tanikeuchi_priors"
-        self.tanikeuchi_prior_thresh = 0.3
-
-        # v2.9 (root cause B, DISK-FREE alternative to the monocular normal prior):
-        # self-supervised learnable normal refinement. Adds a tiny BOUNDED MLP inside
-        # the ASG renderer that predicts a per-Gaussian normal correction from the
-        # existing ASG latent; the (working) multi-view specular loss identifies the
-        # true normal (Ref-NeRF / 3DGS-DR principle) — no external normal maps, no disk.
-        # Zero-initialised + 0.3*tanh bounded => starts as a no-op, can only gently
-        # refine. False = default path unchanged. Pairs with spec_loss (root cause A).
-        self.normal_refine = False
-
-        # Free-text label for the experiment (e.g. "r5"). Logged to train_info.json and
-        # printed at startup so an output folder SELF-IDENTIFIES which run produced it,
-        # independent of how the folder was named/copied (caught a mislabeled v2.8 dir).
-        self.run_tag = ""
-
-        # v2.5: opt-in alternative specular architecture (utils/spec_arch.py).
-        # JSON dict, e.g. '{"activation":"relu","latent_mode":"lowrank","rank":8}'.
-        # Empty string keeps the original SpecularNetwork. Can also be set via the
-        # SPEC_ARCH env var. The ablation found low-rank latent best (quality+compact);
-        # SIREN/WIRE do NOT help — keep relu.
-        self.spec_arch = ""
-
+        self.specular_start_iter = 3000
+        self.full_asg_interval = 0
+        self.f_rest_warmup_until = 0
+        self.f_rest_interval_early = 16
+        self.f_rest_interval_mid = 32
+        self.f_rest_interval_late = 64
+        
+        # Specular/ASG Sparsity
+        self.lambda_spec_reg = 0.01
+        
+        # Shafer/Klinker Prior
+        self.sk_intensity = 0.7
+        self.sk_saturation = 0.2
+        self.use_ref_score = False
+        self.disable_ref_score = False
+        
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):
