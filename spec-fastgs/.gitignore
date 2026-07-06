@@ -29,7 +29,6 @@ __pycache__/
 *.jpg
 *.png
 
-/submodules/
 /output_spec_fastgs/
 Specular-Gaussians/
 docs/
