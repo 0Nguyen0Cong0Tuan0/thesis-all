@@ -121,6 +121,9 @@ class OptimizationParams(ParamGroup):
         self.lambda_spec_reg = 0.01
         
         # Shafer/Klinker Prior
+        self.ref_prior_method = "tan"
+        self.ti_thresh = 0.35
+        self.ti_bright = 0.6
         self.sk_intensity = 0.7
         self.sk_saturation = 0.2
         self.use_ref_score = False
