@@ -157,18 +157,12 @@ def build_scaling_rotation(s, r):
 # ------------------------------------------------------------
 
 def get_minimum_axis(scales, rotations):
-    sorted_idx = torch.argsort(scales, descending=False, dim=-1)
-
+    # Covariance is R diag(s^2) R^T, so principal axes are the COLUMNS of R.
+    # (The old row-gather returned a vector ~46 deg off the true minimum axis
+    # on average; verified against torch.linalg.eigh of the covariance.)
+    idx = torch.argmin(scales, dim=-1)
     R = build_rotation(rotations)
-
-    R_sorted = torch.gather(
-        R,
-        dim=1,
-        index=sorted_idx[:, :, None].repeat(1, 1, 3)
-    ).squeeze()
-
-    x_axis = R_sorted[:, 0, :]
-    return x_axis
+    return R[torch.arange(R.shape[0], device=R.device), :, idx]
 
 
 def flip_align_view(normal, viewdir):

@@ -197,8 +197,14 @@ class GaussianModel:
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
     
-    def get_normal_axis(self, dir_pp_normalized=None, return_delta=False):
-        normal_axis = self.get_minimum_axis
+    def get_normal_axis(self, dir_pp_normalized=None, return_delta=False, indices=None):
+        # `indices` restricts the computation to a subset of Gaussians (identical
+        # values to computing on all N and indexing afterwards, just cheaper).
+        if indices is None:
+            scaling, rotation = self.get_scaling, self.get_rotation
+        else:
+            scaling, rotation = self.get_scaling[indices], self.get_rotation[indices]
+        normal_axis = get_minimum_axis(scaling, rotation)
         normal_axis, positive = flip_align_view(normal_axis, dir_pp_normalized)
         normal = normal_axis / normal_axis.norm(dim=1, keepdim=True)  # (N, 3)
         return normal
@@ -261,9 +267,12 @@ class GaussianModel:
             self.shoptimizer = torch.optim.Adam(sh_l, lr=0.0, eps=1e-15)
             self.asg_optimizer = torch.optim.Adam(asg_l, lr=0.0, eps=1e-15)
         elif self.optimizer_type == "sparse_adam":
-            self.optimizer = SparseGaussianAdam(l + sh_l, lr=0.0, eps=1e-15)
-            self.shoptimizer = None
-            self.asg_optimizer = torch.optim.Adam(asg_l, lr=0.0, eps=1e-15)
+            # SparseGaussianAdam.step() requires (visibility, N), which
+            # optimizer_step() never provides -> it would crash on iteration 1.
+            raise NotImplementedError(
+                "optimizer_type='sparse_adam' is not wired up (step() needs "
+                "per-iteration visibility). Use optimizer_type='default'."
+            )
 
         self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
                                                      lr_final=training_args.position_lr_final*self.spatial_lr_scale,
@@ -581,12 +590,9 @@ class GaussianModel:
         clone_qualifiers = torch.max(self.get_scaling, dim=1).values <= args.dense*extent
         split_qualifiers = torch.max(self.get_scaling, dim=1).values > args.dense*extent
 
-        all_clones = torch.logical_and(clone_qualifiers, grad_qualifiers)
-        all_splits = torch.logical_and(split_qualifiers, grad_qualifiers_abs)
-
         # This is our multi-view consisent metric for densification
         metric_mask = importance_score > 5
-        
+
         final_clones = torch.logical_and(clone_qualifiers, grad_qualifiers)
         final_splits = torch.logical_and(split_qualifiers, grad_qualifiers_abs)
 
@@ -606,21 +612,18 @@ class GaussianModel:
         # The budget is not necessary for our method.
         if remove_budget:
             n_init_points = self.get_xyz.shape[0]
-            padded_importance = torch.zeros((n_init_points), dtype=torch.float32)
+            padded_importance = torch.zeros((n_init_points), dtype=torch.float32, device="cuda")
             padded_importance[:scores.shape[0]] = 1 / (1e-6 + scores.squeeze())
             selected_pts_mask = torch.zeros_like(padded_importance, dtype=bool, device="cuda")
             sampled_indices = torch.multinomial(padded_importance, remove_budget, replacement=False)
             selected_pts_mask[sampled_indices] = True
             final_prune = torch.logical_and(prune_mask, selected_pts_mask)
             self.prune_points(final_prune)
-        
+
         opacities_new = inverse_sigmoid(torch.min(self.get_opacity, torch.ones_like(self.get_opacity)*0.8))
         optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
         self._opacity = optimizable_tensors["opacity"]
-        tmp_radii = self.tmp_radii
         self.tmp_radii = None
-
-        torch.cuda.empty_cache()
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)

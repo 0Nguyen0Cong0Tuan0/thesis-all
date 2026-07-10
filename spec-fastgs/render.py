@@ -47,33 +47,9 @@ def render_set(
     for idx, view in enumerate(tqdm(views, desc=f"{name} rendering")):
 
         # --------------------------------------------------------
-        # COMPUTE VIEWDIR + NORMAL
+        # DEBUG VISUALIZATION (SH-only diagnostic, untimed)
         # --------------------------------------------------------
 
-        xyz = gaussians.get_xyz
-        cam_center = view.camera_center.to("cuda")  
-
-        viewdir = xyz - cam_center
-        viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
-
-        normal = gaussians.get_normal_axis(viewdir).to("cuda")
-
-        # --------------------------------------------------------
-        # SPECULAR
-        # --------------------------------------------------------
-
-        mlp_color = specular_mlp.step(
-            gaussians.get_asg_features.to("cuda"),
-            viewdir,
-            normal
-        )
-
-        # --------------------------------------------------------
-        # DEBUG VISUALIZATIONS (SH-only, specular diagnostics)
-        # --------------------------------------------------------
-        # Minimal extra renders: compute SH-only image and full image
-
-        # SH-only render (no specular)
         sh_pkg = render_fastgs(
             view,
             gaussians,
@@ -84,8 +60,27 @@ def render_set(
         )
         sh_image = sh_pkg["render"]
 
-        # Full render (SH + specular)
+        # --------------------------------------------------------
+        # TIMED FULL FRAME: viewdir + normal + specular MLP + render
+        # (FPS must include everything a novel view actually costs)
+        # --------------------------------------------------------
+
+        torch.cuda.synchronize()
         start_time = time.time()
+
+        xyz = gaussians.get_xyz
+        cam_center = view.camera_center.to("cuda")
+
+        viewdir = xyz - cam_center
+        viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
+
+        normal = gaussians.get_normal_axis(viewdir).to("cuda")
+
+        mlp_color = specular_mlp.step(
+            gaussians.get_asg_features.to("cuda"),
+            viewdir,
+            normal
+        )
 
         render_pkg = render_fastgs(
             view,
@@ -96,6 +91,7 @@ def render_set(
             mlp_color=mlp_color
         )
 
+        torch.cuda.synchronize()
         end_time = time.time()
         total_time += (end_time - start_time)
 
