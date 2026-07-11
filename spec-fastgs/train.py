@@ -194,6 +194,18 @@ def training(dataset, opt, pipe):
         viewpoint_indices.pop(idx)
 
         # --------------------------------------------------------
+        # COMPUTE VIEWDIR + NORMAL
+        # --------------------------------------------------------
+
+        xyz = gaussians.get_xyz
+        cam_center = cam.camera_center
+
+        viewdir = xyz - cam_center
+        viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
+
+        normal = gaussians.get_normal_axis(viewdir)
+
+        # --------------------------------------------------------
         # SPECULAR (SG STYLE) — sparse MLP via previous-frame visibility
         # --------------------------------------------------------
         # Only Gaussians visible in the previous frame feed the ASG MLP.
@@ -201,9 +213,6 @@ def training(dataset, opt, pipe):
         # cuts MLP forward+backward cost by 3–10×.
         # After densification the count changes → we detect size mismatch
         # and fall back to all Gaussians for that one step.
-        # Viewdir/normal are computed on the SAME subset (identical values
-        # to full-N-then-index, just cheaper), and not at all before the
-        # specular branch activates.
 
         spec_sparse: torch.Tensor | None = None  # sparse MLP output [M, 3]
         vis_indices: torch.Tensor | None = None   # indices of evaluated Gaussians
@@ -225,15 +234,13 @@ def training(dataset, opt, pipe):
                 vis_indices = torch.arange(n_gs, device="cuda")
 
             if vis_indices.numel() > 0:
-                viewdir = gaussians.get_xyz[vis_indices] - cam.camera_center
-                viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
-                normal = gaussians.get_normal_axis(viewdir, indices=vis_indices)
-
                 spec_sparse = specular_mlp.step(
                     asg_feat[vis_indices],
-                    viewdir,
-                    normal.detach(),
+                    viewdir[vis_indices],
+                    normal[vis_indices].detach(),
                 )  # [M, 3]
+
+
 
                 # Scatter back into a full-scene buffer; index_put preserves grad
                 mlp_color = torch.zeros(
@@ -272,7 +279,6 @@ def training(dataset, opt, pipe):
         #   • spec_reg          — lightweight L2 penalty on specular MLP outputs
         #     (Gaussian-space). Prevents the MLP from producing unbounded colors
         #     or collapsing to zero, without requiring a second render pass.
-        #     Opt-in: lambda_spec_reg defaults to 0 (exact old behavior).
         # --------------------------------------------------------
 
         gt = cam.original_image.cuda()
@@ -283,10 +289,8 @@ def training(dataset, opt, pipe):
             (1.0 - opt.lambda_dssim) * Ll1
             + opt.lambda_dssim * (1.0 - ssim_val)
         )
-
+        
         loss = photometric_loss
-        if spec_sparse is not None and opt.lambda_spec_reg > 0:
-            loss = loss + opt.lambda_spec_reg * spec_sparse.pow(2).mean()
 
         loss.backward()
 
@@ -330,8 +334,16 @@ def training(dataset, opt, pipe):
 
             # --- GUIDED DENSIFICATION ---
             # Trả lại quyền kiểm soát sinh hạt cho cơ chế ADC của FastGS
+            viewspace_grad = viewspace_point_tensor.grad.clone()
+            
+            class DummyTensor:
+                def __init__(self, grad):
+                    self.grad = grad
+            
+            dummy_viewspace = DummyTensor(viewspace_grad)
+
             gaussians.add_densification_stats(
-                viewspace_point_tensor,
+                dummy_viewspace,
                 visibility_filter
             )
 
@@ -389,8 +401,7 @@ def training(dataset, opt, pipe):
     seconds = int(duration % 60)
 
     metadata = {
-        "scene": os.path.basename(os.path.normpath(dataset.source_path)),
-        "code_version": "v3.3-normalfix-quickwin",
+        "scene": dataset.source_path.split("/")[-1],
         "git_branch": get_git_branch(),
         "image_scale": dataset.images,
         "iterations": opt.iterations,
@@ -426,7 +437,6 @@ def training(dataset, opt, pipe):
         "f_rest_interval_early": opt.f_rest_interval_early,
         "f_rest_interval_mid": opt.f_rest_interval_mid,
         "f_rest_interval_late": opt.f_rest_interval_late,
-        "lambda_spec_reg": opt.lambda_spec_reg,
         "datetime_completed": time.strftime("%Y-%m-%d %H:%M:%S")
     }
 

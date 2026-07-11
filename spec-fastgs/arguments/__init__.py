@@ -124,9 +124,8 @@ class OptimizationParams(ParamGroup):
         self.f_rest_interval_mid = 32
         self.f_rest_interval_late = 64
         
-        # Specular/ASG Sparsity — L2 penalty on specular MLP outputs.
-        # Default 0.0 = no-op (the old code never applied it); opt in per run.
-        self.lambda_spec_reg = 0.0
+        # Specular/ASG Sparsity
+        self.lambda_spec_reg = 0.01
         
         # Shafer/Klinker Prior
         self.ref_prior_method = "tan"
