@@ -4,29 +4,27 @@
 # SPEC-FASTGS BIG RUN SCRIPT
 # ============================================================
 
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+export CUDA_VISIBLE_DEVICES=0
 
 # ------------------------------------------------------------
 # Dataset / Output
 # ------------------------------------------------------------
 DATA_ROOT=./datasets/mipnerf360
 OUTPUT_ROOT=./output
-SCENE=${SCENE:-counter}
-IMAGES=${IMAGES:-images_8}
-OUTPUT_SUFFIX=${OUTPUT_SUFFIX:-}
-MODEL_PATH=${OUTPUT_ROOT}/${SCENE}${OUTPUT_SUFFIX}
+SCENE=counter
+IMAGES=images_8
 
 # ------------------------------------------------------------
 # Core Training / Representation
 # ------------------------------------------------------------
-ASG_DEGREE=${ASG_DEGREE:-64}
-NUM_SCORE_CAMERAS=${NUM_SCORE_CAMERAS:-10}
+ASG_DEGREE=64
+NUM_SCORE_CAMERAS=10
 
 # ------------------------------------------------------------
 # Reflection Prior Extraction
 # ------------------------------------------------------------
-EXTRACT_REF_PRIOR=${EXTRACT_REF_PRIOR:-True}
-BACKUP_REF_PRIOR=${BACKUP_REF_PRIOR:-True}
+EXTRACT_REF_PRIOR=True
+BACKUP_REF_PRIOR=True
 REF_PRIOR_METHOD=tan
 TI_THRESH=0.35
 TI_BRIGHT=0.6
@@ -36,8 +34,8 @@ SK_SATURATION=0.3
 # ------------------------------------------------------------
 # Geometry Coverage Ablation - Shared Switches
 # ------------------------------------------------------------
-USE_REF_SCORE=${USE_REF_SCORE:-True}
-USE_ADAPTIVE_PRIOR=${USE_ADAPTIVE_PRIOR:-True}
+USE_REF_SCORE=True
+USE_ADAPTIVE_PRIOR=True
 
 # ------------------------------------------------------------
 # Geometry Coverage B1 - Scene-Relative RefScore Budget
@@ -66,15 +64,6 @@ ADAPTIVE_PRIOR_NUM_CAMERAS=20
 ADAPTIVE_PRIOR_EMA=0.7
 
 # ------------------------------------------------------------
-# Specular supervision (residual-weighted loss + specular-aware vote)
-#   Defaults = exact old behavior (loss off, SH-only scoring vote).
-#   Validated recipe from the sibling tree's v2.6: WEIGHT=0.15 QUANTILE=0.95.
-# ------------------------------------------------------------
-SPEC_LOSS_WEIGHT=${SPEC_LOSS_WEIGHT:-0.0}
-SPEC_LOSS_QUANTILE=${SPEC_LOSS_QUANTILE:-0.95}
-SPEC_AWARE_SCORE=${SPEC_AWARE_SCORE:-False}
-
-# ------------------------------------------------------------
 # ASG / SH Scheduling Ablation
 # ------------------------------------------------------------
 FULL_ASG_INTERVAL=0
@@ -93,22 +82,14 @@ if [ "$USE_ADAPTIVE_PRIOR" = "True" ]; then
     ADAPTIVE_PRIOR_FLAG="--use_adaptive_prior"
 fi
 
-SPEC_AWARE_SCORE_FLAG=""
-if [ "$SPEC_AWARE_SCORE" = "True" ]; then
-    SPEC_AWARE_SCORE_FLAG="--spec_aware_score"
-fi
-
 echo "========================================================================"
 echo " Starting spec-fastgs BIG Training Pipeline"
 echo "========================================================================"
 echo "Dataset Path : ${DATA_ROOT}/${SCENE}"
 echo "Scene Name   : $SCENE"
-echo "ASG Degree   : ${ASG_DEGREE}"
-echo "Output Path  : ${MODEL_PATH}"
+echo "Output Path  : ${OUTPUT_ROOT}/${SCENE}"
 echo "Use RefScore : ${USE_REF_SCORE}"
 echo "AdaptivePrior: ${USE_ADAPTIVE_PRIOR}"
-echo "SpecLossW    : ${SPEC_LOSS_WEIGHT} (quantile ${SPEC_LOSS_QUANTILE})"
-echo "SpecAwareVote: ${SPEC_AWARE_SCORE}"
 echo "========================================================================"
 
 # 0. EXTRACT REFLECTION PRIOR
@@ -140,7 +121,7 @@ fi
 echo "[1/4] Running train.py..."
 python train.py \
     -s ${DATA_ROOT}/${SCENE} \
-    -m ${MODEL_PATH} \
+    -m ${OUTPUT_ROOT}/${SCENE} \
     -i ${IMAGES} \
     --eval \
     --iterations 30000 \
@@ -176,19 +157,16 @@ python train.py \
     --ti_bright ${TI_BRIGHT} \
     --sk_intensity ${SK_INTENSITY} \
     --sk_saturation ${SK_SATURATION} \
-    --spec_loss_weight ${SPEC_LOSS_WEIGHT} \
-    --spec_loss_quantile ${SPEC_LOSS_QUANTILE} \
     ${REF_SCORE_FLAG} \
-    ${ADAPTIVE_PRIOR_FLAG} \
-    ${SPEC_AWARE_SCORE_FLAG}
+    ${ADAPTIVE_PRIOR_FLAG}
 
 # 2. RENDER
 echo "[2/4] Running render.py..."
 python render.py \
-    -m ${MODEL_PATH} \
+    -m ${OUTPUT_ROOT}/${SCENE} \
     --skip_train
 
 # 3. METRICS
 echo "[3/4] Running metrics.py..."
 python metrics.py \
-    -m ${MODEL_PATH}
+    -m ${OUTPUT_ROOT}/${SCENE}

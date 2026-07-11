@@ -15,7 +15,7 @@ from PIL import Image
 import torch
 import torchvision.transforms.functional as tf
 from utils.loss_utils import ssim
-from lpipsPyTorch.modules.lpips import LPIPS
+from lpipsPyTorch import lpips
 import json
 from tqdm import tqdm
 from utils.image_utils import psnr
@@ -113,13 +113,6 @@ def to_float(value):
 
 def evaluate(model_paths):
 
-    # Build the VGG16-backed LPIPS criterion ONCE and reuse it for every image/
-    # method/scene below. The old code called the `lpips()` convenience function
-    # per-image, which rebuilds the whole LPIPS module (VGG16 + weight loading +
-    # a fresh .to(device) transfer) from scratch on every call -- ~1.6s/image of
-    # pure construction overhead that has nothing to do with the actual metric.
-    lpips_criterion = LPIPS(net_type='vgg', version='0.1').cuda()
-
     full_dict = {}
     per_view_dict = {}
     grouped_dict = {}
@@ -164,7 +157,7 @@ def evaluate(model_paths):
                 for idx in tqdm(range(len(renders)), desc="Metric evaluation progress"):
                     ssims.append(ssim(renders[idx], gts[idx]))
                     psnrs.append(psnr(renders[idx], gts[idx]))
-                    lpipss.append(lpips_criterion(renders[idx], gts[idx]))
+                    lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
                     spec_images = readSpecImages(spec_dir, image_names[idx], idx)
                     aux_metrics = computeAuxMetrics(renders[idx], gts[idx], spec_images)
                     for key, value in aux_metrics.items():

@@ -126,19 +126,6 @@ class OptimizationParams(ParamGroup):
         
         # Specular/ASG Sparsity
         self.lambda_spec_reg = 0.01
-
-        # Residual-weighted specular loss (v2.6-style, ported from spec-fastgs-me).
-        # Default 0.0 = exact old behavior (no extra render, no extra loss term).
-        # Mask = top-(1 - spec_loss_quantile) pixels of |GT - SH-only render|,
-        # i.e. the same residual_real signal the spec/ diagnostics already use.
-        self.spec_loss_weight = 0.0
-        self.spec_loss_quantile = 0.95
-
-        # Specular-aware densification/pruning vote: once the specular branch is
-        # active, render the multi-view consistency scoring passes with the full
-        # model (SH + ASG) instead of SH-only, so genuinely view-dependent
-        # Gaussians are not misread as inconsistent. Default False = old behavior.
-        self.spec_aware_score = False
         
         # Shafer/Klinker Prior
         self.ref_prior_method = "tan"

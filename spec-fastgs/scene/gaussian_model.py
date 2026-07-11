@@ -606,7 +606,7 @@ class GaussianModel:
         # The budget is not necessary for our method.
         if remove_budget:
             n_init_points = self.get_xyz.shape[0]
-            padded_importance = torch.zeros((n_init_points), dtype=torch.float32, device="cuda")
+            padded_importance = torch.zeros((n_init_points), dtype=torch.float32)
             padded_importance[:scores.shape[0]] = 1 / (1e-6 + scores.squeeze())
             selected_pts_mask = torch.zeros_like(padded_importance, dtype=bool, device="cuda")
             sampled_indices = torch.multinomial(padded_importance, remove_budget, replacement=False)
@@ -619,6 +619,8 @@ class GaussianModel:
         self._opacity = optimizable_tensors["opacity"]
         tmp_radii = self.tmp_radii
         self.tmp_radii = None
+
+        torch.cuda.empty_cache()
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)

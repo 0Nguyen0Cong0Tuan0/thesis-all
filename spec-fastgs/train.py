@@ -29,14 +29,6 @@ except:
     TENSORBOARD_FOUND = False
 
 
-class DummyTensor:
-    """Wraps a gradient tensor so it can be passed where a viewspace-point-like
-    object (only `.grad` is accessed) is expected, without allocating a class
-    object on every training iteration."""
-    def __init__(self, grad):
-        self.grad = grad
-
-
 def configure_refscore_budget(opt, initial_gaussians):
     if not getattr(opt, 'use_ref_score', False):
         return
@@ -175,7 +167,7 @@ def training(dataset, opt, pipe):
     viewpoint_indices = list(range(len(viewpoint_stack)))
 
     progress_bar = tqdm(range(1, opt.iterations + 1), desc="Training")
-    ema_loss_gpu = torch.zeros((), device="cuda")
+    ema_loss = 0.0
 
     # Cached boolean visibility mask for sparse ASG evaluation. This follows
     # the original fast path: reuse the previous frame's mask and fall back to
@@ -297,40 +289,8 @@ def training(dataset, opt, pipe):
             (1.0 - opt.lambda_dssim) * Ll1
             + opt.lambda_dssim * (1.0 - ssim_val)
         )
-
+        
         loss = photometric_loss
-
-        # --------------------------------------------------------
-        # RESIDUAL-WEIGHTED SPECULAR LOSS (opt-in, default weight 0.0)
-        # --------------------------------------------------------
-        # Extra L1 weight on the top-(1-quantile) pixels of |GT - diffuse|,
-        # where diffuse is a no-grad SH-only render. The mask is RESIDUAL-based
-        # (true specular locator), deliberately NOT luminance-based: a luminance
-        # mask catches bright diffuse surfaces and was empirically refuted
-        # (drove bad densification, +31% Gaussians). Uniform L1 under-weights
-        # specular pixels (~10% of area but ~30% of total error on counter),
-        # so without this term neither SH nor ASG is pushed to claim them.
-
-        if (
-            opt.spec_loss_weight > 0.0
-            and iteration > opt.specular_start_iter
-            and mlp_color is not None
-        ):
-            with torch.no_grad():
-                diffuse_img = render_fastgs(
-                    cam, gaussians, pipe, background, opt.mult, mlp_color=None
-                )["render"]
-                spec_residual = torch.abs(gt - diffuse_img).mean(dim=0)  # [H, W]
-                spec_thresh = torch.quantile(
-                    spec_residual.flatten(), opt.spec_loss_quantile
-                )
-                spec_mask = spec_residual > spec_thresh  # [H, W] bool
-
-            pixel_l1 = torch.abs(image - gt).mean(dim=0)  # [H, W]
-            # Branch-free masked mean (avoids a CPU sync from `.any()`; safe
-            # when the mask is empty thanks to clamp_min on the count).
-            spec_loss = (pixel_l1 * spec_mask).sum() / spec_mask.sum().clamp_min(1)
-            loss = loss + opt.spec_loss_weight * spec_loss
 
         loss.backward()
 
@@ -354,13 +314,10 @@ def training(dataset, opt, pipe):
         # LOG
         # --------------------------------------------------------
 
-        # Keep the EMA accumulator on-GPU and only pull it to a Python float
-        # (a CUDA sync point) when the progress bar actually needs to display
-        # it, instead of forcing a device sync every single iteration.
-        ema_loss_gpu = 0.4 * loss.detach() + 0.6 * ema_loss_gpu
+        ema_loss = 0.4 * loss.item() + 0.6 * ema_loss
 
         if iteration % 10 == 0:
-            progress_bar.set_postfix({"loss": f"{ema_loss_gpu.item():.6f}"})
+            progress_bar.set_postfix({"loss": f"{ema_loss:.6f}"})
 
         update_adaptive_ref_scores(scene, gaussians, pipe, background, opt, iteration)
 
@@ -377,7 +334,13 @@ def training(dataset, opt, pipe):
 
             # --- GUIDED DENSIFICATION ---
             # Trả lại quyền kiểm soát sinh hạt cho cơ chế ADC của FastGS
-            dummy_viewspace = DummyTensor(viewspace_point_tensor.grad)
+            viewspace_grad = viewspace_point_tensor.grad.clone()
+            
+            class DummyTensor:
+                def __init__(self, grad):
+                    self.grad = grad
+            
+            dummy_viewspace = DummyTensor(viewspace_grad)
 
             gaussians.add_densification_stats(
                 dummy_viewspace,
@@ -392,14 +355,8 @@ def training(dataset, opt, pipe):
                 camlist = sampling_cameras(scene.getTrainCameras().copy(), opt.num_score_cameras)
 
                 with torch.no_grad():
-                    score_mlp = (
-                        specular_mlp
-                        if (opt.spec_aware_score and iteration > opt.specular_start_iter)
-                        else None
-                    )
                     importance_score, pruning_score = compute_gaussian_score_fastgs(
-                        camlist, gaussians, pipe, background, opt, DENSIFY=True, iteration=iteration,
-                        specular_mlp=score_mlp
+                        camlist, gaussians, pipe, background, opt, DENSIFY=True, iteration=iteration
                     )
 
                 gaussians.densify_and_prune_fastgs(
@@ -419,14 +376,8 @@ def training(dataset, opt, pipe):
         if iteration % 3000 == 0 and iteration > 15_000 and iteration < 30_000:
             camlist = sampling_cameras(scene.getTrainCameras().copy(), opt.num_score_cameras)
             with torch.no_grad():
-                score_mlp = (
-                    specular_mlp
-                    if (opt.spec_aware_score and iteration > opt.specular_start_iter)
-                    else None
-                )
                 _, pruning_score = compute_gaussian_score_fastgs(
-                    camlist, gaussians, pipe, background, opt, False, iteration=iteration,
-                    specular_mlp=score_mlp
+                    camlist, gaussians, pipe, background, opt, False, iteration=iteration
                 )
             gaussians.final_prune_fastgs(min_opacity=0.1, pruning_score=pruning_score)
 
@@ -482,9 +433,6 @@ def training(dataset, opt, pipe):
         "ti_bright": opt.ti_bright,
         "sk_intensity": opt.sk_intensity,
         "sk_saturation": opt.sk_saturation,
-        "spec_loss_weight": opt.spec_loss_weight,
-        "spec_loss_quantile": opt.spec_loss_quantile,
-        "spec_aware_score": opt.spec_aware_score,
         "f_rest_warmup_until": opt.f_rest_warmup_until,
         "f_rest_interval_early": opt.f_rest_interval_early,
         "f_rest_interval_mid": opt.f_rest_interval_mid,

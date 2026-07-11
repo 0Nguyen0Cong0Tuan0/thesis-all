@@ -176,20 +176,11 @@ class ASGRenderReal(torch.nn.Module):
 
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
 
-    def reflect(self, viewdir, normal):
-        out = 2 * (viewdir * normal).sum(dim=-1, keepdim=True) * normal - viewdir
-        return out
-
-    def safe_normalize(self, x, eps=1e-8):
-        return x / (torch.norm(x, dim=-1, keepdim=True) + eps)
-
     def forward(self, pts, viewdirs, features, normal):
         asg_params = features.view(-1, self.num_theta, self.num_phi, 4)  # [N, 8, 16, 4]
         a, la, mu = torch.split(asg_params, [2, 1, 1], dim=-1)
 
-        reflect_dir = self.safe_normalize(self.reflect(-viewdirs, normal))
-
-        color_feature = self.ree_function(reflect_dir, a, la, mu)
+        color_feature = self.ree_function(viewdirs, a, la, mu)
         color_feature = color_feature.view(color_feature.size(0), -1)  # [N, 256]
 
         indata = [color_feature]
