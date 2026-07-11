@@ -283,7 +283,14 @@ class GaussianModel:
                 return lr
 
     def optimizer_step(self, iteration, skip_sh=False):
-        ''' An optimization scheduler. The goal is similar to the sparse Adam of taming 3dgs.'''
+        ''' An optimization scheduler. The goal is similar to the sparse Adam of taming 3dgs.
+
+        When a param group's step is skipped for `interval` iterations, gradients
+        keep accumulating (autograd sums them since zero_grad() isn't called on the
+        skipped iterations). We divide by `interval` right before stepping so Adam
+        sees an averaged gradient each time, not an unnormalized `interval`x-larger
+        one — otherwise the occasional step acts like an uncontrolled LR spike.
+        '''
         if getattr(self, 'asg_optimizer', None) is not None:
             self.asg_optimizer.step()
             self.asg_optimizer.zero_grad(set_to_none = True)
@@ -293,43 +300,62 @@ class GaussianModel:
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none = True)
             if self._should_step_f_rest(iteration, skip_sh):
-                self._step_f_rest_optimizer()
+                self._step_f_rest_optimizer(iteration)
                 stepped_f_rest = True
         elif iteration <= 20000:
             if iteration % 32 == 0:
+                self._scale_grad(self.optimizer, 32)
                 self.optimizer.step()
                 self.optimizer.zero_grad(set_to_none = True)
                 if self._should_step_f_rest(iteration, skip_sh):
-                    self._step_f_rest_optimizer()
+                    self._step_f_rest_optimizer(iteration)
                     stepped_f_rest = True
         else:
             if iteration % 64 == 0:
+                self._scale_grad(self.optimizer, 64)
                 self.optimizer.step()
                 self.optimizer.zero_grad(set_to_none = True)
                 if self._should_step_f_rest(iteration, skip_sh):
-                    self._step_f_rest_optimizer()
+                    self._step_f_rest_optimizer(iteration)
                     stepped_f_rest = True
 
         if not stepped_f_rest and self._should_step_f_rest(iteration, skip_sh):
-            self._step_f_rest_optimizer()
+            self._step_f_rest_optimizer(iteration)
+
+    def _f_rest_interval(self, iteration):
+        ''' Number of iterations between f_rest optimizer steps at this point in training
+        (1 during warmup, i.e. stepped every iteration). Shared by _should_step_f_rest
+        (to decide whether to fire) and _step_f_rest_optimizer (to normalize the
+        accumulated gradient by the same interval that was just used to fire). '''
+        if iteration <= self.f_rest_warmup_until:
+            return 1
+        if iteration <= 15000:
+            return self.f_rest_interval_early
+        elif iteration <= 20000:
+            return self.f_rest_interval_mid
+        else:
+            return self.f_rest_interval_late
 
     def _should_step_f_rest(self, iteration, skip_sh=False):
         if skip_sh or self.shoptimizer is None:
             return False
-        if iteration <= self.f_rest_warmup_until:
-            return True
-        if iteration <= 15000:
-            interval = self.f_rest_interval_early
-        elif iteration <= 20000:
-            interval = self.f_rest_interval_mid
-        else:
-            interval = self.f_rest_interval_late
+        interval = self._f_rest_interval(iteration)
         return interval > 0 and iteration % interval == 0
 
-    def _step_f_rest_optimizer(self):
+    def _step_f_rest_optimizer(self, iteration):
         if self.shoptimizer is not None:
+            self._scale_grad(self.shoptimizer, self._f_rest_interval(iteration))
             self.shoptimizer.step()
             self.shoptimizer.zero_grad(set_to_none=True)
+
+    @staticmethod
+    def _scale_grad(optimizer, scale):
+        if scale <= 1:
+            return
+        for group in optimizer.param_groups:
+            for p in group["params"]:
+                if p.grad is not None:
+                    p.grad.div_(scale)
 
     def construct_list_of_attributes(self):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
@@ -519,7 +545,11 @@ class GaussianModel:
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.xyz_gradient_accum_abs = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")  # abs
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+        # Extend (not reset) so the screen-space radius accumulated for surviving
+        # Gaussians over the last densification_interval iterations isn't wiped out
+        # before densify_and_prune_fastgs's max_screen_size check gets to read it.
+        # New Gaussians start at 0 since they haven't been rendered yet.
+        self.max_radii2D = torch.cat((self.max_radii2D, torch.zeros(new_xyz.shape[0], device="cuda")))
 
     def densify_and_split_fastgs(self, metric_mask, filter, N=2):
         n_init_points = self.get_xyz.shape[0]
@@ -581,9 +611,6 @@ class GaussianModel:
         clone_qualifiers = torch.max(self.get_scaling, dim=1).values <= args.dense*extent
         split_qualifiers = torch.max(self.get_scaling, dim=1).values > args.dense*extent
 
-        all_clones = torch.logical_and(clone_qualifiers, grad_qualifiers)
-        all_splits = torch.logical_and(split_qualifiers, grad_qualifiers_abs)
-
         # This is our multi-view consisent metric for densification
         metric_mask = importance_score > 5
         
@@ -619,6 +646,11 @@ class GaussianModel:
         self._opacity = optimizable_tensors["opacity"]
         tmp_radii = self.tmp_radii
         self.tmp_radii = None
+
+        # Start a fresh screen-space-radius measurement window for the next
+        # densification_interval iterations, now that this cycle's accumulated
+        # values have actually been used by the max_screen_size check above.
+        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
         torch.cuda.empty_cache()
 

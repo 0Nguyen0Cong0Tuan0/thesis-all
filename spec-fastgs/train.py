@@ -272,13 +272,10 @@ def training(dataset, opt, pipe):
         # --------------------------------------------------------
         # LOSS
         # --------------------------------------------------------
-        # Phase A design:
-        #   • photometric_loss  — L1 + SSIM, unchanged from FastGS baseline.
-        #     Gradients flow back through the renderer into mlp_color, so the
-        #     specular MLP is already supervised by image reconstruction.
-        #   • spec_reg          — lightweight L2 penalty on specular MLP outputs
-        #     (Gaussian-space). Prevents the MLP from producing unbounded colors
-        #     or collapsing to zero, without requiring a second render pass.
+        # photometric_loss — L1 + SSIM, unchanged from FastGS baseline.
+        # Gradients flow back through the renderer into mlp_color, so the
+        # specular MLP is supervised entirely by image reconstruction; there
+        # is no separate regularizer on the specular MLP output.
         # --------------------------------------------------------
 
         gt = cam.original_image.cuda()

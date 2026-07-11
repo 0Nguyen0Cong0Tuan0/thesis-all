@@ -152,7 +152,7 @@ if __name__ == "__main__":
     asg_path = os.path.join(dataset.model_path, f"point_cloud/iteration_{scene.loaded_iter}/asg.pt")
     gaussians._features_asg = torch.load(asg_path).cuda()
     
-    specular_mlp = SpecularModel(dataset.is_real, dataset.is_indoor)
+    specular_mlp = SpecularModel(dataset.asg_degree, dataset.is_real, dataset.is_indoor)
     specular_mlp.load_weights(dataset.model_path, iteration=scene.loaded_iter)
     
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]

@@ -81,9 +81,8 @@ class OptimizationParams(ParamGroup):
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
         self.position_lr_max_steps = 30_000
-        self.feature_lr = 0.0025 
-        self.shfeature_lr = 0.005 
-        self.opacity_lr = 0.025 
+        self.feature_lr = 0.0025
+        self.opacity_lr = 0.025
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001
         self.percent_dense = 0.001
@@ -123,9 +122,6 @@ class OptimizationParams(ParamGroup):
         self.f_rest_interval_early = 16
         self.f_rest_interval_mid = 32
         self.f_rest_interval_late = 64
-        
-        # Specular/ASG Sparsity
-        self.lambda_spec_reg = 0.01
         
         # Shafer/Klinker Prior
         self.ref_prior_method = "tan"

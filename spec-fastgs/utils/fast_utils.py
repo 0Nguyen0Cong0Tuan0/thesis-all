@@ -20,7 +20,7 @@ def sampling_cameras(my_viewpoint_stack, num_cams=10):
 
 def get_loss(reconstructed_image, original_image):
     l1_loss = torch.mean(torch.abs(reconstructed_image - original_image), 0).detach()
-    l1_loss_norm = (l1_loss - torch.min(l1_loss)) / (torch.max(l1_loss) - torch.min(l1_loss))
+    l1_loss_norm = (l1_loss - torch.min(l1_loss)) / (torch.max(l1_loss) - torch.min(l1_loss) + 1e-6)
 
     return l1_loss_norm
 
@@ -118,7 +118,7 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY, i
         else:
             full_metric_score += photometric_loss * accum_loss_counts
 
-    pruning_score = (full_metric_score - torch.min(full_metric_score)) / (torch.max(full_metric_score) - torch.min(full_metric_score))
+    pruning_score = (full_metric_score - torch.min(full_metric_score)) / (torch.max(full_metric_score) - torch.min(full_metric_score) + 1e-6)
     
     if DENSIFY:
         importance_score = torch.div(full_metric_counts, len(camlist), rounding_mode='floor')
