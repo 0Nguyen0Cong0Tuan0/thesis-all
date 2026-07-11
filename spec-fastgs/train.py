@@ -297,8 +297,40 @@ def training(dataset, opt, pipe):
             (1.0 - opt.lambda_dssim) * Ll1
             + opt.lambda_dssim * (1.0 - ssim_val)
         )
-        
+
         loss = photometric_loss
+
+        # --------------------------------------------------------
+        # RESIDUAL-WEIGHTED SPECULAR LOSS (opt-in, default weight 0.0)
+        # --------------------------------------------------------
+        # Extra L1 weight on the top-(1-quantile) pixels of |GT - diffuse|,
+        # where diffuse is a no-grad SH-only render. The mask is RESIDUAL-based
+        # (true specular locator), deliberately NOT luminance-based: a luminance
+        # mask catches bright diffuse surfaces and was empirically refuted
+        # (drove bad densification, +31% Gaussians). Uniform L1 under-weights
+        # specular pixels (~10% of area but ~30% of total error on counter),
+        # so without this term neither SH nor ASG is pushed to claim them.
+
+        if (
+            opt.spec_loss_weight > 0.0
+            and iteration > opt.specular_start_iter
+            and mlp_color is not None
+        ):
+            with torch.no_grad():
+                diffuse_img = render_fastgs(
+                    cam, gaussians, pipe, background, opt.mult, mlp_color=None
+                )["render"]
+                spec_residual = torch.abs(gt - diffuse_img).mean(dim=0)  # [H, W]
+                spec_thresh = torch.quantile(
+                    spec_residual.flatten(), opt.spec_loss_quantile
+                )
+                spec_mask = spec_residual > spec_thresh  # [H, W] bool
+
+            pixel_l1 = torch.abs(image - gt).mean(dim=0)  # [H, W]
+            # Branch-free masked mean (avoids a CPU sync from `.any()`; safe
+            # when the mask is empty thanks to clamp_min on the count).
+            spec_loss = (pixel_l1 * spec_mask).sum() / spec_mask.sum().clamp_min(1)
+            loss = loss + opt.spec_loss_weight * spec_loss
 
         loss.backward()
 
@@ -360,8 +392,14 @@ def training(dataset, opt, pipe):
                 camlist = sampling_cameras(scene.getTrainCameras().copy(), opt.num_score_cameras)
 
                 with torch.no_grad():
+                    score_mlp = (
+                        specular_mlp
+                        if (opt.spec_aware_score and iteration > opt.specular_start_iter)
+                        else None
+                    )
                     importance_score, pruning_score = compute_gaussian_score_fastgs(
-                        camlist, gaussians, pipe, background, opt, DENSIFY=True, iteration=iteration
+                        camlist, gaussians, pipe, background, opt, DENSIFY=True, iteration=iteration,
+                        specular_mlp=score_mlp
                     )
 
                 gaussians.densify_and_prune_fastgs(
@@ -381,8 +419,14 @@ def training(dataset, opt, pipe):
         if iteration % 3000 == 0 and iteration > 15_000 and iteration < 30_000:
             camlist = sampling_cameras(scene.getTrainCameras().copy(), opt.num_score_cameras)
             with torch.no_grad():
+                score_mlp = (
+                    specular_mlp
+                    if (opt.spec_aware_score and iteration > opt.specular_start_iter)
+                    else None
+                )
                 _, pruning_score = compute_gaussian_score_fastgs(
-                    camlist, gaussians, pipe, background, opt, False, iteration=iteration
+                    camlist, gaussians, pipe, background, opt, False, iteration=iteration,
+                    specular_mlp=score_mlp
                 )
             gaussians.final_prune_fastgs(min_opacity=0.1, pruning_score=pruning_score)
 
@@ -438,6 +482,9 @@ def training(dataset, opt, pipe):
         "ti_bright": opt.ti_bright,
         "sk_intensity": opt.sk_intensity,
         "sk_saturation": opt.sk_saturation,
+        "spec_loss_weight": opt.spec_loss_weight,
+        "spec_loss_quantile": opt.spec_loss_quantile,
+        "spec_aware_score": opt.spec_aware_score,
         "f_rest_warmup_until": opt.f_rest_warmup_until,
         "f_rest_interval_early": opt.f_rest_interval_early,
         "f_rest_interval_mid": opt.f_rest_interval_mid,

@@ -66,6 +66,15 @@ ADAPTIVE_PRIOR_NUM_CAMERAS=20
 ADAPTIVE_PRIOR_EMA=0.7
 
 # ------------------------------------------------------------
+# Specular supervision (residual-weighted loss + specular-aware vote)
+#   Defaults = exact old behavior (loss off, SH-only scoring vote).
+#   Validated recipe from the sibling tree's v2.6: WEIGHT=0.15 QUANTILE=0.95.
+# ------------------------------------------------------------
+SPEC_LOSS_WEIGHT=${SPEC_LOSS_WEIGHT:-0.0}
+SPEC_LOSS_QUANTILE=${SPEC_LOSS_QUANTILE:-0.95}
+SPEC_AWARE_SCORE=${SPEC_AWARE_SCORE:-False}
+
+# ------------------------------------------------------------
 # ASG / SH Scheduling Ablation
 # ------------------------------------------------------------
 FULL_ASG_INTERVAL=0
@@ -84,6 +93,11 @@ if [ "$USE_ADAPTIVE_PRIOR" = "True" ]; then
     ADAPTIVE_PRIOR_FLAG="--use_adaptive_prior"
 fi
 
+SPEC_AWARE_SCORE_FLAG=""
+if [ "$SPEC_AWARE_SCORE" = "True" ]; then
+    SPEC_AWARE_SCORE_FLAG="--spec_aware_score"
+fi
+
 echo "========================================================================"
 echo " Starting spec-fastgs BIG Training Pipeline"
 echo "========================================================================"
@@ -93,6 +107,8 @@ echo "ASG Degree   : ${ASG_DEGREE}"
 echo "Output Path  : ${MODEL_PATH}"
 echo "Use RefScore : ${USE_REF_SCORE}"
 echo "AdaptivePrior: ${USE_ADAPTIVE_PRIOR}"
+echo "SpecLossW    : ${SPEC_LOSS_WEIGHT} (quantile ${SPEC_LOSS_QUANTILE})"
+echo "SpecAwareVote: ${SPEC_AWARE_SCORE}"
 echo "========================================================================"
 
 # 0. EXTRACT REFLECTION PRIOR
@@ -160,8 +176,11 @@ python train.py \
     --ti_bright ${TI_BRIGHT} \
     --sk_intensity ${SK_INTENSITY} \
     --sk_saturation ${SK_SATURATION} \
+    --spec_loss_weight ${SPEC_LOSS_WEIGHT} \
+    --spec_loss_quantile ${SPEC_LOSS_QUANTILE} \
     ${REF_SCORE_FLAG} \
-    ${ADAPTIVE_PRIOR_FLAG}
+    ${ADAPTIVE_PRIOR_FLAG} \
+    ${SPEC_AWARE_SCORE_FLAG}
 
 # 2. RENDER
 echo "[2/4] Running render.py..."

@@ -20,14 +20,16 @@ def sampling_cameras(my_viewpoint_stack, num_cams=10):
 
 def get_loss(reconstructed_image, original_image):
     l1_loss = torch.mean(torch.abs(reconstructed_image - original_image), 0).detach()
-    l1_loss_norm = (l1_loss - torch.min(l1_loss)) / (torch.max(l1_loss) - torch.min(l1_loss))
+    # Epsilon guard: a degenerate uniform-error view would otherwise divide by
+    # zero and poison the metric map (and every score downstream) with NaNs.
+    l1_loss_norm = (l1_loss - torch.min(l1_loss)) / (torch.max(l1_loss) - torch.min(l1_loss) + 1e-8)
 
     return l1_loss_norm
 
-def compute_photometric_loss(viewpoint_cam, image):
+def compute_photometric_loss(viewpoint_cam, image, lambda_dssim=0.2):
     gt_image = viewpoint_cam.original_image.cuda()
     Ll1 = l1_loss(image, gt_image)
-    loss = (1.0 - 0.2) * Ll1 + 0.2 * (1.0 - fast_ssim(image.unsqueeze(0), gt_image.unsqueeze(0)))
+    loss = (1.0 - lambda_dssim) * Ll1 + lambda_dssim * (1.0 - fast_ssim(image.unsqueeze(0), gt_image.unsqueeze(0)))
     return loss
 
 def normalize(config_value, value_tensor):
@@ -42,7 +44,7 @@ def normalize(config_value, value_tensor):
 
     return ret_value
 
-def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY, iteration=None):
+def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY, iteration=None, specular_mlp=None):
     """Compute multi-view consistency scores for Gaussians to guide densification.
 
     For each camera in `camlist` the function renders the scene and computes a
@@ -58,6 +60,12 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY, i
         args: runtime config containing thresholds (e.g. `loss_thresh`).
         DENSIFY (bool): whether to compute and return the importance score
             used for densification. If False, only the pruning score is computed.
+        specular_mlp: optional SpecularModel. When provided, the scoring renders
+            include the specular (ASG) contribution so genuinely view-dependent
+            Gaussians are not misread as multi-view inconsistent (the SH-only
+            vote is Lambertian-biased against specular surfaces). None keeps the
+            original SH-only behavior. Callers must wrap this function in
+            torch.no_grad() (both existing call sites already do).
 
     Returns:
         importance_score (Tensor): per-Gaussian integer counts of how many views
@@ -72,8 +80,17 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY, i
 
     for view in range(len(camlist)):
         my_viewpoint_cam = camlist[view]
-        render_image = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult)["render"]
-        photometric_loss = compute_photometric_loss(my_viewpoint_cam, render_image)
+
+        mlp_color = None
+        if specular_mlp is not None:
+            xyz = gaussians.get_xyz
+            viewdir = xyz - my_viewpoint_cam.camera_center
+            viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
+            normal = gaussians.get_normal_axis(viewdir)
+            mlp_color = specular_mlp.step(gaussians.get_asg_features, viewdir, normal)
+
+        render_image = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult, mlp_color=mlp_color)["render"]
+        photometric_loss = compute_photometric_loss(my_viewpoint_cam, render_image, getattr(args, 'lambda_dssim', 0.2))
 
         gt_image = my_viewpoint_cam.original_image.cuda()
         get_flag = True
@@ -103,7 +120,7 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY, i
             ref_mask = (my_viewpoint_cam.ref_score.cuda() > ref_score_threshold).int()
             metric_map = torch.max(metric_map, ref_mask)
 
-        render_pkg = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult, get_flag = get_flag, metric_map = metric_map)
+        render_pkg = render_fastgs(my_viewpoint_cam, gaussians, pipe, bg, args.mult, mlp_color=mlp_color, get_flag = get_flag, metric_map = metric_map)
 
         accum_loss_counts = render_pkg["accum_metric_counts"]
 
@@ -118,7 +135,7 @@ def compute_gaussian_score_fastgs(camlist, gaussians, pipe, bg, args, DENSIFY, i
         else:
             full_metric_score += photometric_loss * accum_loss_counts
 
-    pruning_score = (full_metric_score - torch.min(full_metric_score)) / (torch.max(full_metric_score) - torch.min(full_metric_score))
+    pruning_score = (full_metric_score - torch.min(full_metric_score)) / (torch.max(full_metric_score) - torch.min(full_metric_score) + 1e-8)
     
     if DENSIFY:
         importance_score = torch.div(full_metric_counts, len(camlist), rounding_mode='floor')

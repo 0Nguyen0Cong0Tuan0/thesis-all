@@ -606,7 +606,7 @@ class GaussianModel:
         # The budget is not necessary for our method.
         if remove_budget:
             n_init_points = self.get_xyz.shape[0]
-            padded_importance = torch.zeros((n_init_points), dtype=torch.float32)
+            padded_importance = torch.zeros((n_init_points), dtype=torch.float32, device="cuda")
             padded_importance[:scores.shape[0]] = 1 / (1e-6 + scores.squeeze())
             selected_pts_mask = torch.zeros_like(padded_importance, dtype=bool, device="cuda")
             sampled_indices = torch.multinomial(padded_importance, remove_budget, replacement=False)
