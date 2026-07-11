@@ -163,11 +163,11 @@ def get_minimum_axis(scales, rotations):
 
     R_sorted = torch.gather(
         R,
-        dim=1,
-        index=sorted_idx[:, :, None].repeat(1, 1, 3)
+        dim=2,
+        index=sorted_idx[:, None, :].repeat(1, 3, 1)
     ).squeeze()
 
-    x_axis = R_sorted[:, 0, :]
+    x_axis = R_sorted[:, :, 0]
     return x_axis
 
 
