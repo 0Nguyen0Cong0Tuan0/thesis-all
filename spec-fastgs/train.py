@@ -29,6 +29,14 @@ except:
     TENSORBOARD_FOUND = False
 
 
+class DummyTensor:
+    """Wraps a gradient tensor so it can be passed where a viewspace-point-like
+    object (only `.grad` is accessed) is expected, without allocating a class
+    object on every training iteration."""
+    def __init__(self, grad):
+        self.grad = grad
+
+
 def configure_refscore_budget(opt, initial_gaussians):
     if not getattr(opt, 'use_ref_score', False):
         return
@@ -167,7 +175,7 @@ def training(dataset, opt, pipe):
     viewpoint_indices = list(range(len(viewpoint_stack)))
 
     progress_bar = tqdm(range(1, opt.iterations + 1), desc="Training")
-    ema_loss = 0.0
+    ema_loss_gpu = torch.zeros((), device="cuda")
 
     # Cached boolean visibility mask for sparse ASG evaluation. This follows
     # the original fast path: reuse the previous frame's mask and fall back to
@@ -314,10 +322,13 @@ def training(dataset, opt, pipe):
         # LOG
         # --------------------------------------------------------
 
-        ema_loss = 0.4 * loss.item() + 0.6 * ema_loss
+        # Keep the EMA accumulator on-GPU and only pull it to a Python float
+        # (a CUDA sync point) when the progress bar actually needs to display
+        # it, instead of forcing a device sync every single iteration.
+        ema_loss_gpu = 0.4 * loss.detach() + 0.6 * ema_loss_gpu
 
         if iteration % 10 == 0:
-            progress_bar.set_postfix({"loss": f"{ema_loss:.6f}"})
+            progress_bar.set_postfix({"loss": f"{ema_loss_gpu.item():.6f}"})
 
         update_adaptive_ref_scores(scene, gaussians, pipe, background, opt, iteration)
 
@@ -334,13 +345,7 @@ def training(dataset, opt, pipe):
 
             # --- GUIDED DENSIFICATION ---
             # Trả lại quyền kiểm soát sinh hạt cho cơ chế ADC của FastGS
-            viewspace_grad = viewspace_point_tensor.grad.clone()
-            
-            class DummyTensor:
-                def __init__(self, grad):
-                    self.grad = grad
-            
-            dummy_viewspace = DummyTensor(viewspace_grad)
+            dummy_viewspace = DummyTensor(viewspace_point_tensor.grad)
 
             gaussians.add_densification_stats(
                 dummy_viewspace,
