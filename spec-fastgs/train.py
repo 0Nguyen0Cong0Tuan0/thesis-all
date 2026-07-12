@@ -95,6 +95,40 @@ def update_adaptive_ref_scores(scene, gaussians, pipe, background, opt, iteratio
     return updated
 
 
+def gaussian_normal_smoothness_loss(xyz, normals, mask=None, max_points=2048, k=8):
+    if mask is not None:
+        indices = mask.reshape(-1).nonzero(as_tuple=False).squeeze(1)
+    else:
+        indices = torch.arange(xyz.shape[0], device=xyz.device)
+
+    if indices.numel() <= 1:
+        return None
+
+    max_points = int(max_points)
+    if max_points > 0 and indices.numel() > max_points:
+        perm = torch.randperm(indices.numel(), device=indices.device)[:max_points]
+        indices = indices[perm]
+
+    if indices.numel() <= 1:
+        return None
+
+    k = min(int(k), indices.numel() - 1)
+    if k <= 0:
+        return None
+
+    pts = xyz[indices].detach()
+    selected_normals = normals[indices]
+    selected_normals = selected_normals / (selected_normals.norm(dim=1, keepdim=True) + 1e-6)
+
+    with torch.no_grad():
+        dists = torch.cdist(pts, pts)
+        knn = torch.topk(dists, k=k + 1, dim=1, largest=False).indices[:, 1:]
+
+    neighbor_normals = selected_normals[knn]
+    cos_sim = (selected_normals[:, None, :] * neighbor_normals).sum(dim=-1).clamp(-1.0, 1.0)
+    return (1.0 - cos_sim).mean()
+
+
 # ============================================================
 # TRAINING LOOP
 # ============================================================
@@ -114,7 +148,16 @@ def training(dataset, opt, pipe):
     configure_refscore_budget(opt, initial_gaussians)
     gaussians.training_setup(opt)
 
-    specular_mlp = SpecularModel(dataset.asg_degree, dataset.is_real, dataset.is_indoor)
+    specular_mlp = SpecularModel(
+        dataset.asg_degree,
+        dataset.is_real,
+        dataset.is_indoor,
+        getattr(dataset, "asg_num_theta", -1),
+        getattr(dataset, "asg_num_phi", -1),
+        getattr(dataset, "specular_hidden", -1),
+        getattr(dataset, "specular_layers", -1),
+        getattr(dataset, "real_use_reflection_dir", False),
+    )
     specular_mlp.train_setting(opt)
 
     # ------------------------------------------------------------
@@ -173,6 +216,19 @@ def training(dataset, opt, pipe):
     # the original fast path: reuse the previous frame's mask and fall back to
     # full ASG only when Gaussian count changes or an explicit refresh is due.
     prev_vis_mask: torch.Tensor | None = None
+    asg_eval_count_total = 0
+    asg_eval_steps = 0
+    sh_spec_mask_ratio_total = 0.0
+    sh_spec_mask_steps = 0
+    spec_reg_loss_total = 0.0
+    spec_reg_steps = 0
+    asg_residual_loss_total = 0.0
+    asg_leak_loss_total = 0.0
+    asg_residual_steps = 0
+    normal_delta_loss_total = 0.0
+    normal_delta_steps = 0
+    normal_smooth_loss_total = 0.0
+    normal_smooth_steps = 0
 
     for iteration in progress_bar:
 
@@ -232,12 +288,15 @@ def training(dataset, opt, pipe):
             else:
                 # First specular step, full refresh, or count changed after densification.
                 vis_indices = torch.arange(n_gs, device="cuda")
+            asg_eval_count_total += int(vis_indices.numel())
+            asg_eval_steps += 1
 
             if vis_indices.numel() > 0:
+                normal_for_spec = normal if getattr(opt, "use_normal_delta", False) else normal.detach()
                 spec_sparse = specular_mlp.step(
                     asg_feat[vis_indices],
                     viewdir[vis_indices],
-                    normal[vis_indices].detach(),
+                    normal_for_spec[vis_indices],
                 )  # [M, 3]
 
 
@@ -246,6 +305,17 @@ def training(dataset, opt, pipe):
                 mlp_color = torch.zeros(
                     (n_gs, 3), device="cuda"
                 ).index_put((vis_indices,), spec_sparse)
+
+        collect_sh_spec_mask = (
+            getattr(opt, "use_sh_spec_mask", False)
+            and iteration >= getattr(opt, "sh_spec_mask_start", 0)
+            and hasattr(cam, "ref_score")
+        )
+        sh_spec_metric_map = None
+        if collect_sh_spec_mask:
+            sh_spec_metric_map = (
+                cam.ref_score.cuda() > opt.sh_spec_mask_threshold
+            ).reshape(-1).int()
 
         # --------------------------------------------------------
         # RENDER  (single pass — Phase A removes redundant sh & spec-sharp passes)
@@ -257,13 +327,25 @@ def training(dataset, opt, pipe):
             pipe,
             background,
             opt.mult,
-            mlp_color=mlp_color
+            mlp_color=mlp_color,
+            get_flag=collect_sh_spec_mask,
+            metric_map=sh_spec_metric_map,
         )
 
         image                 = render_pkg["render"]
         viewspace_point_tensor = render_pkg["viewspace_points"]
         visibility_filter     = render_pkg["visibility_filter"]
         radii                 = render_pkg["radii"]
+        accum_metric_counts   = render_pkg["accum_metric_counts"]
+
+        sh_spec_grad_mask = None
+        if collect_sh_spec_mask and accum_metric_counts is not None:
+            mask_counts = accum_metric_counts.reshape(-1)
+            if mask_counts.shape[0] == gaussians.get_xyz.shape[0]:
+                sh_spec_grad_mask = mask_counts >= opt.sh_spec_min_metric_count
+                if sh_spec_grad_mask.numel() > 0:
+                    sh_spec_mask_ratio_total += sh_spec_grad_mask.float().mean().item()
+                    sh_spec_mask_steps += 1
 
         # ── Update cached visibility mask for the NEXT iteration ──────────
         # radii has shape [N]; (radii > 0) gives the boolean visibility mask.
@@ -272,15 +354,27 @@ def training(dataset, opt, pipe):
         # --------------------------------------------------------
         # LOSS
         # --------------------------------------------------------
-        # photometric_loss — L1 + SSIM, unchanged from FastGS baseline.
-        # Gradients flow back through the renderer into mlp_color, so the
-        # specular MLP is supervised entirely by image reconstruction; there
-        # is no separate regularizer on the specular MLP output.
+        # Phase A design:
+        #   • photometric_loss  — L1 + SSIM, unchanged from FastGS baseline.
+        #     Gradients flow back through the renderer into mlp_color, so the
+        #     specular MLP is already supervised by image reconstruction.
+        #   • spec_reg          — lightweight L2 penalty on specular MLP outputs
+        #     (Gaussian-space). Optional; prevents unbounded ASG energy/leakage,
+        #     but can weaken only_asg if set too high.
         # --------------------------------------------------------
 
         gt = cam.original_image.cuda()
 
-        Ll1      = l1_loss(image, gt)
+        if (
+            getattr(opt, "lambda_spec_l1_weight", 0.0) > 0.0
+            and hasattr(cam, "ref_score")
+        ):
+            pixel_l1 = torch.abs(image - gt)
+            ref_w = cam.ref_score.cuda().unsqueeze(0)
+            weight_map = 1.0 + opt.lambda_spec_l1_weight * ref_w
+            Ll1 = (pixel_l1 * weight_map).sum() / (3.0 * weight_map.sum().clamp_min(1e-6))
+        else:
+            Ll1 = l1_loss(image, gt)
         ssim_val = fast_ssim(image.unsqueeze(0), gt.unsqueeze(0))
         photometric_loss = (
             (1.0 - opt.lambda_dssim) * Ll1
@@ -288,6 +382,95 @@ def training(dataset, opt, pipe):
         )
         
         loss = photometric_loss
+        if getattr(opt, "lambda_spec_reg", 0.0) > 0.0 and spec_sparse is not None:
+            spec_reg_loss = (spec_sparse ** 2).mean()
+            loss = loss + opt.lambda_spec_reg * spec_reg_loss
+            spec_reg_loss_total += spec_reg_loss.detach().item()
+            spec_reg_steps += 1
+
+        use_asg_residual_loss = (
+            getattr(opt, "use_asg_residual_supervision", False)
+            and mlp_color is not None
+            and hasattr(cam, "ref_score")
+            and iteration >= getattr(opt, "asg_residual_start", 0)
+            and getattr(opt, "asg_residual_interval", 0) > 0
+            and iteration % opt.asg_residual_interval == 0
+        )
+        if use_asg_residual_loss:
+            ref_score = cam.ref_score.cuda().unsqueeze(0)
+            ref_mask = (ref_score > opt.asg_residual_ref_threshold).float()
+            outside_mask = 1.0 - ref_mask
+
+            with torch.no_grad():
+                sh_only = render_fastgs(
+                    cam,
+                    gaussians,
+                    pipe,
+                    background,
+                    opt.mult,
+                    mlp_color=None,
+                )["render"]
+                target_spec = torch.clamp(gt - sh_only, min=0.0)
+
+            asg_only = render_fastgs(
+                cam,
+                gaussians,
+                pipe,
+                background,
+                opt.mult,
+                override_color=mlp_color,
+            )["render"]
+
+            asg_loss_active = False
+            if getattr(opt, "lambda_asg_residual", 0.0) > 0.0 and ref_mask.sum() > 0:
+                asg_residual_loss = (
+                    torch.abs(asg_only - target_spec) * ref_mask
+                ).sum() / (3.0 * ref_mask.sum().clamp_min(1e-6))
+                loss = loss + opt.lambda_asg_residual * asg_residual_loss
+                asg_residual_loss_total += asg_residual_loss.detach().item()
+                asg_loss_active = True
+
+            if getattr(opt, "lambda_asg_leak", 0.0) > 0.0 and outside_mask.sum() > 0:
+                asg_leak_loss = (
+                    torch.abs(asg_only) * outside_mask
+                ).sum() / (3.0 * outside_mask.sum().clamp_min(1e-6))
+                loss = loss + opt.lambda_asg_leak * asg_leak_loss
+                asg_leak_loss_total += asg_leak_loss.detach().item()
+                asg_loss_active = True
+
+            if asg_loss_active:
+                asg_residual_steps += 1
+
+        if (
+            getattr(opt, "use_normal_delta", False)
+            and getattr(opt, "lambda_normal_delta_reg", 0.0) > 0.0
+            and iteration >= getattr(opt, "normal_delta_start_iter", 0)
+        ):
+            normal_delta_loss = (gaussians._normal_delta ** 2).mean()
+            loss = loss + opt.lambda_normal_delta_reg * normal_delta_loss
+            normal_delta_loss_total += normal_delta_loss.detach().item()
+            normal_delta_steps += 1
+
+        if (
+            getattr(opt, "lambda_normal_smooth", 0.0) > 0.0
+            and iteration >= getattr(opt, "normal_smooth_start_iter", 0)
+            and getattr(opt, "normal_smooth_interval", 0) > 0
+            and iteration % opt.normal_smooth_interval == 0
+        ):
+            normal_smooth_mask = (radii > 0)
+            if getattr(opt, "normal_smooth_use_ref_mask", False) and sh_spec_grad_mask is not None:
+                normal_smooth_mask = torch.logical_and(normal_smooth_mask, sh_spec_grad_mask)
+            normal_smooth_loss = gaussian_normal_smoothness_loss(
+                gaussians.get_xyz,
+                normal,
+                normal_smooth_mask,
+                opt.normal_smooth_max_points,
+                opt.normal_smooth_k,
+            )
+            if normal_smooth_loss is not None:
+                loss = loss + opt.lambda_normal_smooth * normal_smooth_loss
+                normal_smooth_loss_total += normal_smooth_loss.detach().item()
+                normal_smooth_steps += 1
 
         loss.backward()
 
@@ -301,7 +484,12 @@ def training(dataset, opt, pipe):
 
         # Set skip_sh=False because we now use fine-grained gradient scaling per-Gaussian
         skip_sh = False
-        gaussians.optimizer_step(iteration, skip_sh=skip_sh)
+        gaussians.optimizer_step(
+            iteration,
+            skip_sh=skip_sh,
+            f_rest_grad_mask=sh_spec_grad_mask,
+            f_rest_grad_scale=opt.sh_spec_grad_scale,
+        )
 
         # Update specular lr BEFORE stepping optimizer to ensure non-zero lr is used
         specular_mlp.update_learning_rate(iteration)
@@ -396,6 +584,14 @@ def training(dataset, opt, pipe):
     duration = end_time - start_time
     minutes = int(duration // 60)
     seconds = int(duration % 60)
+    avg_asg_eval_count = asg_eval_count_total / asg_eval_steps if asg_eval_steps > 0 else 0.0
+    avg_sh_spec_mask_ratio = sh_spec_mask_ratio_total / sh_spec_mask_steps if sh_spec_mask_steps > 0 else 0.0
+    avg_spec_reg_loss = spec_reg_loss_total / spec_reg_steps if spec_reg_steps > 0 else 0.0
+    avg_asg_residual_loss = asg_residual_loss_total / asg_residual_steps if asg_residual_steps > 0 else 0.0
+    avg_asg_leak_loss = asg_leak_loss_total / asg_residual_steps if asg_residual_steps > 0 else 0.0
+    avg_normal_delta_loss = normal_delta_loss_total / normal_delta_steps if normal_delta_steps > 0 else 0.0
+    avg_normal_smooth_loss = normal_smooth_loss_total / normal_smooth_steps if normal_smooth_steps > 0 else 0.0
+    normal_delta_norm = gaussians._normal_delta.detach().norm(dim=1) if gaussians._normal_delta.numel() > 0 else None
 
     metadata = {
         "scene": dataset.source_path.split("/")[-1],
@@ -408,8 +604,14 @@ def training(dataset, opt, pipe):
         "training_time_formatted": f"{minutes}m {seconds}s",
         "peak_vram_mib": round(torch.cuda.max_memory_allocated() / (1024 ** 2), 2),
         "asg_degree": dataset.asg_degree,
+        "asg_num_theta": getattr(dataset, "asg_num_theta", -1),
+        "asg_num_phi": getattr(dataset, "asg_num_phi", -1),
+        "specular_hidden": getattr(dataset, "specular_hidden", -1),
+        "specular_layers": getattr(dataset, "specular_layers", -1),
+        "real_use_reflection_dir": getattr(dataset, "real_use_reflection_dir", False),
         "specular_start_iter": opt.specular_start_iter,
         "full_asg_interval": opt.full_asg_interval,
+        "avg_asg_eval_count": round(avg_asg_eval_count, 2),
         "num_score_cameras": opt.num_score_cameras,
         "use_ref_score": opt.use_ref_score,
         "max_refscore_gaussians": opt.max_refscore_gaussians,
@@ -430,10 +632,46 @@ def training(dataset, opt, pipe):
         "ti_bright": opt.ti_bright,
         "sk_intensity": opt.sk_intensity,
         "sk_saturation": opt.sk_saturation,
+        "tophat_val_thresh": opt.tophat_val_thresh,
+        "tophat_sat_thresh": opt.tophat_sat_thresh,
+        "tophat_radius": opt.tophat_radius,
+        "tophat_thresh": opt.tophat_thresh,
         "f_rest_warmup_until": opt.f_rest_warmup_until,
         "f_rest_interval_early": opt.f_rest_interval_early,
         "f_rest_interval_mid": opt.f_rest_interval_mid,
         "f_rest_interval_late": opt.f_rest_interval_late,
+        "use_sh_spec_mask": opt.use_sh_spec_mask,
+        "sh_spec_mask_threshold": opt.sh_spec_mask_threshold,
+        "sh_spec_grad_scale": opt.sh_spec_grad_scale,
+        "sh_spec_mask_start": opt.sh_spec_mask_start,
+        "sh_spec_min_metric_count": opt.sh_spec_min_metric_count,
+        "avg_sh_spec_mask_ratio": round(avg_sh_spec_mask_ratio, 6),
+        "use_asg_residual_supervision": opt.use_asg_residual_supervision,
+        "lambda_asg_residual": opt.lambda_asg_residual,
+        "lambda_asg_leak": opt.lambda_asg_leak,
+        "asg_residual_start": opt.asg_residual_start,
+        "asg_residual_interval": opt.asg_residual_interval,
+        "asg_residual_ref_threshold": opt.asg_residual_ref_threshold,
+        "avg_asg_residual_loss": round(avg_asg_residual_loss, 8),
+        "avg_asg_leak_loss": round(avg_asg_leak_loss, 8),
+        "lambda_spec_l1_weight": opt.lambda_spec_l1_weight,
+        "lambda_spec_reg": opt.lambda_spec_reg,
+        "avg_spec_reg_loss": round(avg_spec_reg_loss, 8),
+        "use_normal_delta": opt.use_normal_delta,
+        "normal_delta_lr": opt.normal_delta_lr,
+        "normal_delta_start_iter": opt.normal_delta_start_iter,
+        "normal_delta_max_norm": opt.normal_delta_max_norm,
+        "lambda_normal_delta_reg": opt.lambda_normal_delta_reg,
+        "avg_normal_delta_loss": round(avg_normal_delta_loss, 8),
+        "normal_delta_mean_norm": round(normal_delta_norm.mean().item(), 8) if normal_delta_norm is not None else 0.0,
+        "normal_delta_max_norm_observed": round(normal_delta_norm.max().item(), 8) if normal_delta_norm is not None else 0.0,
+        "lambda_normal_smooth": opt.lambda_normal_smooth,
+        "normal_smooth_start_iter": opt.normal_smooth_start_iter,
+        "normal_smooth_interval": opt.normal_smooth_interval,
+        "normal_smooth_max_points": opt.normal_smooth_max_points,
+        "normal_smooth_k": opt.normal_smooth_k,
+        "normal_smooth_use_ref_mask": opt.normal_smooth_use_ref_mask,
+        "avg_normal_smooth_loss": round(avg_normal_smooth_loss, 8),
         "datetime_completed": time.strftime("%Y-%m-%d %H:%M:%S")
     }
 

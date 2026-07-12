@@ -18,6 +18,11 @@ IMAGES=images_8
 # Core Training / Representation
 # ------------------------------------------------------------
 ASG_DEGREE=64
+ASG_NUM_THETA=-1
+ASG_NUM_PHI=-1
+SPECULAR_HIDDEN=-1
+SPECULAR_LAYERS=-1
+REAL_USE_REFLECTION_DIR=False
 NUM_SCORE_CAMERAS=10
 
 # ------------------------------------------------------------
@@ -72,6 +77,43 @@ F_REST_INTERVAL_EARLY=16
 F_REST_INTERVAL_MID=32
 F_REST_INTERVAL_LATE=64
 
+# ------------------------------------------------------------
+# Representation Capacity R1/R2 - SH/ASG Role Separation
+# ------------------------------------------------------------
+USE_SH_SPEC_MASK=False
+SH_SPEC_GRAD_SCALE=0.75
+SH_SPEC_MASK_START=8000
+SH_SPEC_MASK_THRESHOLD=0.75
+SH_SPEC_MIN_METRIC_COUNT=2
+
+USE_ASG_RESIDUAL_SUPERVISION=False
+LAMBDA_ASG_RESIDUAL=0.0
+LAMBDA_ASG_LEAK=0.0
+ASG_RESIDUAL_START=8000
+ASG_RESIDUAL_INTERVAL=16
+ASG_RESIDUAL_REF_THRESHOLD=0.75
+
+# ------------------------------------------------------------
+# Supervision Signal S - Specular-weighted loss / ASG regularizer
+# ------------------------------------------------------------
+LAMBDA_SPEC_L1_WEIGHT=0.0
+LAMBDA_SPEC_REG=0.0
+
+# ------------------------------------------------------------
+# Normal Quality N - Learned delta / Gaussian-space smoothness
+# ------------------------------------------------------------
+USE_NORMAL_DELTA=False
+NORMAL_DELTA_LR=0.00005
+NORMAL_DELTA_START_ITER=3000
+NORMAL_DELTA_MAX_NORM=0.05
+LAMBDA_NORMAL_DELTA_REG=0.001
+LAMBDA_NORMAL_SMOOTH=0.0001
+NORMAL_SMOOTH_START_ITER=8000
+NORMAL_SMOOTH_INTERVAL=16
+NORMAL_SMOOTH_MAX_POINTS=2048
+NORMAL_SMOOTH_K=8
+NORMAL_SMOOTH_USE_REF_MASK=False
+
 REF_SCORE_FLAG=""
 if [ "$USE_REF_SCORE" = "True" ]; then
     REF_SCORE_FLAG="--use_ref_score"
@@ -82,6 +124,31 @@ if [ "$USE_ADAPTIVE_PRIOR" = "True" ]; then
     ADAPTIVE_PRIOR_FLAG="--use_adaptive_prior"
 fi
 
+SH_SPEC_MASK_FLAG=""
+if [ "$USE_SH_SPEC_MASK" = "True" ]; then
+    SH_SPEC_MASK_FLAG="--use_sh_spec_mask"
+fi
+
+ASG_RESIDUAL_FLAG=""
+if [ "$USE_ASG_RESIDUAL_SUPERVISION" = "True" ]; then
+    ASG_RESIDUAL_FLAG="--use_asg_residual_supervision"
+fi
+
+REAL_REFLECTION_FLAG=""
+if [ "$REAL_USE_REFLECTION_DIR" = "True" ]; then
+    REAL_REFLECTION_FLAG="--real_use_reflection_dir"
+fi
+
+NORMAL_DELTA_FLAG=""
+if [ "$USE_NORMAL_DELTA" = "True" ]; then
+    NORMAL_DELTA_FLAG="--use_normal_delta"
+fi
+
+NORMAL_SMOOTH_REF_FLAG=""
+if [ "$NORMAL_SMOOTH_USE_REF_MASK" = "True" ]; then
+    NORMAL_SMOOTH_REF_FLAG="--normal_smooth_use_ref_mask"
+fi
+
 echo "========================================================================"
 echo " Starting spec-fastgs BIG Training Pipeline"
 echo "========================================================================"
@@ -90,6 +157,8 @@ echo "Scene Name   : $SCENE"
 echo "Output Path  : ${OUTPUT_ROOT}/${SCENE}"
 echo "Use RefScore : ${USE_REF_SCORE}"
 echo "AdaptivePrior: ${USE_ADAPTIVE_PRIOR}"
+echo "SH Spec Mask : ${USE_SH_SPEC_MASK}"
+echo "Normal Delta : ${USE_NORMAL_DELTA}"
 echo "========================================================================"
 
 # 0. EXTRACT REFLECTION PRIOR
@@ -128,6 +197,10 @@ python train.py \
     --densification_interval 100 \
     --optimizer_type default \
     --asg_degree ${ASG_DEGREE} \
+    --asg_num_theta ${ASG_NUM_THETA} \
+    --asg_num_phi ${ASG_NUM_PHI} \
+    --specular_hidden ${SPECULAR_HIDDEN} \
+    --specular_layers ${SPECULAR_LAYERS} \
     --is_real \
     --is_indoor \
     --sh_degree 3 \
@@ -152,13 +225,38 @@ python train.py \
     --f_rest_interval_early ${F_REST_INTERVAL_EARLY} \
     --f_rest_interval_mid ${F_REST_INTERVAL_MID} \
     --f_rest_interval_late ${F_REST_INTERVAL_LATE} \
+    --sh_spec_mask_threshold ${SH_SPEC_MASK_THRESHOLD} \
+    --sh_spec_grad_scale ${SH_SPEC_GRAD_SCALE} \
+    --sh_spec_mask_start ${SH_SPEC_MASK_START} \
+    --sh_spec_min_metric_count ${SH_SPEC_MIN_METRIC_COUNT} \
+    --lambda_asg_residual ${LAMBDA_ASG_RESIDUAL} \
+    --lambda_asg_leak ${LAMBDA_ASG_LEAK} \
+    --asg_residual_start ${ASG_RESIDUAL_START} \
+    --asg_residual_interval ${ASG_RESIDUAL_INTERVAL} \
+    --asg_residual_ref_threshold ${ASG_RESIDUAL_REF_THRESHOLD} \
+    --lambda_spec_l1_weight ${LAMBDA_SPEC_L1_WEIGHT} \
+    --lambda_spec_reg ${LAMBDA_SPEC_REG} \
+    --normal_delta_lr ${NORMAL_DELTA_LR} \
+    --normal_delta_start_iter ${NORMAL_DELTA_START_ITER} \
+    --normal_delta_max_norm ${NORMAL_DELTA_MAX_NORM} \
+    --lambda_normal_delta_reg ${LAMBDA_NORMAL_DELTA_REG} \
+    --lambda_normal_smooth ${LAMBDA_NORMAL_SMOOTH} \
+    --normal_smooth_start_iter ${NORMAL_SMOOTH_START_ITER} \
+    --normal_smooth_interval ${NORMAL_SMOOTH_INTERVAL} \
+    --normal_smooth_max_points ${NORMAL_SMOOTH_MAX_POINTS} \
+    --normal_smooth_k ${NORMAL_SMOOTH_K} \
     --ref_prior_method ${REF_PRIOR_METHOD} \
     --ti_thresh ${TI_THRESH} \
     --ti_bright ${TI_BRIGHT} \
     --sk_intensity ${SK_INTENSITY} \
     --sk_saturation ${SK_SATURATION} \
     ${REF_SCORE_FLAG} \
-    ${ADAPTIVE_PRIOR_FLAG}
+    ${ADAPTIVE_PRIOR_FLAG} \
+    ${SH_SPEC_MASK_FLAG} \
+    ${ASG_RESIDUAL_FLAG} \
+    ${REAL_REFLECTION_FLAG} \
+    ${NORMAL_DELTA_FLAG} \
+    ${NORMAL_SMOOTH_REF_FLAG}
 
 # 2. RENDER
 echo "[2/4] Running render.py..."

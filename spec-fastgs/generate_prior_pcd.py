@@ -11,6 +11,7 @@ from PIL import Image
 from argparse import ArgumentParser
 from plyfile import PlyData, PlyElement
 from tqdm import tqdm
+from pathlib import Path
 
 def focal2fov(focal, pixels):
     return 2*np.arctan(pixels/(2*focal))
@@ -107,11 +108,9 @@ def generate_prior_pcd(dataset_path):
         img_rgba = np.array(img.convert("RGBA"))
         alpha = torch.from_numpy(img_rgba[:, :, 3]).float().to(device) / 255.0 # [H, W]
         
-        # Load Ref Score. extract_reflection_prior.py saves priors keyed by
-        # cam.image_name, which for this transforms.json layout is exactly
-        # frame["file_path"] (e.g. "train/r_0", already including the
-        # train/test subfolder) — NOT the bare filename stem.
-        ref_score_path = os.path.join(dataset_path, "reflection_prior", f"{frame['file_path']}_ref_score.png")
+        # Load Ref Score
+        stem = Path(img_rel_path).stem
+        ref_score_path = os.path.join(dataset_path, "reflection_prior", f"train_{stem}_ref_score.png")
         if os.path.exists(ref_score_path):
             ref_score_img = imageio.imread(ref_score_path)
             ref_score = torch.from_numpy(ref_score_img).float().to(device) / 255.0

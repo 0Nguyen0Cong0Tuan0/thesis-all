@@ -191,8 +191,34 @@ def render_sets(
         gaussians._features_asg = torch.load(asg_path).cuda()
 
         print("ASG loaded with shape:", gaussians._features_asg.shape)
+
+        normal_delta_path = os.path.join(
+            dataset.model_path,
+            f"point_cloud/iteration_{scene.loaded_iter}/normal_delta.pt"
+        )
+        if os.path.exists(normal_delta_path):
+            normal_delta = torch.load(normal_delta_path).cuda()
+            if normal_delta.shape[0] == gaussians.get_xyz.shape[0]:
+                gaussians._normal_delta = normal_delta
+                gaussians.use_normal_delta = True
+                print("Normal delta loaded with shape:", gaussians._normal_delta.shape)
+            else:
+                print(
+                    "Skipping normal_delta.pt due to shape mismatch:",
+                    normal_delta.shape,
+                    gaussians.get_xyz.shape,
+                )
         
-        specular_mlp = SpecularModel(dataset.asg_degree, dataset.is_real, dataset.is_indoor)
+        specular_mlp = SpecularModel(
+            dataset.asg_degree,
+            dataset.is_real,
+            dataset.is_indoor,
+            getattr(dataset, "asg_num_theta", -1),
+            getattr(dataset, "asg_num_phi", -1),
+            getattr(dataset, "specular_hidden", -1),
+            getattr(dataset, "specular_layers", -1),
+            getattr(dataset, "real_use_reflection_dir", False),
+        )
         specular_mlp.load_weights(dataset.model_path, iteration=scene.loaded_iter)
 
         # --------------------------------------------------------

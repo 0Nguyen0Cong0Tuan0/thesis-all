@@ -168,6 +168,10 @@ class Scene:
             self.gaussians.get_asg_features.detach().cpu(),
             os.path.join(path, "asg.pt")
         )
+        torch.save(
+            self.gaussians._normal_delta.detach().cpu(),
+            os.path.join(path, "normal_delta.pt")
+        )
     # ------------------------------------------------------------
     # GET CAMERAS
     # ------------------------------------------------------------

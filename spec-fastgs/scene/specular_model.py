@@ -8,8 +8,35 @@ from utils.general_utils import get_expon_lr_func, get_linear_noise_func
 
 
 class SpecularModel:
-    def __init__(self, asg_degree=24, is_real=False, is_indoor=False):
-        self.specular = SpecularNetworkReal(asg_degree, is_indoor).cuda() if is_real else SpecularNetwork(asg_degree).cuda()
+    def __init__(
+        self,
+        asg_degree=24,
+        is_real=False,
+        is_indoor=False,
+        asg_num_theta=-1,
+        asg_num_phi=-1,
+        specular_hidden=-1,
+        specular_layers=-1,
+        real_use_reflection_dir=False,
+    ):
+        if is_real:
+            self.specular = SpecularNetworkReal(
+                asg_degree,
+                is_indoor,
+                asg_num_theta,
+                asg_num_phi,
+                specular_hidden,
+                specular_layers,
+                real_use_reflection_dir,
+            ).cuda()
+        else:
+            self.specular = SpecularNetwork(
+                asg_degree,
+                asg_num_theta,
+                asg_num_phi,
+                specular_hidden,
+                specular_layers,
+            ).cuda()
         self.optimizer = None
         self.spatial_lr_scale = 5
 

@@ -11,23 +11,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gaussian_renderer import render_fastgs
 from scene import Scene, GaussianModel
+from utils.graphics_utils import patch_offsets, patch_warp
 from arguments import ModelParams, PipelineParams
+from extract_reflection_prior import get_multi_view_neighbor, compute_depth_edge_mask
 from collections import defaultdict
-
-# This diagnostic depended on a multi-view PGSR-style reflection-score pipeline
-# (get_multi_view_neighbor / compute_depth_edge_mask in extract_reflection_prior.py,
-# patch_offsets / patch_warp in utils/graphics_utils.py, and
-# GaussianModel.get_points_from_depth / get_points_depth_in_depth_map) that has
-# since been removed in favor of the simpler per-pixel Tan-Ikeuchi/Shafer priors
-# extract_reflection_prior.py uses today. The function below still calls all of
-# those removed symbols, so this script is disabled until it's rewritten against
-# the current prior pipeline (or the multi-view helpers are restored).
-raise RuntimeError(
-    "experiment/debug_ref_score.py is disabled: it depends on multi-view reflection-"
-    "score helpers that no longer exist in extract_reflection_prior.py / "
-    "utils/graphics_utils.py / scene/gaussian_model.py. Rewrite it against the current "
-    "Tan-Ikeuchi/Shafer prior pipeline before use."
-)
 
 def save_heatmap(tensor, path, cmap='gray'):
     # Normalize tensor to 0-255

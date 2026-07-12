@@ -47,6 +47,11 @@ class ParamGroup:
 class ModelParams(ParamGroup): 
     def __init__(self, parser, sentinel=False):
         self.asg_degree = 24
+        self.asg_num_theta = -1
+        self.asg_num_phi = -1
+        self.specular_hidden = -1
+        self.specular_layers = -1
+        self.real_use_reflection_dir = False
         self.is_real = False
         self.is_indoor = False
 
@@ -81,8 +86,9 @@ class OptimizationParams(ParamGroup):
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
         self.position_lr_max_steps = 30_000
-        self.feature_lr = 0.0025
-        self.opacity_lr = 0.025
+        self.feature_lr = 0.0025 
+        self.shfeature_lr = 0.005 
+        self.opacity_lr = 0.025 
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001
         self.percent_dense = 0.001
@@ -123,12 +129,46 @@ class OptimizationParams(ParamGroup):
         self.f_rest_interval_mid = 32
         self.f_rest_interval_late = 64
         
+        # Representation Capacity / Role Separation
+        self.use_sh_spec_mask = False
+        self.sh_spec_mask_threshold = 0.7
+        self.sh_spec_grad_scale = 0.0
+        self.sh_spec_mask_start = 3000
+        self.sh_spec_min_metric_count = 1
+        self.use_asg_residual_supervision = False
+        self.lambda_asg_residual = 0.0
+        self.lambda_asg_leak = 0.0
+        self.asg_residual_start = 8000
+        self.asg_residual_interval = 16
+        self.asg_residual_ref_threshold = 0.75
+
+        # Supervision Signal
+        self.lambda_spec_l1_weight = 0.0
+        self.lambda_spec_reg = 0.0
+
+        # Normal Quality
+        self.use_normal_delta = False
+        self.normal_delta_lr = 0.00005
+        self.normal_delta_start_iter = 3000
+        self.normal_delta_max_norm = 0.1
+        self.lambda_normal_delta_reg = 0.0
+        self.lambda_normal_smooth = 0.0
+        self.normal_smooth_start_iter = 3000
+        self.normal_smooth_interval = 16
+        self.normal_smooth_max_points = 2048
+        self.normal_smooth_k = 8
+        self.normal_smooth_use_ref_mask = False
+        
         # Shafer/Klinker Prior
         self.ref_prior_method = "tan"
         self.ti_thresh = 0.35
         self.ti_bright = 0.6
         self.sk_intensity = 0.7
         self.sk_saturation = 0.2
+        self.tophat_val_thresh = 0.75
+        self.tophat_sat_thresh = 0.25
+        self.tophat_radius = 12
+        self.tophat_thresh = 0.08
         self.use_ref_score = False
         self.disable_ref_score = False
         self.use_adaptive_prior = False

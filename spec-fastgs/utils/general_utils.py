@@ -161,15 +161,13 @@ def get_minimum_axis(scales, rotations):
 
     R = build_rotation(rotations)
 
-    # Sigma = R @ diag(s^2) @ R^T, so the world-space direction of the axis
-    # with scale s_i is COLUMN i of R (not row i) — gather along dim=2.
     R_sorted = torch.gather(
         R,
-        dim=2,
-        index=sorted_idx[:, None, :].repeat(1, 3, 1)
+        dim=1,
+        index=sorted_idx[:, :, None].repeat(1, 1, 3)
     ).squeeze()
 
-    x_axis = R_sorted[:, :, 0]
+    x_axis = R_sorted[:, 0, :]
     return x_axis
 
 
