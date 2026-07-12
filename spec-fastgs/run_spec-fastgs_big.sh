@@ -3,116 +3,134 @@
 # ============================================================
 # SPEC-FASTGS BIG RUN SCRIPT
 # ============================================================
+# Every variable below uses the bash "default-if-unset" pattern
+# (VAR=${VAR:-default}) so callers can override any of them by exporting
+# an env var before invoking this script, e.g.:
+#   CUDA_VISIBLE_DEVICES=1 ASG_DEGREE=48 OUTPUT_SUFFIX=_asg48_ref bash run_spec-fastgs_big.sh
+# Plain `VAR=value` assignment (the old style) would silently clobber any
+# caller-provided override -- that was a real bug (every override from the
+# notebook's parallel-sweep cells, including CUDA_VISIBLE_DEVICES itself,
+# was being ignored). Do not revert to plain assignment.
 
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 
 # ------------------------------------------------------------
 # Dataset / Output
 # ------------------------------------------------------------
-DATA_ROOT=./datasets/mipnerf360
-OUTPUT_ROOT=./output
-SCENE=counter
-IMAGES=images_8
+DATA_ROOT=${DATA_ROOT:-./datasets/mipnerf360}
+OUTPUT_ROOT=${OUTPUT_ROOT:-./output}
+SCENE=${SCENE:-counter}
+IMAGES=${IMAGES:-images_8}
+# Appended to the output dir name (./output/${SCENE}${OUTPUT_SUFFIX}) so
+# parallel/sequential sweeps against the same scene don't collide or
+# overwrite each other. Empty by default -> exact old behavior (./output/${SCENE}).
+OUTPUT_SUFFIX=${OUTPUT_SUFFIX:-}
 
 # ------------------------------------------------------------
 # Core Training / Representation
 # ------------------------------------------------------------
-ASG_DEGREE=64
-ASG_NUM_THETA=-1
-ASG_NUM_PHI=-1
-SPECULAR_HIDDEN=-1
-SPECULAR_LAYERS=-1
-REAL_USE_REFLECTION_DIR=False
-NUM_SCORE_CAMERAS=10
+ASG_DEGREE=${ASG_DEGREE:-64}
+ASG_NUM_THETA=${ASG_NUM_THETA:--1}
+ASG_NUM_PHI=${ASG_NUM_PHI:--1}
+SPECULAR_HIDDEN=${SPECULAR_HIDDEN:--1}
+SPECULAR_LAYERS=${SPECULAR_LAYERS:--1}
+REAL_USE_REFLECTION_DIR=${REAL_USE_REFLECTION_DIR:-False}
+NUM_SCORE_CAMERAS=${NUM_SCORE_CAMERAS:-10}
 
 # ------------------------------------------------------------
 # Reflection Prior Extraction
 # ------------------------------------------------------------
-EXTRACT_REF_PRIOR=True
-BACKUP_REF_PRIOR=True
-REF_PRIOR_METHOD=tan
-TI_THRESH=0.35
-TI_BRIGHT=0.6
-SK_INTENSITY=0.65
-SK_SATURATION=0.3
+EXTRACT_REF_PRIOR=${EXTRACT_REF_PRIOR:-True}
+BACKUP_REF_PRIOR=${BACKUP_REF_PRIOR:-True}
+REF_PRIOR_METHOD=${REF_PRIOR_METHOD:-tan}
+TI_THRESH=${TI_THRESH:-0.35}
+TI_BRIGHT=${TI_BRIGHT:-0.6}
+SK_INTENSITY=${SK_INTENSITY:-0.65}
+SK_SATURATION=${SK_SATURATION:-0.3}
+# shafer_tophat only (ref_prior_method=shafer_tophat) -- see
+# implementation/Locator_Consistency/Locator_Consistency_plan.md
+TOPHAT_VAL_THRESH=${TOPHAT_VAL_THRESH:-0.75}
+TOPHAT_SAT_THRESH=${TOPHAT_SAT_THRESH:-0.25}
+TOPHAT_RADIUS=${TOPHAT_RADIUS:-12}
+TOPHAT_THRESH=${TOPHAT_THRESH:-0.08}
 
 # ------------------------------------------------------------
 # Geometry Coverage Ablation - Shared Switches
 # ------------------------------------------------------------
-USE_REF_SCORE=True
-USE_ADAPTIVE_PRIOR=True
+USE_REF_SCORE=${USE_REF_SCORE:-True}
+USE_ADAPTIVE_PRIOR=${USE_ADAPTIVE_PRIOR:-True}
 
 # ------------------------------------------------------------
 # Geometry Coverage B1 - Scene-Relative RefScore Budget
 #   -1 means auto budget from initial Gaussian count.
 # ------------------------------------------------------------
-MAX_REFSCORE_GAUSSIANS=-1
-REFSCORE_BUDGET_MULTIPLIER=10.0
-REFSCORE_BUDGET_MIN=200000
-REFSCORE_BUDGET_MAX=1000000
+MAX_REFSCORE_GAUSSIANS=${MAX_REFSCORE_GAUSSIANS:--1}
+REFSCORE_BUDGET_MULTIPLIER=${REFSCORE_BUDGET_MULTIPLIER:-10.0}
+REFSCORE_BUDGET_MIN=${REFSCORE_BUDGET_MIN:-200000}
+REFSCORE_BUDGET_MAX=${REFSCORE_BUDGET_MAX:-1000000}
 
 # ------------------------------------------------------------
 # Geometry Coverage B2 - Soft RefScore Decay
 # ------------------------------------------------------------
-REFSCORE_DECAY_POWER=1.0
-REFSCORE_MIN_STRENGTH=0.15
-REFSCORE_THRESHOLD_MIN=0.5
-REFSCORE_THRESHOLD_MAX=0.9
+REFSCORE_DECAY_POWER=${REFSCORE_DECAY_POWER:-1.0}
+REFSCORE_MIN_STRENGTH=${REFSCORE_MIN_STRENGTH:-0.15}
+REFSCORE_THRESHOLD_MIN=${REFSCORE_THRESHOLD_MIN:-0.5}
+REFSCORE_THRESHOLD_MAX=${REFSCORE_THRESHOLD_MAX:-0.9}
 
 # ------------------------------------------------------------
 # Geometry Coverage A - Residual-Adaptive Prior
 #   Active only when USE_ADAPTIVE_PRIOR=True.
 # ------------------------------------------------------------
-ADAPTIVE_PRIOR_START=5000
-ADAPTIVE_PRIOR_INTERVAL=3000
-ADAPTIVE_PRIOR_NUM_CAMERAS=20
-ADAPTIVE_PRIOR_EMA=0.7
+ADAPTIVE_PRIOR_START=${ADAPTIVE_PRIOR_START:-5000}
+ADAPTIVE_PRIOR_INTERVAL=${ADAPTIVE_PRIOR_INTERVAL:-3000}
+ADAPTIVE_PRIOR_NUM_CAMERAS=${ADAPTIVE_PRIOR_NUM_CAMERAS:-20}
+ADAPTIVE_PRIOR_EMA=${ADAPTIVE_PRIOR_EMA:-0.7}
 
 # ------------------------------------------------------------
 # ASG / SH Scheduling Ablation
 # ------------------------------------------------------------
-FULL_ASG_INTERVAL=0
-F_REST_WARMUP_UNTIL=0
-F_REST_INTERVAL_EARLY=16
-F_REST_INTERVAL_MID=32
-F_REST_INTERVAL_LATE=64
+FULL_ASG_INTERVAL=${FULL_ASG_INTERVAL:-0}
+F_REST_WARMUP_UNTIL=${F_REST_WARMUP_UNTIL:-0}
+F_REST_INTERVAL_EARLY=${F_REST_INTERVAL_EARLY:-16}
+F_REST_INTERVAL_MID=${F_REST_INTERVAL_MID:-32}
+F_REST_INTERVAL_LATE=${F_REST_INTERVAL_LATE:-64}
 
 # ------------------------------------------------------------
 # Representation Capacity R1/R2 - SH/ASG Role Separation
 # ------------------------------------------------------------
-USE_SH_SPEC_MASK=False
-SH_SPEC_GRAD_SCALE=0.75
-SH_SPEC_MASK_START=8000
-SH_SPEC_MASK_THRESHOLD=0.75
-SH_SPEC_MIN_METRIC_COUNT=2
+USE_SH_SPEC_MASK=${USE_SH_SPEC_MASK:-False}
+SH_SPEC_GRAD_SCALE=${SH_SPEC_GRAD_SCALE:-0.75}
+SH_SPEC_MASK_START=${SH_SPEC_MASK_START:-8000}
+SH_SPEC_MASK_THRESHOLD=${SH_SPEC_MASK_THRESHOLD:-0.75}
+SH_SPEC_MIN_METRIC_COUNT=${SH_SPEC_MIN_METRIC_COUNT:-2}
 
-USE_ASG_RESIDUAL_SUPERVISION=False
-LAMBDA_ASG_RESIDUAL=0.0
-LAMBDA_ASG_LEAK=0.0
-ASG_RESIDUAL_START=8000
-ASG_RESIDUAL_INTERVAL=16
-ASG_RESIDUAL_REF_THRESHOLD=0.75
+USE_ASG_RESIDUAL_SUPERVISION=${USE_ASG_RESIDUAL_SUPERVISION:-False}
+LAMBDA_ASG_RESIDUAL=${LAMBDA_ASG_RESIDUAL:-0.0}
+LAMBDA_ASG_LEAK=${LAMBDA_ASG_LEAK:-0.0}
+ASG_RESIDUAL_START=${ASG_RESIDUAL_START:-8000}
+ASG_RESIDUAL_INTERVAL=${ASG_RESIDUAL_INTERVAL:-16}
+ASG_RESIDUAL_REF_THRESHOLD=${ASG_RESIDUAL_REF_THRESHOLD:-0.75}
 
 # ------------------------------------------------------------
 # Supervision Signal S - Specular-weighted loss / ASG regularizer
 # ------------------------------------------------------------
-LAMBDA_SPEC_L1_WEIGHT=0.0
-LAMBDA_SPEC_REG=0.0
+LAMBDA_SPEC_L1_WEIGHT=${LAMBDA_SPEC_L1_WEIGHT:-0.0}
+LAMBDA_SPEC_REG=${LAMBDA_SPEC_REG:-0.0}
 
 # ------------------------------------------------------------
 # Normal Quality N - Learned delta / Gaussian-space smoothness
 # ------------------------------------------------------------
-USE_NORMAL_DELTA=False
-NORMAL_DELTA_LR=0.00005
-NORMAL_DELTA_START_ITER=3000
-NORMAL_DELTA_MAX_NORM=0.05
-LAMBDA_NORMAL_DELTA_REG=0.001
-LAMBDA_NORMAL_SMOOTH=0.0001
-NORMAL_SMOOTH_START_ITER=8000
-NORMAL_SMOOTH_INTERVAL=16
-NORMAL_SMOOTH_MAX_POINTS=2048
-NORMAL_SMOOTH_K=8
-NORMAL_SMOOTH_USE_REF_MASK=False
+USE_NORMAL_DELTA=${USE_NORMAL_DELTA:-False}
+NORMAL_DELTA_LR=${NORMAL_DELTA_LR:-0.00005}
+NORMAL_DELTA_START_ITER=${NORMAL_DELTA_START_ITER:-3000}
+NORMAL_DELTA_MAX_NORM=${NORMAL_DELTA_MAX_NORM:-0.05}
+LAMBDA_NORMAL_DELTA_REG=${LAMBDA_NORMAL_DELTA_REG:-0.001}
+LAMBDA_NORMAL_SMOOTH=${LAMBDA_NORMAL_SMOOTH:-0.0001}
+NORMAL_SMOOTH_START_ITER=${NORMAL_SMOOTH_START_ITER:-8000}
+NORMAL_SMOOTH_INTERVAL=${NORMAL_SMOOTH_INTERVAL:-16}
+NORMAL_SMOOTH_MAX_POINTS=${NORMAL_SMOOTH_MAX_POINTS:-2048}
+NORMAL_SMOOTH_K=${NORMAL_SMOOTH_K:-8}
+NORMAL_SMOOTH_USE_REF_MASK=${NORMAL_SMOOTH_USE_REF_MASK:-False}
 
 REF_SCORE_FLAG=""
 if [ "$USE_REF_SCORE" = "True" ]; then
@@ -149,16 +167,22 @@ if [ "$NORMAL_SMOOTH_USE_REF_MASK" = "True" ]; then
     NORMAL_SMOOTH_REF_FLAG="--normal_smooth_use_ref_mask"
 fi
 
+OUTPUT_DIR="${OUTPUT_ROOT}/${SCENE}${OUTPUT_SUFFIX}"
+
 echo "========================================================================"
 echo " Starting spec-fastgs BIG Training Pipeline"
 echo "========================================================================"
 echo "Dataset Path : ${DATA_ROOT}/${SCENE}"
 echo "Scene Name   : $SCENE"
-echo "Output Path  : ${OUTPUT_ROOT}/${SCENE}"
+echo "Output Path  : ${OUTPUT_DIR}"
+echo "CUDA Device  : ${CUDA_VISIBLE_DEVICES}"
+echo "ASG Degree   : ${ASG_DEGREE}"
+echo "RefPriorMethod: ${REF_PRIOR_METHOD}"
 echo "Use RefScore : ${USE_REF_SCORE}"
 echo "AdaptivePrior: ${USE_ADAPTIVE_PRIOR}"
 echo "SH Spec Mask : ${USE_SH_SPEC_MASK}"
 echo "Normal Delta : ${USE_NORMAL_DELTA}"
+echo "FullASGInterv: ${FULL_ASG_INTERVAL}"
 echo "========================================================================"
 
 # 0. EXTRACT REFLECTION PRIOR
@@ -181,7 +205,11 @@ if [ "$USE_REF_SCORE" = "True" ] && [ "$EXTRACT_REF_PRIOR" = "True" ]; then
         --ti_thresh ${TI_THRESH} \
         --ti_bright ${TI_BRIGHT} \
         --sk_intensity ${SK_INTENSITY} \
-        --sk_saturation ${SK_SATURATION}
+        --sk_saturation ${SK_SATURATION} \
+        --tophat_val_thresh ${TOPHAT_VAL_THRESH} \
+        --tophat_sat_thresh ${TOPHAT_SAT_THRESH} \
+        --tophat_radius ${TOPHAT_RADIUS} \
+        --tophat_thresh ${TOPHAT_THRESH}
 else
     echo "[0/4] Skipping extract_reflection_prior.py"
 fi
@@ -190,7 +218,7 @@ fi
 echo "[1/4] Running train.py..."
 python train.py \
     -s ${DATA_ROOT}/${SCENE} \
-    -m ${OUTPUT_ROOT}/${SCENE} \
+    -m ${OUTPUT_DIR} \
     -i ${IMAGES} \
     --eval \
     --iterations 30000 \
@@ -250,6 +278,10 @@ python train.py \
     --ti_bright ${TI_BRIGHT} \
     --sk_intensity ${SK_INTENSITY} \
     --sk_saturation ${SK_SATURATION} \
+    --tophat_val_thresh ${TOPHAT_VAL_THRESH} \
+    --tophat_sat_thresh ${TOPHAT_SAT_THRESH} \
+    --tophat_radius ${TOPHAT_RADIUS} \
+    --tophat_thresh ${TOPHAT_THRESH} \
     ${REF_SCORE_FLAG} \
     ${ADAPTIVE_PRIOR_FLAG} \
     ${SH_SPEC_MASK_FLAG} \
@@ -261,10 +293,10 @@ python train.py \
 # 2. RENDER
 echo "[2/4] Running render.py..."
 python render.py \
-    -m ${OUTPUT_ROOT}/${SCENE} \
+    -m ${OUTPUT_DIR} \
     --skip_train
 
 # 3. METRICS
 echo "[3/4] Running metrics.py..."
 python metrics.py \
-    -m ${OUTPUT_ROOT}/${SCENE}
+    -m ${OUTPUT_DIR}

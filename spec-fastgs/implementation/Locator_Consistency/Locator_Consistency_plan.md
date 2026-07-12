@@ -337,6 +337,37 @@ So sánh 3-way (R038 tan / R046a shafer / R046b shafer_tophat) cho phép quy k�
 gốc của bất kỳ cải thiện nào, thay vì gộp 2 thay đổi (rời `tan` + thêm top-hat) vào một run
 duy nhất.
 
+**Cập nhật (2026-07-12) — đã wire vào Kaggle notebook, phát hiện + sửa 1 bug hạ tầng trước
+khi wire**: `run_spec-fastgs_big.sh` trước đây gán MỌI biến (`SCENE`, `ASG_DEGREE`,
+`CUDA_VISIBLE_DEVICES`, `REF_PRIOR_METHOD`, ...) bằng cú pháp gán cứng (`VAR=value`), không
+phải `VAR=${VAR:-value}`. Hệ quả: mọi override từ notebook qua env var (kể cả cell 14 sweep
+ASG_DEGREE=32/48 có sẵn từ trước) bị **âm thầm ghi đè và bỏ qua** — cả 2 leg "song song" của
+sweep ASG thực ra đều chạy trên GPU 0 (vì `export CUDA_VISIBLE_DEVICES=0` cứng ở đầu file),
+và `OUTPUT_SUFFIX` chưa từng được dùng ở đâu trong script nên 2 leg còn race-write vào cùng
+`output/counter`. Đã sửa toàn bộ sang `${VAR:-default}` + thêm `OUTPUT_SUFFIX` vào đường dẫn
+output (`${OUTPUT_ROOT}/${SCENE}${OUTPUT_SUFFIX}`) — verify bằng cách chạy riêng phần
+gán-biến+echo của script với override giả lập, xác nhận `CUDA_VISIBLE_DEVICES`, `ASG_DEGREE`,
+`REF_PRIOR_METHOD`, `OUTPUT_SUFFIX` đều nhận đúng giá trị override. Điều này sửa luôn cho cả
+sweep ASG_DEGREE cũ, không chỉ locator experiment mới.
+
+`hcmus-spec-fastgs-thesis.ipynb` được thêm 4 cell mới sau cell archive cũ (không sửa cell
+0-16 hiện có, giữ nguyên pipeline ASG sweep cũ chạy được):
+1. Cell cấu hình `LOCATOR_METHODS = ["shafer", "shafer_tophat"]`.
+2. Cell `%%bash` chạy R046a (`shafer`) rồi R046b (`shafer_tophat`) **tuần tự** (không song
+   song, vì 2 leg dùng chung `reflection_prior/` của cùng 1 scene — chạy song song sẽ ghi đè
+   nhau; khác với sweep ASG_DEGREE vốn share chung 1 prior `tan` hợp lệ). Mỗi leg tự
+   `EXTRACT_REF_PRIOR=True` + `BACKUP_REF_PRIOR=True` (script tự backup prior cũ trước khi
+   ghi đè), `OUTPUT_SUFFIX=_${METHOD}_ref` để tách thư mục output.
+3. Cell so sánh nhanh: đọc `results_grouped.json` + `train_info.json` của cả 2 output dir,
+   in PSNR/SSIM/LPIPS + Spec_PSNR/ASG_Residual_IoU/ASG_Energy_In_Residual song song — đây là
+   GATE nhanh, không phải phân tích cuối; vẫn cần đối chiếu tay với số R038 trong
+   `run_note.md`.
+4. Cell archive output thành `.zip`, theo đúng pattern cell 16 cũ.
+
+`python -m py_compile` + `bash -n` sạch trên script đã sửa; `nbformat.validate()` sạch trên
+notebook đã thêm cell. Chưa chạy thật trên Kaggle (cần GPU) — đây là bước tiếp theo do người
+dùng thực hiện.
+
 ### Phase 0b (song song, độc lập, rủi ro = 0): `full_asg_interval` ablation
 
 Không cần sửa code. Chạy lại **R038** (baseline hiện tại) với
