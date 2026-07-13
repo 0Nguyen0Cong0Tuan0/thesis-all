@@ -172,16 +172,13 @@ class ASGRenderReal(torch.nn.Module):
         num_phi=4,
         is_indoor=False,
         num_layers=None,
-        use_reflection_dir=False,
     ):
         super(ASGRenderReal, self).__init__()
 
         self.num_theta = num_theta
         self.num_phi = num_phi
-        self.ch_normal_dot_viewdir = 1 if use_reflection_dir else 0
-        self.in_mlpC = 2 * viewpe * 3 + 3 + self.num_theta * self.num_phi * 2 + self.ch_normal_dot_viewdir
+        self.in_mlpC = 2 * viewpe * 3 + 3 + self.num_theta * self.num_phi * 2
         self.viewpe = viewpe
-        self.use_reflection_dir = use_reflection_dir
         self.ree_function = RenderingEquationEncoding(self.num_theta, self.num_phi, 'cuda')
 
         if num_layers is None or num_layers <= 0:
@@ -190,29 +187,14 @@ class ASGRenderReal(torch.nn.Module):
 
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
 
-    def reflect(self, viewdir, normal):
-        out = 2 * (viewdir * normal).sum(dim=-1, keepdim=True) * normal - viewdir
-        return out
-
-    def safe_normalize(self, x, eps=1e-8):
-        return x / (torch.norm(x, dim=-1, keepdim=True) + eps)
-
     def forward(self, pts, viewdirs, features, normal):
         asg_params = features.view(-1, self.num_theta, self.num_phi, 4)  # [N, 8, 16, 4]
         a, la, mu = torch.split(asg_params, [2, 1, 1], dim=-1)
 
-        if self.use_reflection_dir:
-            ree_dir = self.safe_normalize(self.reflect(-viewdirs, normal))
-        else:
-            ree_dir = viewdirs
-
-        color_feature = self.ree_function(ree_dir, a, la, mu)
+        color_feature = self.ree_function(viewdirs, a, la, mu)
         color_feature = color_feature.view(color_feature.size(0), -1)  # [N, 256]
 
         indata = [color_feature]
-        if self.use_reflection_dir:
-            normal_dot_viewdir = ((-viewdirs) * normal).sum(dim=-1, keepdim=True)
-            indata += [normal_dot_viewdir]
         if self.viewpe > -1:
             indata += [viewdirs]
         if self.viewpe > 0:
@@ -268,7 +250,6 @@ class SpecularNetworkReal(nn.Module):
         num_phi=-1,
         hidden_feature=-1,
         specular_layers=-1,
-        use_reflection_dir=False,
     ):
         super(SpecularNetworkReal, self).__init__()
 
@@ -281,7 +262,6 @@ class SpecularNetworkReal(nn.Module):
             self.specular_layers = 2 if is_indoor else 1
         else:
             self.specular_layers = int(specular_layers)
-        self.use_reflection_dir = use_reflection_dir
         self.asg_hidden = self.num_theta * self.num_phi * 4
 
         self.gaussian_feature = nn.Linear(self.asg_feature, self.asg_hidden)
@@ -293,7 +273,6 @@ class SpecularNetworkReal(nn.Module):
             self.num_phi,
             is_indoor,
             self.specular_layers,
-            self.use_reflection_dir,
         )
 
     def forward(self, x, view, normal):

@@ -17,7 +17,6 @@ class SpecularModel:
         asg_num_phi=-1,
         specular_hidden=-1,
         specular_layers=-1,
-        real_use_reflection_dir=False,
     ):
         if is_real:
             self.specular = SpecularNetworkReal(
@@ -27,7 +26,6 @@ class SpecularModel:
                 asg_num_phi,
                 specular_hidden,
                 specular_layers,
-                real_use_reflection_dir,
             ).cuda()
         else:
             self.specular = SpecularNetwork(

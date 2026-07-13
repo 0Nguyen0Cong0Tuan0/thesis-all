@@ -132,6 +132,14 @@ def render_set(
             os.path.join(spec_path, f"{idx:05d}_residual_real.png")
         )
 
+        # 5) residual_remaining.png: clamp(GT - Final, min=0)
+        # This shows what is still missing after SH + ASG have both contributed.
+        residual_remaining = torch.clamp(gt - rendering, min=0.0)
+        torchvision.utils.save_image(
+            residual_remaining,
+            os.path.join(spec_path, f"{idx:05d}_residual_remaining.png")
+        )
+
         # --------------------------------------------------------
         # SAVE RENDERS (original behavior)
         # --------------------------------------------------------
@@ -192,23 +200,6 @@ def render_sets(
 
         print("ASG loaded with shape:", gaussians._features_asg.shape)
 
-        normal_delta_path = os.path.join(
-            dataset.model_path,
-            f"point_cloud/iteration_{scene.loaded_iter}/normal_delta.pt"
-        )
-        if os.path.exists(normal_delta_path):
-            normal_delta = torch.load(normal_delta_path).cuda()
-            if normal_delta.shape[0] == gaussians.get_xyz.shape[0]:
-                gaussians._normal_delta = normal_delta
-                gaussians.use_normal_delta = True
-                print("Normal delta loaded with shape:", gaussians._normal_delta.shape)
-            else:
-                print(
-                    "Skipping normal_delta.pt due to shape mismatch:",
-                    normal_delta.shape,
-                    gaussians.get_xyz.shape,
-                )
-        
         specular_mlp = SpecularModel(
             dataset.asg_degree,
             dataset.is_real,
@@ -217,7 +208,6 @@ def render_sets(
             getattr(dataset, "asg_num_phi", -1),
             getattr(dataset, "specular_hidden", -1),
             getattr(dataset, "specular_layers", -1),
-            getattr(dataset, "real_use_reflection_dir", False),
         )
         specular_mlp.load_weights(dataset.model_path, iteration=scene.loaded_iter)
 

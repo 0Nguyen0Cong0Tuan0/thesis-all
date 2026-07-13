@@ -20,6 +20,7 @@ IMAGES=images_8
 # Prior method:
 #   tan    = Tan-Ikeuchi-style prior, older spec-fastgs behavior
 #   shafer = Shafer/Klinker-style prior
+#   hybrid = softer confidence prior combining several highlight cues
 # REF_PRIOR_METHOD=shafer
 REF_PRIOR_METHOD=tan
 
@@ -30,6 +31,12 @@ TI_BRIGHT=0.6
 # Shafer/Klinker parameters
 SK_INTENSITY=0.7
 SK_SATURATION=0.2
+
+# Conservative confidence post-processing.
+# Keep these as identity values to reproduce older extracted priors.
+REF_CONF_GAMMA=1.0
+REF_CONF_QUANTILE=0.0
+REF_CONF_SMOOTH_RADIUS=0
 
 # Backup existing reflection_prior before overwrite.
 # Set to False if you intentionally want direct overwrite.
@@ -51,10 +58,18 @@ if [ "$REF_PRIOR_METHOD" = "tan" ]; then
 elif [ "$REF_PRIOR_METHOD" = "shafer" ]; then
     echo "sk_intensity : ${SK_INTENSITY}"
     echo "sk_saturation: ${SK_SATURATION}"
+elif [ "$REF_PRIOR_METHOD" = "hybrid" ]; then
+    echo "ti_thresh    : ${TI_THRESH}"
+    echo "ti_bright    : ${TI_BRIGHT}"
+    echo "sk_intensity : ${SK_INTENSITY}"
+    echo "sk_saturation: ${SK_SATURATION}"
 else
-    echo "ERROR: REF_PRIOR_METHOD must be 'tan' or 'shafer'."
+    echo "ERROR: REF_PRIOR_METHOD must be 'tan', 'shafer', or 'hybrid'."
     exit 1
 fi
+echo "conf_gamma   : ${REF_CONF_GAMMA}"
+echo "conf_quantile: ${REF_CONF_QUANTILE}"
+echo "smooth_radius: ${REF_CONF_SMOOTH_RADIUS}"
 echo "========================================================================"
 
 if [ "$BACKUP_EXISTING" = "True" ] && [ -d "$PRIOR_DIR" ]; then
@@ -74,7 +89,10 @@ python extract_reflection_prior.py \
     --ti_thresh ${TI_THRESH} \
     --ti_bright ${TI_BRIGHT} \
     --sk_intensity ${SK_INTENSITY} \
-    --sk_saturation ${SK_SATURATION}
+    --sk_saturation ${SK_SATURATION} \
+    --ref_conf_gamma ${REF_CONF_GAMMA} \
+    --ref_conf_quantile ${REF_CONF_QUANTILE} \
+    --ref_conf_smooth_radius ${REF_CONF_SMOOTH_RADIUS}
 
 echo "========================================================================"
 echo " Reflection prior extraction completed."

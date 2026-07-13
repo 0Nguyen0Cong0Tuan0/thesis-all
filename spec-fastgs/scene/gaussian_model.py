@@ -72,10 +72,6 @@ class GaussianModel:
 
         self._features_asg = torch.empty(0)
         self._normal_delta = torch.empty(0)
-        self.use_normal_delta = False
-        self.normal_delta_lr = 0.0
-        self.normal_delta_start_iter = 0
-        self.normal_delta_max_norm = 0.0
 
         self.setup_functions()
 
@@ -162,7 +158,7 @@ class GaussianModel:
 
         if normal_delta is None or normal_delta.shape[0] != self._xyz.shape[0]:
             normal_delta = torch.zeros((self._xyz.shape[0], 3), device=self._xyz.device)
-        self._normal_delta = nn.Parameter(normal_delta.requires_grad_(True))
+        self._normal_delta = normal_delta.detach()
 
         # Recreate optimizers / param groups with training_args then load states if present
         self.training_setup(training_args)
@@ -228,8 +224,6 @@ class GaussianModel:
     
     def get_normal_axis(self, dir_pp_normalized=None, return_delta=False):
         normal_axis = self.get_minimum_axis
-        if self.use_normal_delta and self._normal_delta.numel() > 0:
-            normal_axis = normal_axis.detach() + self._normal_delta
         normal_axis, positive = flip_align_view(normal_axis, dir_pp_normalized)
         normal = normal_axis / normal_axis.norm(dim=1, keepdim=True).clamp_min(1e-6)  # (N, 3)
         if return_delta:
@@ -267,8 +261,7 @@ class GaussianModel:
 
         asg_features = torch.zeros((fused_color.shape[0], self.asg_degree)).cuda()
         self._features_asg = nn.Parameter(asg_features.requires_grad_(True))
-        normal_delta = torch.zeros((fused_color.shape[0], 3), device="cuda")
-        self._normal_delta = nn.Parameter(normal_delta.requires_grad_(True))
+        self._normal_delta = torch.zeros((fused_color.shape[0], 3), device="cuda")
 
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._rotation = nn.Parameter(rots.requires_grad_(True))
@@ -280,13 +273,8 @@ class GaussianModel:
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.xyz_gradient_accum_abs = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-        self.use_normal_delta = getattr(training_args, "use_normal_delta", False)
-        self.normal_delta_lr = getattr(training_args, "normal_delta_lr", 0.0)
-        self.normal_delta_start_iter = getattr(training_args, "normal_delta_start_iter", 0)
-        self.normal_delta_max_norm = getattr(training_args, "normal_delta_max_norm", 0.0)
         if self._normal_delta.numel() == 0 or self._normal_delta.shape[0] != self.get_xyz.shape[0]:
-            normal_delta = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
-            self._normal_delta = nn.Parameter(normal_delta.requires_grad_(True))
+            self._normal_delta = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
 
         l = [
             {'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
@@ -295,8 +283,6 @@ class GaussianModel:
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"}
         ]
-        if self.use_normal_delta:
-            l.append({'params': [self._normal_delta], 'lr': 0.0, "name": "normal_delta"})
         sh_l = [{'params': [self._features_rest], 'lr': training_args.highfeature_lr / 20.0, "name": "f_rest"}]
         asg_l = [{'params': [self._features_asg], 'lr': training_args.feature_lr, "name": "f_asg"}]
 
@@ -328,7 +314,6 @@ class GaussianModel:
 
     def optimizer_step(self, iteration, skip_sh=False, f_rest_grad_mask=None, f_rest_grad_scale=0.0):
         ''' An optimization scheduler. The goal is similar to the sparse Adam of taming 3dgs.'''
-        self._update_normal_delta_lr(iteration)
         self._apply_f_rest_grad_mask(f_rest_grad_mask, f_rest_grad_scale)
 
         if getattr(self, 'asg_optimizer', None) is not None:
@@ -359,25 +344,6 @@ class GaussianModel:
 
         if not stepped_f_rest and self._should_step_f_rest(iteration, skip_sh):
             self._step_f_rest_optimizer()
-        self._clamp_normal_delta()
-
-    def _update_normal_delta_lr(self, iteration):
-        if not self.use_normal_delta or self.optimizer is None:
-            return
-        lr = self.normal_delta_lr if iteration >= self.normal_delta_start_iter else 0.0
-        for param_group in self.optimizer.param_groups:
-            if param_group["name"] == "normal_delta":
-                param_group["lr"] = lr
-
-    def _clamp_normal_delta(self):
-        if not self.use_normal_delta or self.normal_delta_max_norm <= 0:
-            return
-        if self._normal_delta.numel() == 0:
-            return
-        with torch.no_grad():
-            norm = self._normal_delta.norm(dim=1, keepdim=True).clamp_min(1e-8)
-            scale = torch.clamp(self.normal_delta_max_norm / norm, max=1.0)
-            self._normal_delta.mul_(scale)
 
     def _apply_f_rest_grad_mask(self, f_rest_grad_mask=None, f_rest_grad_scale=0.0):
         if f_rest_grad_mask is None or self._features_rest.grad is None:
@@ -486,8 +452,7 @@ class GaussianModel:
         self._opacity = nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(True))
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
-        normal_delta = torch.zeros((self._xyz.shape[0], 3), device="cuda")
-        self._normal_delta = nn.Parameter(normal_delta.requires_grad_(True))
+        self._normal_delta = torch.zeros((self._xyz.shape[0], 3), device="cuda")
 
         self.active_sh_degree = self.max_sh_degree
 
@@ -537,8 +502,6 @@ class GaussianModel:
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
         self._features_asg = optimizable_tensors["f_asg"]
-        if "normal_delta" in optimizable_tensors:
-            self._normal_delta = optimizable_tensors["normal_delta"]
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
@@ -578,7 +541,7 @@ class GaussianModel:
 
         return optimizable_tensors
 
-    def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_features_asg, new_opacities, new_scaling, new_rotation, new_tmp_radii, new_normal_delta=None):
+    def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_features_asg, new_opacities, new_scaling, new_rotation, new_tmp_radii):
         d = {"xyz": new_xyz,
         "f_dc": new_features_dc,
         "f_rest": new_features_rest,
@@ -586,18 +549,11 @@ class GaussianModel:
         "opacity": new_opacities,
         "scaling" : new_scaling,
         "rotation" : new_rotation}
-        if self.use_normal_delta:
-            if new_normal_delta is None:
-                new_normal_delta = torch.zeros((new_xyz.shape[0], 3), device=new_xyz.device)
-            d["normal_delta"] = new_normal_delta
-
         optimizable_tensors = self.cat_tensors_to_optimizer(d)
         self._xyz = optimizable_tensors["xyz"]
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
         self._features_asg = optimizable_tensors["f_asg"]
-        if "normal_delta" in optimizable_tensors:
-            self._normal_delta = optimizable_tensors["normal_delta"]
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
@@ -625,7 +581,6 @@ class GaussianModel:
         new_features_dc = self._features_dc[selected_pts_mask].repeat(N,1,1)
         new_features_rest = self._features_rest[selected_pts_mask].repeat(N,1,1)
         new_features_asg = self._features_asg[selected_pts_mask].repeat(N,1)
-        new_normal_delta = self._normal_delta[selected_pts_mask].repeat(N,1) if self.use_normal_delta else None
         new_opacity = self._opacity[selected_pts_mask].repeat(N,1)
         new_tmp_radii = self.tmp_radii[selected_pts_mask].repeat(N)
 
@@ -638,7 +593,6 @@ class GaussianModel:
             new_scaling,
             new_rotation,
             new_tmp_radii,
-            new_normal_delta,
         )
 
         prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
@@ -651,7 +605,6 @@ class GaussianModel:
         new_features_dc = self._features_dc[selected_pts_mask]
         new_features_rest = self._features_rest[selected_pts_mask]
         new_features_asg = self._features_asg[selected_pts_mask]
-        new_normal_delta = self._normal_delta[selected_pts_mask] if self.use_normal_delta else None
         new_opacities = self._opacity[selected_pts_mask]
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
@@ -666,7 +619,6 @@ class GaussianModel:
             new_scaling,
             new_rotation,
             new_tmp_radii,
-            new_normal_delta,
         )
 
     def densify_and_prune_fastgs(self, max_screen_size, min_opacity, extent, radii, args, importance_score = None, pruning_score = None):

@@ -6,7 +6,6 @@ import os
 import time
 import imageio
 import numpy as np
-from scipy.ndimage import grey_opening
 from tqdm import tqdm
 from argparse import ArgumentParser
 
@@ -50,51 +49,87 @@ def shafer_klinker_score(img01, intensity_thresh=0.7, sat_thresh=0.2):
     score = Imax * (1.0 - saturation)
     
     final_score = np.where(mask, score, 0.0)
-
+    
     if final_score.max() > 0:
         final_score = final_score / final_score.max()
-
+        
     return final_score
 
-def _disk_footprint(radius):
-    y, x = np.ogrid[-radius:radius + 1, -radius:radius + 1]
-    return (x ** 2 + y ** 2 <= radius ** 2)
+def _normalize_score(score):
+    score = np.nan_to_num(score, nan=0.0, posinf=0.0, neginf=0.0)
+    score = np.clip(score, 0.0, None)
+    score_max = score.max()
+    if score_max > 0:
+        score = score / score_max
+    return score
 
-def shafer_tophat_score(img01, val_thresh=0.75, sat_thresh=0.25, tophat_radius=12, tophat_thresh=0.08):
+def _soft_step(x, center, temperature=0.06):
+    return 1.0 / (1.0 + np.exp(-(x - center) / max(temperature, 1e-6)))
+
+def _box_blur_2d(x, radius):
+    radius = int(radius)
+    if radius <= 0:
+        return x
+
+    padded = np.pad(x, ((radius, radius), (radius, radius)), mode="reflect")
+    acc = np.zeros_like(x, dtype=np.float32)
+    count = 0
+    for dy in range(2 * radius + 1):
+        for dx in range(2 * radius + 1):
+            acc += padded[dy:dy + x.shape[0], dx:dx + x.shape[1]]
+            count += 1
+    return acc / max(count, 1)
+
+def postprocess_score(score, gamma=1.0, quantile=0.0, smooth_radius=0):
     """
-    Shafer/Klinker dichromatic threshold (bright + desaturated) gated by a
-    morphological white top-hat filter on value V. The plain threshold in
-    shafer_klinker_score()/tan_ikeuchi_score() has no spatial-compactness
-    constraint, so it false-positives hard on large flat bright-diffuse
-    regions (white backgrounds, glossy-but-non-specular plastic). Top-hat
-    (V minus its grey-opening by a disk of `tophat_radius`) measures how much
-    a pixel stands out from its local neighborhood, which true highlights do
-    and flat bright surfaces do not.
-
-    Ported from test_specular_algorithms_comparison.ipynb's validated inline
-    fallback for tools/classical_specular_mask.py (that canonical module does
-    not exist in this repo). Measured there on counter/teapot: raw
-    Shafer/Klinker flags ~15% mean / ~25% max pixels; this top-hat-gated
-    version flags ~1.4-1.5% mean, ~4.2% max, with no cherry-picking.
+    Convert a raw specular cue into a conservative confidence map.
+    This is intentionally soft: densification can use broad priors, while
+    supervision/masking should trust only high-confidence regions.
     """
-    maxc = img01.max(axis=-1)
-    minc = img01.min(axis=-1)
-    V = maxc
-    S = np.where(maxc > 1e-6, (maxc - minc) / (maxc + 1e-6), 0.0)
+    score = _normalize_score(score)
+    if smooth_radius > 0:
+        score = _box_blur_2d(score.astype(np.float32), smooth_radius)
+        score = _normalize_score(score)
 
-    raw_mask = (V > val_thresh) & (S < sat_thresh)
+    quantile = float(quantile)
+    if 0.0 < quantile < 1.0 and score.max() > 0:
+        pivot = np.quantile(score.reshape(-1), quantile)
+        score_max = score.max()
+        if score_max > pivot + 1e-6:
+            score = np.clip((score - pivot) / (score_max - pivot + 1e-6), 0.0, 1.0)
+        else:
+            score = (score >= pivot).astype(np.float32)
 
-    opened = grey_opening(V, footprint=_disk_footprint(int(tophat_radius)))
-    tophat = np.clip(V - opened, 0.0, None)
+    gamma = float(gamma)
+    if gamma > 0 and gamma != 1.0:
+        score = np.power(score, gamma)
 
-    mask = raw_mask & (tophat > tophat_thresh)
-    score = tophat * raw_mask
+    return _normalize_score(score)
 
-    final_score = np.where(mask, score, 0.0)
-    if final_score.max() > 0:
-        final_score = final_score / final_score.max()
+def hybrid_confidence_score(
+    img01,
+    ti_thresh=0.35,
+    ti_bright=0.6,
+    sk_intensity=0.65,
+    sk_saturation=0.3,
+):
+    """
+    A softer confidence prior combining Tan-Ikeuchi, Shafer/Klinker, and
+    local highlight contrast. It is still a prior, not ground truth.
+    """
+    Imax = img01.max(axis=-1)
+    Imin = img01.min(axis=-1)
+    saturation = 1.0 - (Imin / (Imax + 1e-6))
 
-    return final_score
+    tan_soft = _soft_step(Imin, ti_thresh) * _soft_step(Imax, ti_bright)
+    shafer_soft = _soft_step(Imax, sk_intensity) * _soft_step(sk_saturation - saturation, 0.0)
+
+    local_mean = _box_blur_2d(Imax.astype(np.float32), radius=3)
+    local_highlight = _normalize_score(np.clip(Imax - local_mean, 0.0, None))
+
+    gray_bright = _normalize_score(Imax * (1.0 - saturation))
+    score = 0.35 * tan_soft + 0.35 * shafer_soft + 0.20 * gray_bright + 0.10 * local_highlight
+    return _normalize_score(score)
 
 def extract_priors(dataset, args):
     start_time = time.time()
@@ -133,24 +168,35 @@ def extract_priors(dataset, args):
                 intensity_thresh=args.sk_intensity,
                 sat_thresh=args.sk_saturation
             )
-        elif args.ref_prior_method == "shafer_tophat":
-            final_score = shafer_tophat_score(
+        elif args.ref_prior_method == "hybrid":
+            final_score = hybrid_confidence_score(
                 img01,
-                val_thresh=args.tophat_val_thresh,
-                sat_thresh=args.tophat_sat_thresh,
-                tophat_radius=args.tophat_radius,
-                tophat_thresh=args.tophat_thresh
+                ti_thresh=args.ti_thresh,
+                ti_bright=args.ti_bright,
+                sk_intensity=args.sk_intensity,
+                sk_saturation=args.sk_saturation,
             )
         else:
             raise ValueError(f"Unknown ref_prior_method: {args.ref_prior_method}")
+
+        ref_score = _normalize_score(final_score)
+        ref_conf = postprocess_score(
+            final_score,
+            gamma=args.ref_conf_gamma,
+            quantile=args.ref_conf_quantile,
+            smooth_radius=args.ref_conf_smooth_radius,
+        )
         
         # Convert to 8-bit image
-        score_img = (final_score * 255).astype(np.uint8)
+        score_img = (ref_score * 255).astype(np.uint8)
+        conf_img = (ref_conf * 255).astype(np.uint8)
         
         # Save to disk
         save_path = os.path.join(save_dir, f"{ref_image_name}_ref_score.png")
+        conf_path = os.path.join(save_dir, f"{ref_image_name}_ref_conf.png")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         imageio.imwrite(save_path, score_img)
+        imageio.imwrite(conf_path, conf_img)
 
     end_time = time.time()
     print(f"Prior extraction complete in {end_time - start_time:.2f} seconds!")
@@ -164,22 +210,16 @@ if __name__ == "__main__":
         "--ref_prior_method",
         type=str,
         default="tan",
-        choices=["tan", "shafer", "shafer_tophat"],
-        help=(
-            "Reflection prior extractor: tan reproduces the older Tan-Ikeuchi-style prior; "
-            "shafer uses plain Shafer/Klinker; shafer_tophat additionally gates by a "
-            "morphological top-hat filter to reject flat bright-diffuse false positives "
-            "(opt-in, does not change tan/shafer behavior)."
-        )
+        choices=["tan", "shafer", "hybrid"],
+        help="Reflection prior extractor: tan reproduces the older prior; shafer uses Shafer/Klinker; hybrid builds a softer confidence prior."
     )
     parser.add_argument("--ti_thresh", type=float, default=0.35, help="Tan-Ikeuchi intensity threshold")
     parser.add_argument("--ti_bright", type=float, default=0.6, help="Tan-Ikeuchi bright floor threshold")
     parser.add_argument("--sk_intensity", type=float, default=0.7, help="Shafer/Klinker intensity threshold")
     parser.add_argument("--sk_saturation", type=float, default=0.2, help="Shafer/Klinker saturation threshold")
-    parser.add_argument("--tophat_val_thresh", type=float, default=0.75, help="shafer_tophat: value (brightness) threshold")
-    parser.add_argument("--tophat_sat_thresh", type=float, default=0.25, help="shafer_tophat: saturation threshold")
-    parser.add_argument("--tophat_radius", type=int, default=12, help="shafer_tophat: morphological opening disk radius (px)")
-    parser.add_argument("--tophat_thresh", type=float, default=0.08, help="shafer_tophat: minimum top-hat response to flag a pixel")
+    parser.add_argument("--ref_conf_gamma", type=float, default=1.0, help="Post-process gamma for extracted reflection confidence")
+    parser.add_argument("--ref_conf_quantile", type=float, default=0.0, help="Optional quantile cutoff for conservative confidence maps")
+    parser.add_argument("--ref_conf_smooth_radius", type=int, default=0, help="Optional box smoothing radius for extracted confidence maps")
 
     args = parser.parse_args()
 

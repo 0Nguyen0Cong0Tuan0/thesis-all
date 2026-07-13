@@ -29,7 +29,16 @@
 | R042 | 2026-07-11 22:03:26 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260711_220403][R042-output] | tan, adaptive=True, asg=64, ASG residual only, no SH mask | 30.8979 | 0.9400 | 0.0640 | 23.4321 | 0.2346 | 178522 | 17m 37s | Residual loss có chạy nhưng không vượt no-mask R038 |
 | R043 | 2026-07-11 22:24:31 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260711_222509][R043-output] | tan, adaptive=True, asg=64, soft SH mask + ASG residual | 30.8528 | 0.9398 | 0.0630 | 23.4023 | 0.2489 | 178627 | 17m 37s | IoU tăng nhẹ nhất nhóm soft/residual, nhưng PSNR và Spec_PSNR vẫn giảm |
 | R044 | 2026-07-11 23:00:56 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260711_230133][R044-output] | tan, adaptive=True, asg=64, normal-delta + smooth, no ref-mask | 30.8517 | 0.9397 | 0.0636 | 23.1791 | 0.2167 | 179473 | 17m 43s | Normal-delta học nhưng giảm rõ PSNR/Spec_PSNR/IoU |
-| R045 | 2026-07-11 23:20:28 | counter | [output/counter][R045-output] | tan, adaptive=True, asg=64, normal-delta + smooth ref-mask | 30.6906 | 0.9387 | 0.0646 | 23.0685 | 0.1920 | 179400 | 17m 56s | Ref-mask smooth làm metric tụt mạnh hơn; không nên dùng default |
+| R045 | 2026-07-11 23:20:28 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260711_232105][R045-output] | tan, adaptive=True, asg=64, normal-delta + smooth ref-mask | 30.6906 | 0.9387 | 0.0646 | 23.0685 | 0.1920 | 179400 | 17m 56s | Ref-mask smooth làm metric tụt mạnh hơn; không nên dùng default |
+| R046 | 2026-07-11 23:41:58 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260711_234236][R046-output] | tan, adaptive=True, asg=64, real-refl, no normal-delta, smooth global | 30.7059 | 0.9385 | 0.0651 | 23.1551 | 0.2003 | 177867 | 17m 37s | Chỉ bật real reflection đã làm fidelity giảm mạnh; smooth không cứu được |
+| R047 | 2026-07-12 00:02:37 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_000315][R047-output] | tan, adaptive=True, asg=64, no real-refl, no normal-delta, smooth global inactive | 30.9625 | 0.9402 | 0.0629 | 23.4922 | 0.2215 | 179364 | 17m 37s | Quay lại no real-reflection gần baseline; metric phục hồi rõ |
+| R048 | 2026-07-12 16:39:41 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_164019][R048-output] | tan, adaptive=True, asg=64, no real-refl, no normal-delta, smooth global inactive | 30.9136 | 0.9402 | 0.0626 | 23.3579 | 0.2318 | 179615 | 17m 0s | Rerun baseline-like; PSNR thấp hơn R047 nhưng LPIPS tốt |
+| R049 | 2026-07-12 17:24:27 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_172509][R049-output] | tan, adaptive=True, asg=64, no real-refl, all normal/supervision off | 30.9167 | 0.9401 | 0.0635 | 23.5190 | 0.2463 | 179284 | 17m 12s | Baseline sạch sau ref-score confidence; không đạt lại R025 do variance |
+| R050 | 2026-07-12 17:53:37 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_175418][R050-output] | tan, adaptive=True, asg=64, real-refl only, no normal-delta/smooth | 30.7710 | 0.9390 | 0.0641 | 23.1857 | 0.2038 | 178024 | 17m 24s | Real reflection direction riêng lẻ vẫn kéo thấp PSNR/Spec_PSNR |
+| R051 | 2026-07-12 18:19:45 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_182023][R051-output] | tan, adaptive=True, asg=64, real-refl, normal-delta, smooth ref-mask nhẹ | 30.7766 | 0.9393 | 0.0646 | 23.1830 | 0.2029 | 177597 | 17m 45s | Normal-delta học nhưng không cải thiện so với real-refl only |
+| R052 | 2026-07-12 18:53:55 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_185435][R052-output] | tan, adaptive=True, asg=64, SH mask scale=0.75, no ASG residual | 30.9680 | 0.9402 | 0.0629 | 23.6289 | 0.2384 | 179620 | 17m 36s | SH mask mới hoạt động tốt nhất trong nhóm gần đây theo PSNR/Spec_PSNR |
+| R053 | 2026-07-12 19:21:43 | counter | [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_192226][R053-output] | tan, adaptive=True, asg=64, SH mask + ASG residual 0.01/leak 0.001 | 30.8989 | 0.9400 | 0.0637 | 23.4385 | 0.2368 | 179091 | 18m 25s | ASG residual active nhưng làm giảm PSNR/Spec_PSNR so với R052 |
+| R054 | 2026-07-12 19:52:03 | counter | [output/counter][R054-output] | tan, adaptive=True, asg=64, SH mask + ASG residual nhẹ 0.003/leak 0.0005 | 30.9337 | 0.9399 | 0.0637 | 23.4247 | 0.2485 | 178605 | 17m 46s | Residual nhẹ tăng IoU so với R052 nhưng vẫn giảm fidelity/spec PSNR |
 
 ### Ref-NeRF
 
@@ -510,17 +519,107 @@
 ### R045
 
 - Mục tiêu: thử cùng Normal Quality như R044 nhưng chỉ áp smoothness theo ref-mask để xem giới hạn regularization vào vùng specular có tốt hơn không.
-- Output: [output/counter][R045-output]
+- Output: [output/backups/counter/spec-fastgs_v3_new_architecture_20260711_232105][R045-output]
 - Config: giống R044 nhưng normal_smooth_use_ref_mask=True.
 - Kết quả đáng chú ý: PSNR=30.6906, SSIM=0.9387, LPIPS=0.0646; Spec_PSNR=23.0685, ASG_Energy_In_Residual=0.5051, ASG_Residual_IoU=0.1920.
 - Training: initial_gaussians=155767, final_gaussians=179400, normal_delta_mean_norm=0.0141, normal_delta_max_norm_observed=0.0500, avg_normal_delta_loss=0.000075, avg_normal_smooth_loss=0.7170, time=17m56s.
 - Nhận xét: so với R044, ref-mask smooth làm PSNR giảm thêm -0.1611, LPIPS xấu hơn +0.0010, Spec_PSNR giảm -0.1106 và ASG_IoU giảm -0.0247. So với R038, mức giảm rất lớn: PSNR -0.2827, Spec_PSNR -0.5344, ASG_IoU -0.0463.
 - Kết luận: `normal_smooth_use_ref_mask=True` không những không cứu Normal Quality mà còn làm metric tụt mạnh hơn. Không nên bật Normal Quality trong default pipeline hiện tại.
 
+### R046
+
+- Mục tiêu: tách riêng tác động của `real_use_reflection_dir=True` khi không bật normal-delta, nhưng vẫn còn global normal smoothness.
+- Output: [output/backups/counter/spec-fastgs_v3_new_architecture_20260711_234236][R046-output]
+- Config: scene=counter, images=images_8, iterations=30000, asg_degree=64, use_ref_score=True, use_adaptive_prior=True, ref_prior_method=tan, real_use_reflection_dir=True, use_normal_delta=False, lambda_normal_delta_reg=0.001, lambda_normal_smooth=0.0001, normal_smooth_use_ref_mask=False, use_sh_spec_mask=False, lambda_spec_l1_weight=0.0, lambda_spec_reg=0.0.
+- Kết quả đáng chú ý: PSNR=30.7059, SSIM=0.9385, LPIPS=0.0651; Spec_PSNR=23.1551, ASG_Energy_In_Residual=0.5507, ASG_Residual_IoU=0.2003.
+- Training: initial_gaussians=155767, final_gaussians=177867, normal_delta_mean_norm=0.0000, avg_normal_smooth_loss=0.7156, time=17m37s.
+- Nhận xét: so với R038 no real-ref/no normal baseline, R046 giảm PSNR -0.2673, Spec_PSNR -0.4478 và ASG_IoU -0.0380. Vì `use_normal_delta=False`, mức giảm này cho thấy riêng việc đổi ASG sang reflection direction đã làm tối ưu khó hơn khi normal gốc chưa đủ tốt.
+- Kết luận: `real_use_reflection_dir=True` không nên bật mặc định nếu chưa có normal objective tốt hơn. Nó hợp lý về mặt vật lý nhưng đang làm fidelity giảm.
+
+### R047
+
+- Mục tiêu: kiểm tra lại baseline khi tắt `real_use_reflection_dir` và không dùng normal-delta, trong khi các weight normal còn được truyền nhưng không active.
+- Output: [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_000315][R047-output]
+- Config: scene=counter, images=images_8, iterations=30000, asg_degree=64, use_ref_score=True, use_adaptive_prior=True, ref_prior_method=tan, real_use_reflection_dir=False, use_normal_delta=False, lambda_normal_delta_reg=0.001, lambda_normal_smooth=0.0001, normal_smooth_use_ref_mask=False, use_sh_spec_mask=False, lambda_spec_l1_weight=0.0, lambda_spec_reg=0.0.
+- Kết quả đáng chú ý: PSNR=30.9625, SSIM=0.9402, LPIPS=0.0629; Spec_PSNR=23.4922, ASG_Energy_In_Residual=0.4867, ASG_Residual_IoU=0.2215.
+- Training: initial_gaussians=155767, final_gaussians=179364, normal_delta_mean_norm=0.0000, avg_normal_smooth_loss=0.7146, time=17m37s.
+- Nhận xét: so với R046, chỉ cần tắt real reflection direction đã tăng PSNR +0.2566, LPIPS tốt hơn -0.0022 và Spec_PSNR tăng +0.3371. Điều này củng cố rằng bottleneck chính không phải weight smoothness, mà là reflection direction dựa trên normal chưa đáng tin.
+- Kết luận: baseline không dùng real reflection direction vẫn là hướng metric tốt hơn.
+
+### R048
+
+- Mục tiêu: rerun baseline-like giống R047 để kiểm tra variance khi real reflection và normal-delta đều tắt.
+- Output: [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_164019][R048-output]
+- Config: giống R047: real_use_reflection_dir=False, use_normal_delta=False, use_sh_spec_mask=False, lambda_spec_l1_weight=0.0, lambda_spec_reg=0.0.
+- Kết quả đáng chú ý: PSNR=30.9136, SSIM=0.9402, LPIPS=0.0626; Spec_PSNR=23.3579, ASG_Energy_In_Residual=0.5386, ASG_Residual_IoU=0.2318.
+- Training: initial_gaussians=155767, final_gaussians=179615, time=17m00s.
+- Nhận xét: thấp hơn R047 về PSNR -0.0489 và Spec_PSNR -0.1343 nhưng LPIPS tốt hơn nhẹ. Đây là thêm một bằng chứng về run variance quanh baseline no-normal.
+- Kết luận: không nên so một run normal đơn lẻ với một baseline duy nhất; cần so với dải R038/R047/R048/R049.
+
+### R049
+
+- Mục tiêu: baseline sạch sau khi thêm cơ chế `ref_score_conf`, tắt toàn bộ Representation/Supervision/Normal để kiểm tra trạng thái R025-like.
+- Output: [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_172509][R049-output]
+- Config: scene=counter, images=images_8, iterations=30000, asg_degree=64, use_ref_score=True, use_adaptive_prior=True, ref_prior_method=tan, real_use_reflection_dir=False, use_sh_spec_mask=False, use_asg_residual_supervision=False, lambda_spec_l1_weight=0.0, lambda_spec_reg=0.0, use_normal_delta=False, lambda_normal_delta_reg=0.0, lambda_normal_smooth=0.0.
+- Kết quả đáng chú ý: PSNR=30.9167, SSIM=0.9401, LPIPS=0.0635; Spec_PSNR=23.5190, ASG_Energy_In_Residual=0.5329, ASG_Residual_IoU=0.2463.
+- Training: initial_gaussians=155767, final_gaussians=179284, ref_conf_quantile=0.0, refscore_conf_quantile=0.85, time=17m12s.
+- Nhận xét: so với R038, R049 giảm PSNR -0.0565 nhưng Spec_PSNR cao hơn +0.0839 và ASG_IoU cao hơn +0.0080. So với R025, PSNR thấp hơn -0.0786. Đây là baseline no-normal mới, nhưng không phải cấu hình normal.
+- Kết luận: ref-score confidence mới không gây tác động khi các nhánh dùng confidence tắt; chênh metric chủ yếu là variance/rerun.
+
+### R050
+
+- Mục tiêu: kiểm tra riêng `real_use_reflection_dir=True` khi đã tắt normal-delta và smoothness, để xem bản thân reflection direction có giúp không.
+- Output: [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_175418][R050-output]
+- Config: giống R049 nhưng real_use_reflection_dir=True.
+- Kết quả đáng chú ý: PSNR=30.7710, SSIM=0.9390, LPIPS=0.0641; Spec_PSNR=23.1857, ASG_Energy_In_Residual=0.5346, ASG_Residual_IoU=0.2038.
+- Training: initial_gaussians=155767, final_gaussians=178024, time=17m24s.
+- Nhận xét: so với R049, chỉ bật real reflection direction làm PSNR giảm -0.1458, LPIPS xấu hơn +0.0006, Spec_PSNR giảm -0.3333 và ASG_IoU giảm -0.0425. So với R046, việc tắt smoothness giúp PSNR tăng nhẹ +0.0650 nhưng vẫn thấp hơn baseline rõ.
+- Kết luận: real reflection direction riêng lẻ hiện là negative evidence; hướng phản xạ vật lý chưa giúp metric khi normal gốc chưa đủ chính xác.
+
+### R051
+
+- Mục tiêu: thử Normal Quality mới sau khi ref-score confidence được thêm vào: bật `real_use_reflection_dir=True`, normal-delta, smoothness nhẹ hơn và ref-mask.
+- Output: [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_182023][R051-output]
+- Config: scene=counter, images=images_8, iterations=30000, asg_degree=64, use_ref_score=True, use_adaptive_prior=True, ref_prior_method=tan, real_use_reflection_dir=True, use_normal_delta=True, normal_delta_lr=5e-05, normal_delta_max_norm=0.05, lambda_normal_delta_reg=0.001, lambda_normal_smooth=0.00002, normal_smooth_use_ref_mask=True, use_sh_spec_mask=False, lambda_spec_l1_weight=0.0, lambda_spec_reg=0.0.
+- Kết quả đáng chú ý: PSNR=30.7766, SSIM=0.9393, LPIPS=0.0646; Spec_PSNR=23.1830, ASG_Energy_In_Residual=0.5096, ASG_Residual_IoU=0.2029.
+- Training: initial_gaussians=155767, final_gaussians=177597, normal_delta_mean_norm=0.0154, normal_delta_max_norm_observed=0.0500, avg_normal_delta_loss=0.000085, avg_normal_smooth_loss=0.6121, time=17m45s.
+- Nhận xét: normal-delta thật sự học, nhưng so với R050 real-ref only, PSNR chỉ tăng +0.0056, SSIM +0.0003, còn LPIPS xấu hơn +0.0005, Spec_PSNR giảm -0.0027 và ASG_IoU gần như không đổi -0.0009. So với R049 baseline sạch, R051 giảm PSNR -0.1402, Spec_PSNR -0.3360 và ASG_IoU -0.0434.
+- Kết luận: ref-mask smooth nhẹ hơn có làm R051 đỡ xấu hơn R045, nhưng không biến Normal Quality thành cải thiện metric. Normal-delta học được nhưng không bù được tác hại của real reflection direction/normal không chính xác.
+
+### R052
+
+- Mục tiêu: kiểm tra cấu hình sau khi lược bỏ Normal Quality, bật lại `use_sh_spec_mask=True` với soft suppression nhẹ hơn để xem SH/ASG role separation có còn giúp metrics không.
+- Output: [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_185435][R052-output]
+- Config: scene=counter, images=images_8, iterations=30000, asg_degree=64, use_ref_score=True, use_adaptive_prior=True, ref_prior_method=tan, real_use_reflection_dir=False, use_sh_spec_mask=True, sh_spec_grad_scale=0.75, sh_spec_mask_threshold=0.75, sh_spec_mask_start=8000, sh_spec_min_metric_count=2, use_asg_residual_supervision=False, lambda_spec_l1_weight=0.0, lambda_spec_reg=0.0.
+- Kết quả đáng chú ý: PSNR=30.9680, SSIM=0.9402, LPIPS=0.0629; Spec_PSNR=23.6289, ASG_Energy_In_Residual=0.5216, ASG_Residual_IoU=0.2384.
+- Training: initial_gaussians=155767, final_gaussians=179620, avg_sh_spec_mask_ratio=0.0180, time=17m36s.
+- Nhận xét: so với R049 baseline sạch, R052 tăng PSNR +0.0513, Spec_PSNR +0.1099 và LPIPS tốt hơn -0.0005, nhưng ASG_IoU giảm -0.0079. So với R040 soft-mask cũ, cấu hình `grad_scale=0.75` cho fidelity tốt hơn rõ.
+- Kết luận: SH spec mask bản nhẹ hiện là tín hiệu tích cực nhất của Representation Capacity: nó giúp final reconstruction và vùng specular, dù chưa làm ASG_IoU tăng ổn định.
+
+### R053
+
+- Mục tiêu: bật ASG residual supervision ở mức nhẹ vừa (`lambda_asg_residual=0.01`, `lambda_asg_leak=0.001`) trên nền R052 để xem loss trực tiếp cho ASG có cải thiện Spec_PSNR/IoU không.
+- Output: [output/backups/counter/spec-fastgs_v3_new_architecture_20260712_192226][R053-output]
+- Config: giống R052 nhưng use_asg_residual_supervision=True, lambda_asg_residual=0.01, lambda_asg_leak=0.001, asg_residual_start=8000, asg_residual_interval=16, asg_residual_ref_threshold=0.75.
+- Kết quả đáng chú ý: PSNR=30.8989, SSIM=0.9400, LPIPS=0.0637; Spec_PSNR=23.4385, ASG_Energy_In_Residual=0.5316, ASG_Residual_IoU=0.2368.
+- Training: initial_gaussians=155767, final_gaussians=179091, avg_sh_spec_mask_ratio=0.0178, avg_asg_residual_loss=0.0703, avg_asg_leak_loss=0.0051, time=18m25s.
+- Nhận xét: so với R052, loss active nhưng PSNR giảm -0.0691, Spec_PSNR giảm -0.1904, LPIPS xấu hơn +0.0008 và ASG_IoU giảm nhẹ -0.0017. ASG_Energy_In_Residual tăng +0.0099, nghĩa là ASG tham gia nhiều hơn nhưng không đúng hơn.
+- Kết luận: ASG residual supervision ở mức 0.01/0.001 không hiệu quả cho mục tiêu best metrics; target residual hiện tại có vẻ nhiễu hoặc lệch với reconstruction cuối.
+
+### R054
+
+- Mục tiêu: thử ASG residual supervision nhẹ hơn và muộn hơn để xem có giữ được lợi ích IoU mà bớt giảm PSNR không.
+- Output: [output/counter][R054-output]
+- Config: giống R052 nhưng use_asg_residual_supervision=True, lambda_asg_residual=0.003, lambda_asg_leak=0.0005, asg_residual_start=10000, asg_residual_interval=64, asg_residual_ref_threshold=0.85.
+- Kết quả đáng chú ý: PSNR=30.9337, SSIM=0.9399, LPIPS=0.0637; Spec_PSNR=23.4247, ASG_Energy_In_Residual=0.5351, ASG_Residual_IoU=0.2485.
+- Training: initial_gaussians=155767, final_gaussians=178605, avg_sh_spec_mask_ratio=0.0179, avg_asg_residual_loss=0.1139, avg_asg_leak_loss=0.0053, time=17m46s.
+- Nhận xét: so với R052, R054 tăng ASG_IoU +0.0101 và ASG_Energy_In_Residual +0.0134, nhưng PSNR giảm -0.0343, SSIM giảm nhẹ, LPIPS xấu hơn +0.0008 và Spec_PSNR giảm -0.2042. So với R053, PSNR phục hồi +0.0348 và IoU tăng +0.0117, nhưng Spec_PSNR vẫn thấp hơn.
+- Kết luận: giảm weight/start muộn hơn làm ASG residual bớt phá PSNR, nhưng vẫn không vượt SH-mask-only. Nếu ưu tiên metrics tốt nhất, không nên bật ASG residual supervision; nếu cần minh họa role separation/proxy IoU thì R054 có thể dùng như ablation phụ.
+
 ## Conclusion
 
-- Thời điểm tổng kết: 2026-07-11 23:30 ICT.
-- Runs được dùng: R001-R045.
+- Thời điểm tổng kết: 2026-07-12 19:55 ICT.
+- Runs được dùng: R001-R054.
 - Dataset: Mip-NeRF360/counter và Ref-NeRF/toaster.
 - Metric chính: PSNR, SSIM, LPIPS, Spec_PSNR, ASG_Residual_IoU, ASG_Energy_In_Residual.
 - Specular error contribution được ước lượng bằng mask proxy `residual_real > 0.02`, với công thức `L1 error trong spec_mask / L1 error toàn ảnh`.
@@ -543,10 +642,10 @@ Kết luận chính vẫn giữ nguyên: bài toán hiện tại thật sự là
 - ASG degree trên toaster: tăng ASG degree tạo trade-off. Không adaptive thì R016 `asg=24` tốt nhất theo PSNR, R015 `asg=64` tốt theo LPIPS/IoU. Có adaptive thì ASG12 là quá thấp, ASG64 tốt LPIPS nhưng giảm IoU, còn ASG32 với Tan ở R024 cân bằng nhất.
 - Scene-relative RefScore budget và soft RefScore decay: hai chỉnh sửa này làm budget tự scale theo số Gaussian ban đầu và giảm độ mạnh của prior khi scene đã nhiều Gaussian hơn. Tuy nhiên, R017/R019 cho thấy khi tắt adaptive prior, chúng chưa tự tạo ra cải thiện chắc chắn; chúng nên được xem là hạ tầng để RefScore ổn định hơn, không phải nguồn gain chính.
 - Residual-adaptive prior: đây là chỉnh sửa Geometry Coverage có bằng chứng tích cực nhất. R018 tốt hơn R017 trên toaster/asg24 về PSNR, LPIPS, Spec_PSNR và ASG_IoU; R020 tốt hơn R019 trên counter/asg64 về PSNR, SSIM, LPIPS và Spec_PSNR. Tác động chính là cập nhật prior theo residual còn lại của model, nên nó bám sát lỗi geometric/specular thực tế hơn static prior.
-- Sparse `f_rest` schedule: các run R017-R045 đều dùng `f_rest_interval=16/32/64`, giúp giảm cập nhật SH residual khi training đi xa hơn và nhường vai trò giải thích phần view-dependent cho ASG. Hiện chưa có ablation off riêng cho schedule này, nên chỉ nên kết luận là nó tương thích với cấu hình best mới, chưa khẳng định nó là nguồn gain độc lập.
-- Representation Capability / SH spec mask: R025/R026 và R027/R028 cho thấy `use_sh_spec_mask=True` đẩy vai trò specular về ASG rõ rệt. Trên counter, R026 tăng Spec_PSNR và ASG_IoU rất mạnh so với R025 nhưng giảm PSNR/SSIM/LPIPS, nghĩa là hard mask đang quá cứng với `sh_spec_grad_scale=0.0`. R038 là no-mask rerun mới có Spec_PSNR cao, cho thấy baseline variance/prior-rerun đáng kể. R040 là soft-mask hợp lệ: mask active (`avg_sh_spec_mask_ratio=0.0180`) và tăng ASG_IoU nhẹ so với R038, nhưng Spec_PSNR/PSNR vẫn thấp hơn. R042/R043 cho thấy ASG residual supervision đã chạy thật (`avg_asg_residual_loss~0.0736`) nhưng vẫn không cải thiện metric; bản combined chỉ tăng IoU lên 0.2489 trong khi PSNR/Spec_PSNR giảm. Kết luận hiện tại: Representation Capacity hiện chỉ cải thiện proxy role separation, chưa cải thiện reconstruction.
+- Sparse `f_rest` schedule: các run R017-R054 đều dùng `f_rest_interval=16/32/64`, giúp giảm cập nhật SH residual khi training đi xa hơn và nhường vai trò giải thích phần view-dependent cho ASG. Hiện chưa có ablation off riêng cho schedule này, nên chỉ nên kết luận là nó tương thích với cấu hình best mới, chưa khẳng định nó là nguồn gain độc lập.
+- Representation Capability / SH spec mask: R025/R026 và R027/R028 cho thấy `use_sh_spec_mask=True` đẩy vai trò specular về ASG rõ rệt. Trên counter, R026 tăng Spec_PSNR và ASG_IoU rất mạnh so với R025 nhưng giảm PSNR/SSIM/LPIPS, nghĩa là hard mask đang quá cứng với `sh_spec_grad_scale=0.0`. R038 là no-mask rerun mới có Spec_PSNR cao, cho thấy baseline variance/prior-rerun đáng kể. R040 là soft-mask hợp lệ: mask active (`avg_sh_spec_mask_ratio=0.0180`) và tăng ASG_IoU nhẹ so với R038, nhưng Spec_PSNR/PSNR vẫn thấp hơn. R052 là soft SH mask tốt hơn sau khi gỡ Normal Quality: so với R049, PSNR tăng +0.0513 và Spec_PSNR tăng +0.1099, dù ASG_IoU giảm nhẹ. R042/R043/R053/R054 cho thấy ASG residual supervision đã chạy thật (`avg_asg_residual_loss>0`) nhưng không cải thiện best metrics; R054 tăng IoU lên 0.2485 nhưng PSNR/Spec_PSNR vẫn thấp hơn R052. Kết luận hiện tại: SH spec mask nhẹ có hiệu quả thực dụng cho reconstruction, còn ASG residual supervision chỉ cải thiện proxy trong một số cấu hình và chưa giúp metric cuối.
 - Supervision Signal: weighted L1 có tín hiệu tốt hơn spec-reg khi chạy cùng SH mask. Trên counter, R031 tăng PSNR +0.0883 và Spec_PSNR +0.0835 so với R026 khi bật `lambda_spec_l1_weight=1.0` mà không dùng spec-reg. Nhưng R037 cho thấy khi tắt SH mask và bật `real_use_reflection_dir=True`, `lambda_spec_l1_weight=1.0` + `lambda_spec_reg=0.0001` vẫn không vượt R025/R031. Trên toaster, R029/R030 tăng ASG_IoU hoặc Spec_PSNR nhưng giảm PSNR/LPIPS so với R028. `lambda_spec_reg=0.1` ở R034 quá mạnh; `0.001` ở R035 và `0.0001` ở R036/R037 đều chưa tạo gain fidelity rõ.
-- Normal Quality: toaster synthetic branch cho thấy `use_normal_delta=True` thật sự học được delta ở R030 (`mean_norm=0.0251`, `max_norm=0.1`) và tăng Spec_PSNR so với R029, nhưng giảm IoU và fidelity. Counter R032-R035 chưa phải ablation normal hợp lệ vì `real_use_reflection_dir=False`, khiến `normal_delta_mean_norm=0.0`. R036 là ablation hợp lệ hơn: bật `real_use_reflection_dir=True` làm normal-delta học được (`mean_norm=0.0148`, `max_norm=0.05`) và tăng ASG_IoU lên 0.2831, nhưng PSNR/SSIM/LPIPS/Spec_PSNR đều không tốt. R044/R045 là kiểm tra sạch hơn khi tắt Representation/Supervision: delta vẫn học (`mean_norm~0.014`), nhưng PSNR/Spec_PSNR/IoU đều giảm mạnh so với R038; ref-mask smooth ở R045 còn xấu hơn R044. Vì vậy Normal Quality hiện chỉ chứng minh được tác động, không chứng minh được cải thiện visual quality.
+- Normal Quality: toaster synthetic branch cho thấy `use_normal_delta=True` thật sự học được delta ở R030 (`mean_norm=0.0251`, `max_norm=0.1`) và tăng Spec_PSNR so với R029, nhưng giảm IoU và fidelity. Counter R032-R035 chưa phải ablation normal hợp lệ vì `real_use_reflection_dir=False`, khiến `normal_delta_mean_norm=0.0`. R036 là ablation hợp lệ hơn: bật `real_use_reflection_dir=True` làm normal-delta học được (`mean_norm=0.0148`, `max_norm=0.05`) và tăng ASG_IoU lên 0.2831, nhưng PSNR/SSIM/LPIPS/Spec_PSNR đều không tốt. R044/R045 là kiểm tra sạch hơn khi tắt Representation/Supervision và vẫn âm. R046/R050 cho thấy riêng `real_use_reflection_dir=True` đã kéo PSNR/Spec_PSNR xuống mạnh khi normal chưa đủ tốt; R051 cho thấy normal-delta + smooth ref-mask nhẹ chỉ tăng PSNR +0.0056 so với R050 nhưng vẫn thấp hơn R049 baseline sạch -0.1402 PSNR và -0.3360 Spec_PSNR. Vì vậy Normal Quality hiện chỉ chứng minh được tác động/gradient, không chứng minh được cải thiện visual quality.
 
 ### Best runs hiện tại
 
@@ -554,7 +653,7 @@ Kết luận chính vẫn giữ nguyên: bài toán hiện tại thật sự là
 | --- | --- | --- |
 | Counter - metric tổng thể | R025 | Best PSNR/LPIPS hiện tại; cần ghi rõ đây là Tan + adaptive rerun, không phải so sánh thuần với R020 Shafer. |
 | Counter - Geometry Coverage baseline | R020 | Best Geometry Coverage trước Stage 2 theo cân bằng PSNR/SSIM/LPIPS/Spec_PSNR. |
-| Counter - ASG alignment proxy | R036/R033/R043 | R036 cao nhất ASG_IoU; R033 cao nhất Spec_PSNR; R043 là bản soft+residual mới nhất nhưng vẫn hy sinh fidelity tổng thể. R044/R045 không nên chọn vì giảm cả fidelity lẫn proxy. |
+| Counter - ASG alignment proxy | R036/R033/R054/R052 | R036 cao nhất ASG_IoU trong nhóm real-refl/normal nhưng fidelity thấp; R033 cao nhất Spec_PSNR trong nhóm hard-mask cũ; R054 tăng IoU bằng ASG residual nhẹ nhưng hy sinh Spec_PSNR; R052 là cấu hình SH-mask-only cân bằng nhất sau khi gỡ Normal Quality. |
 | Toaster - metric tổng thể | R024 | Best PSNR/SSIM/LPIPS trong toàn bộ nhóm toaster và IoU cao. |
 | Toaster - Representation/Supervision proxy | R029/R030 | R029 cao nhất ASG_IoU; R030 cao nhất Spec_PSNR, nhưng PSNR/LPIPS chưa vượt R024/R028. |
 | Toaster - Shafer Spec_PSNR | R016/R023 | R016 cao nhất trong nhóm Shafer cũ; R023 cao nhất trong nhóm Shafer-adaptive. |
@@ -568,17 +667,25 @@ Các chỉnh sửa mới đi đúng hướng, nhưng gain không đến từ m�
 
 ### Nhận xét về chỉnh sửa Representation / Supervision / Normal mới
 
-Các run R025-R028 là proof-of-concept đầu tiên cho trục Representation Capability. Kiến trúc ASG/MLP vẫn để default bằng `asg_num_theta=-1`, `asg_num_phi=-1`, `specular_hidden=-1`, `specular_layers=-1`, nên biến số chính ở đây là SH spec mask. Khi bật hard mask, ASG nhận nhiều trách nhiệm hơn ở vùng ref-score cao: counter tăng ASG_IoU từ 0.2199 lên 0.2781, toaster tăng từ 0.6109 lên 0.6413. Điều này đúng với mục tiêu role separation.
+Các run R025-R028 là proof-of-concept đầu tiên cho trục Representation Capability. Kiến trúc ASG/MLP vẫn để default bằng `asg_num_theta=-1`, `asg_num_phi=-1`, `specular_hidden=-1`, `specular_layers=-1`, nên biến số chính ở đây là SH spec mask. Khi bật hard mask, ASG nhận nhiều trách nhiệm hơn ở vùng ref-score cao: counter tăng ASG_IoU từ 0.2199 lên 0.2781, toaster tăng từ 0.6109 lên 0.6413. Điều này đúng với mục tiêu role separation. Sau khi chuyển sang soft suppression nhẹ hơn, R052 cho thấy SH mask có thể cải thiện cả PSNR và Spec_PSNR so với baseline sạch R049.
 
-Tuy vậy, hard mask hiện tại đang là hard suppression (`sh_spec_grad_scale=0.0`), nên counter bị mất fidelity nặng. Toaster phản ứng tốt hơn vì vừa tăng PSNR vừa tăng Spec_PSNR/IoU so với R027, nhưng vẫn xấu hơn R024 về PSNR/LPIPS. R039 là failed-config vì start=80000 vượt quá 30000 iterations và `avg_sh_spec_mask_ratio=0.0`. R040 đã chạy đúng soft mask nhưng chỉ tăng IoU nhẹ, trong khi Spec_PSNR thấp hơn R038. R042/R043 kiểm tra hướng "dạy ASG reconstruct residual" trực tiếp hơn, nhưng kết quả vẫn giảm PSNR/Spec_PSNR. Vì vậy vấn đề không chỉ là hard/soft scale hay thiếu một L1 residual đơn giản; cơ chế decomposition giữa SH/base/ASG và mask target hiện tại chưa đủ đúng.
+Tuy vậy, hard mask hiện tại đang là hard suppression (`sh_spec_grad_scale=0.0`), nên counter bị mất fidelity nặng. Toaster phản ứng tốt hơn vì vừa tăng PSNR vừa tăng Spec_PSNR/IoU so với R027, nhưng vẫn xấu hơn R024 về PSNR/LPIPS. R039 là failed-config vì start=80000 vượt quá 30000 iterations và `avg_sh_spec_mask_ratio=0.0`. R040 đã chạy đúng soft mask nhưng chỉ tăng IoU nhẹ, trong khi Spec_PSNR thấp hơn R038. R052 là bước cải thiện quan trọng vì `grad_scale=0.75` đủ nhẹ để không phá reconstruction. R042/R043/R053/R054 kiểm tra hướng "dạy ASG reconstruct residual" trực tiếp hơn: loss đều active, nhưng kết quả không vượt R052. Vì vậy vấn đề không chỉ là thiếu một L1 residual đơn giản; target `gt - sh_only` và mask confidence hiện vẫn chưa đủ sạch để biến ASG residual supervision thành gain metrics.
 
 Nhóm Supervision R029-R037 cho thấy `lambda_spec_l1_weight=1.0` là knob đáng thử tiếp, đặc biệt trên counter ở R031 khi chạy cùng SH mask và không kèm spec-reg. Ngược lại, `lambda_spec_reg` chưa có bằng chứng tốt: R034 cho thấy 0.1 quá mạnh, R035 với 0.001 không cải thiện counter, còn 0.0001 trong R036/R037 cũng chưa đưa fidelity vượt baseline. Trên toaster, supervision làm tăng ASG overlap/spec proxy nhưng kéo PSNR/LPIPS xuống, nên nên tune nhỏ hơn hoặc chạy riêng `lambda_spec_l1_weight` không kèm spec-reg.
 
-Nhóm Normal Quality mới chỉ có bằng chứng tác động, chưa có bằng chứng cải thiện fidelity. R030 trên toaster xác nhận learned normal delta có thể học và tăng Spec_PSNR, nhưng trade-off với IoU/fidelity chưa tốt. R036 trên counter là run hợp lệ hơn vì `real_use_reflection_dir=True` làm delta học được; tuy vậy metric tổng thể giảm mạnh và chỉ ASG_IoU tăng. R044/R045 loại bỏ nhiễu từ Representation/Supervision và vẫn cho kết quả âm: normal-delta + smoothness kéo PSNR/Spec_PSNR/IoU xuống, đặc biệt khi `normal_smooth_use_ref_mask=True`. Vì vậy normal-delta không nên đưa vào default; nếu tiếp tục nghiên cứu thì cần đổi thiết kế normal objective thay vì tune nhỏ quanh các weight hiện tại.
+Nhóm Normal Quality mới chỉ có bằng chứng tác động, chưa có bằng chứng cải thiện fidelity. R030 trên toaster xác nhận learned normal delta có thể học và tăng Spec_PSNR, nhưng trade-off với IoU/fidelity chưa tốt. R036 trên counter là run hợp lệ hơn vì `real_use_reflection_dir=True` làm delta học được; tuy vậy metric tổng thể giảm mạnh và chỉ ASG_IoU tăng. R044/R045 loại bỏ nhiễu từ Representation/Supervision và vẫn cho kết quả âm. R046/R050 tách riêng `real_use_reflection_dir=True` và cho thấy chỉ đổi ASG sang reflection direction đã làm PSNR/Spec_PSNR giảm mạnh so với baseline no-real-reflection. R051 dùng normal-delta + smooth ref-mask nhẹ hơn, delta học được (`mean_norm=0.0154`) nhưng chỉ nhích hơn R050 về PSNR +0.0056 và vẫn thua R049 rất xa. Vì vậy normal-delta không nên đưa vào default; nếu tiếp tục nghiên cứu thì cần đổi thiết kế normal objective hoặc cách ước lượng normal/reflection direction, không nên chỉ tune nhỏ quanh các weight hiện tại.
+
+### Kết luận về hai thành phần đã loại bỏ
+
+`real_use_reflection_dir` đã được khảo sát như một hướng làm ASG mang tính vật lý hơn bằng cách dùng hướng phản xạ từ normal thay cho view direction. Tuy nhiên, R046 và R050 cho thấy chỉ riêng việc bật real reflection direction đã làm fidelity giảm rõ: R050 thấp hơn R049 `-0.1458` PSNR, `-0.3333` Spec_PSNR và `-0.0425` ASG_IoU. Khi kết hợp normal-delta ở R051, metric chỉ nhích nhẹ so với R050 nhưng vẫn thua xa baseline sạch R049. Kết luận: trong pipeline hiện tại, normal/geometry chưa đủ đáng tin để dùng reflection direction làm input ASG; thành phần này không góp phần cải thiện specular visual quality cuối cùng và đã được loại khỏi final pipeline.
+
+`use_asg_residual_supervision` đã được khảo sát như một hướng dạy ASG trực tiếp reconstruct residual specular. Các run R042/R043/R053/R054 xác nhận loss này thật sự active và có thể làm ASG tham gia mạnh hơn, nhưng không tạo ra best metrics. So với R052 SH-mask-only, R053 giảm `-0.0691` PSNR và `-0.1904` Spec_PSNR; R054 nhẹ hơn có tăng ASG_IoU `+0.0101` nhưng vẫn giảm `-0.0343` PSNR và `-0.2042` Spec_PSNR. Kết luận: residual target `gt - sh_only` và ref-mask hiện chưa đủ sạch; loss này hữu ích như ablation/diagnostic cho role separation nhưng không cải thiện reconstruction/specular quality tốt nhất, nên cũng đã được loại khỏi final pipeline.
+
+Sau khi loại bỏ hai thành phần trên, cấu hình final nên giữ phần có bằng chứng tốt nhất: Geometry Coverage với `use_ref_score=True`, `use_adaptive_prior=True`, `ref_prior_method=tan`, ASG64 cho counter, và SH spec mask nhẹ `use_sh_spec_mask=True`, `sh_spec_grad_scale=0.75`, `sh_spec_mask_start=8000`, `sh_spec_mask_threshold=0.75`, `sh_spec_min_metric_count=2`. Các loss phụ `lambda_spec_l1_weight`, `lambda_spec_reg` và ASG residual đều để 0 trong cấu hình đề xuất.
 
 ### Kết luận cho thesis
 
-Các kết quả cho thấy cải thiện specular reconstruction là hướng hợp lý vì specular chiếm khoảng 30-50% tổng sai số L1 tùy dataset. Sau R001-R045, kết luận nên tách ba tầng: residual-adaptive prior là bổ sung đáng giữ cho Geometry Coverage; SH spec mask là bằng chứng tốt cho role separation nhưng chưa đủ để tăng reconstruction; ASG residual supervision bản hiện tại chưa cho tín hiệu tích cực dù loss đã active. Supervision Signal có tín hiệu tốt nhất ở weighted L1=1.0 trong R031, nhưng R041 với weight=0.5 lại giảm metric khi dùng cùng soft mask, nên không nên tiếp tục xem đây là hướng chính. Normal delta đã được xác nhận có tác động cả trên toaster và counter khi counter bật `real_use_reflection_dir=True`, nhưng R044/R045 cho thấy tác động đó làm metrics xấu đi khi kiểm tra sạch hơn. R038 là no-mask/no-normal baseline mới đáng dùng để so soft-mask/residual/normal; R040/R043/R044/R045 cho thấy các chỉnh sửa Representation/Normal hiện tại chưa vượt baseline. Counter hiện có R025/R038 nếu ưu tiên PSNR/Spec_PSNR, R036/R033/R043 nếu cần minh họa ASG alignment/spec proxy; toaster vẫn hợp nhất với R024 cho metric tổng thể.
+Các kết quả cho thấy cải thiện specular reconstruction là hướng hợp lý vì specular chiếm khoảng 30-50% tổng sai số L1 tùy dataset. Sau R001-R054, kết luận nên tách ba tầng: residual-adaptive prior là bổ sung đáng giữ cho Geometry Coverage; SH spec mask nhẹ ở R052 là tín hiệu Representation Capacity tốt nhất hiện tại vì cải thiện PSNR/Spec_PSNR so với baseline sạch R049; ASG residual supervision bản hiện tại chưa cho hiệu quả để đạt metrics tốt nhất dù loss đã active. Supervision Signal có tín hiệu tốt nhất ở weighted L1=1.0 trong R031, nhưng R041 với weight=0.5 lại giảm metric khi dùng cùng soft mask, nên không nên tiếp tục xem đây là hướng chính. Normal delta đã được xác nhận có tác động cả trên toaster và counter khi counter bật `real_use_reflection_dir=True`, nhưng R044-R051 cho thấy tác động đó không chuyển thành metric tốt hơn. R049 là baseline sạch sau ref-score confidence; R052 là cấu hình counter hiện tại đáng giữ nếu ưu tiên fidelity/specular PSNR; R053/R054 cho thấy thêm ASG residual chỉ tăng ASG energy/IoU trong một số trường hợp nhưng làm PSNR/Spec_PSNR thấp hơn R052. Counter hiện có R025/R038/R052 nếu ưu tiên fidelity/spec proxy, còn R036/R033/R054 chỉ nên dùng để minh họa ASG alignment/proxy trade-off; toaster vẫn hợp nhất với R024 cho metric tổng thể.
 
 [R001-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260707_105338
 [R002-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260707_124037
@@ -624,4 +731,13 @@ Các kết quả cho thấy cải thiện specular reconstruction là hướng h
 [R042-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260711_220403
 [R043-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260711_222509
 [R044-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260711_230133
-[R045-output]: output/counter
+[R045-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260711_232105
+[R046-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260711_234236
+[R047-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260712_000315
+[R048-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260712_164019
+[R049-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260712_172509
+[R050-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260712_175418
+[R051-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260712_182023
+[R052-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260712_185435
+[R053-output]: output/backups/counter/spec-fastgs_v3_new_architecture_20260712_192226
+[R054-output]: output/counter
