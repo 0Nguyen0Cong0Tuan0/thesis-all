@@ -10,7 +10,7 @@ export CUDA_VISIBLE_DEVICES=0
 DATA_ROOT=./datasets/mipnerf360
 OUTPUT_ROOT=./output
 SCENE=counter
-IMAGES=images_8
+IMAGES=images_4
 
 # Important final knobs
 ASG_DEGREE=64
@@ -20,11 +20,12 @@ ASG_DEGREE=64
 #   shafer = Shafer/Klinker
 #   hybrid = combined heuristic
 REF_PRIOR_METHOD=tan
-EXTRACT_REF_PRIOR=False
+EXTRACT_REF_PRIOR=True
 BACKUP_REF_PRIOR=True
 USE_REF_SCORE=True
 USE_ADAPTIVE_PRIOR=True
 USE_SH_SPEC_MASK=True
+STOP_ON_ERROR=True
 
 # Representation Capacity: light SH suppression on high-confidence specular areas.
 SH_SPEC_GRAD_SCALE=0.75

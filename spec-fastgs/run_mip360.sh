@@ -7,7 +7,7 @@
 
 export CUDA_VISIBLE_DEVICES=0
 
-DATA_ROOT=./datasets/mipnerf360
+DATA_ROOT=${DATA_ROOT:-./datasets/mipnerf360}
 OUTPUT_ROOT=./output/mip360_images4
 IMAGES=images_4
 
@@ -70,7 +70,13 @@ run_or_stop() {
 }
 
 for SCENE in "${SCENES[@]}"; do
-    SOURCE_PATH=${DATA_ROOT}/${SCENE}
+    if [ -d "${DATA_ROOT}/360_v2/${SCENE}" ]; then
+        SOURCE_PATH="${DATA_ROOT}/360_v2/${SCENE}"
+    elif [ -d "${DATA_ROOT}/360_extra_scenes/${SCENE}" ]; then
+        SOURCE_PATH="${DATA_ROOT}/360_extra_scenes/${SCENE}"
+    else
+        SOURCE_PATH="${DATA_ROOT}/${SCENE}"
+    fi
     MODEL_PATH=${OUTPUT_ROOT}/${SCENE}
 
     if [ ! -d "$SOURCE_PATH" ]; then
