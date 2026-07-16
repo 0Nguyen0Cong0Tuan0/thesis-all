@@ -66,7 +66,7 @@ class Scene:
                 args.source_path, args.images, args.eval
             )
 
-        elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
+        elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")) or os.path.exists(os.path.join(args.source_path, "transforms.json")):
             print("Detected Blender dataset")
             scene_info = sceneLoadTypeCallbacks["Blender"](
                 args.source_path, args.white_background, args.eval

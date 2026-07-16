@@ -75,8 +75,8 @@ for SCENE in "${SCENES[@]}"; do
         echo "Skipping ${SCENE}: ${SOURCE_PATH} not found."
         continue
     fi
-    if [ ! -f "${SOURCE_PATH}/transforms_train.json" ]; then
-        echo "Skipping ${SCENE}: transforms_train.json not found."
+    if [ ! -f "${SOURCE_PATH}/transforms_train.json" ] && [ ! -f "${SOURCE_PATH}/transforms.json" ]; then
+        echo "Skipping ${SCENE}: transforms_train.json or transforms.json not found."
         continue
     fi
 
