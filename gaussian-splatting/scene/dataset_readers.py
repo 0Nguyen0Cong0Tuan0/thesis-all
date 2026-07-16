@@ -256,7 +256,7 @@ def readCamerasFromTransforms(path, transformsfile, depths_folder, white_backgro
 
             norm_data = im_data / 255.0
             arr = norm_data[:,:,:3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
-            image = Image.fromarray(np.array(arr*255.0, dtype=np.byte), "RGB")
+            image = Image.fromarray(np.array(arr*255.0, dtype=np.uint8), "RGB")
 
             fovy = focal2fov(fov2focal(fovx, image.size[0]), image.size[1])
             FovY = fovy 
@@ -273,10 +273,25 @@ def readCamerasFromTransforms(path, transformsfile, depths_folder, white_backgro
 def readNerfSyntheticInfo(path, white_background, depths, eval, extension=".png"):
 
     depths_folder=os.path.join(path, depths) if depths != "" else ""
-    print("Reading Training Transforms")
-    train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", depths_folder, white_background, False, extension)
-    print("Reading Test Transforms")
-    test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", depths_folder, white_background, True, extension)
+    if os.path.exists(os.path.join(path, "transforms_train.json")):
+        print("Reading Training Transforms")
+        train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", depths_folder, white_background, False, extension)
+        if os.path.exists(os.path.join(path, "transforms_test.json")):
+            print("Reading Test Transforms")
+            test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", depths_folder, white_background, True, extension)
+        else:
+            test_cam_infos = []
+    elif os.path.exists(os.path.join(path, "transforms.json")):
+        print("Reading Single Transforms (transforms.json)")
+        cam_infos = readCamerasFromTransforms(path, "transforms.json", depths_folder, white_background, False, extension)
+        if eval:
+            train_cam_infos = [c for i, c in enumerate(cam_infos) if i % 8 != 0]
+            test_cam_infos = [c for i, c in enumerate(cam_infos) if i % 8 == 0]
+        else:
+            train_cam_infos = cam_infos
+            test_cam_infos = []
+    else:
+        raise RuntimeError(f"No transforms JSON file found in {path}")
     
     if not eval:
         train_cam_infos.extend(test_cam_infos)
