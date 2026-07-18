@@ -8,8 +8,8 @@
 export CUDA_VISIBLE_DEVICES=0
 
 DATA_ROOT=${DATA_ROOT:-./datasets/mipnerf360}
-OUTPUT_ROOT=./output/mip360_images4
-IMAGES=images_4
+IMAGES=${IMAGES:-images_4}
+OUTPUT_ROOT=./output/mip360_${IMAGES}
 
 SCENES=(
     bicycle
