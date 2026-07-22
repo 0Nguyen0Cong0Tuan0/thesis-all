@@ -55,3 +55,6 @@ Synthetic_NSVF/
 # folder), so dataset/mipnerf360/*.JPG real photos were untracked-but-NOT-ignored. Anchor
 # to repo root explicitly.
 /dataset/
+results
+thesis_figures
+Spec_fastgs_Luận_văn
