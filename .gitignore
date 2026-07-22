@@ -46,6 +46,9 @@ pipeline-results/
 *.ply
 *.pt
 
+# Analysis notebooks with embedded plot images can exceed GitHub's 100MB push limit
+mipnerf360_images4_experiment_comparison.ipynb
+
 # Local copies of datasets (large; live on Kaggle, not in git)
 Anisotropic-Synthetic-Dataset/
 Synthetic_NSVF/
