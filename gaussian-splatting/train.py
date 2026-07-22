@@ -10,6 +10,8 @@
 #
 
 import os
+import time
+import json
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim
@@ -45,10 +47,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     if not SPARSE_ADAM_AVAILABLE and opt.optimizer_type == "sparse_adam":
         sys.exit(f"Trying to use sparse adam but it is not installed, please install the correct rasterizer using pip install [3dgs_accel].")
 
+    start_time = time.time()
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type)
     scene = Scene(dataset, gaussians)
+    initial_gaussians = gaussians.get_xyz.shape[0]
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -189,7 +193,31 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
-def prepare_output_and_logger(args):    
+    duration = time.time() - start_time
+    metadata = {
+        "scene": dataset.source_path.split("/")[-1],
+        "git_branch": get_git_branch(),
+        "image_scale": dataset.images,
+        "iterations": opt.iterations,
+        "initial_gaussians": initial_gaussians,
+        "final_gaussians": gaussians.get_xyz.shape[0],
+        "training_time_seconds": round(duration, 2),
+        "training_time_formatted": f"{int(duration // 60)}m {int(duration % 60)}s",
+        "peak_vram_mib": round(torch.cuda.max_memory_allocated() / (1024 ** 2), 2),
+    }
+    info_path = os.path.join(dataset.model_path, "train_info.json")
+    with open(info_path, "w") as f:
+        json.dump(metadata, f, indent=4)
+    print(f"Training metadata saved to {info_path}")
+
+def get_git_branch():
+    try:
+        import subprocess
+        return subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).decode("utf-8").strip()
+    except Exception:
+        return "unknown"
+
+def prepare_output_and_logger(args):
     if not args.model_path:
         if os.getenv('OAR_JOB_ID'):
             unique_str=os.getenv('OAR_JOB_ID')

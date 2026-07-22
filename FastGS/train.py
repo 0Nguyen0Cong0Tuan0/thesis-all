@@ -11,7 +11,7 @@
 
 import torch
 import numpy as np
-import os, random, time
+import os, random, time, json
 from random import randint
 from lpipsPyTorch import lpips
 from utils.loss_utils import l1_loss
@@ -35,10 +35,12 @@ from utils.fast_utils import compute_gaussian_score_fastgs, sampling_cameras
 
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, websockets):
+    start_time = time.time()
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type)
     scene = Scene(dataset, gaussians)
+    initial_gaussians = gaussians.get_xyz.shape[0]
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -175,8 +177,32 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     # scene.save(iteration)
     print(f"Gaussian number: {gaussians._xyz.shape[0]}")
     print(f"Training time: {total_time}")
-    
-def prepare_output_and_logger(args):    
+
+    duration = time.time() - start_time
+    metadata = {
+        "scene": dataset.source_path.split("/")[-1],
+        "git_branch": get_git_branch(),
+        "image_scale": dataset.images,
+        "iterations": opt.iterations,
+        "initial_gaussians": initial_gaussians,
+        "final_gaussians": gaussians.get_xyz.shape[0],
+        "training_time_seconds": round(duration, 2),
+        "training_time_formatted": f"{int(duration // 60)}m {int(duration % 60)}s",
+        "peak_vram_mib": round(torch.cuda.max_memory_allocated() / (1024 ** 2), 2),
+    }
+    info_path = os.path.join(dataset.model_path, "train_info.json")
+    with open(info_path, "w") as f:
+        json.dump(metadata, f, indent=4)
+    print(f"Training metadata saved to {info_path}")
+
+def get_git_branch():
+    try:
+        import subprocess
+        return subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).decode("utf-8").strip()
+    except Exception:
+        return "unknown"
+
+def prepare_output_and_logger(args):
     if not args.model_path:
         if os.getenv('OAR_JOB_ID'):
             unique_str=os.getenv('OAR_JOB_ID')
