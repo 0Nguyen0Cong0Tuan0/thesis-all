@@ -241,7 +241,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             norm_data = im_data / 255.0
 
             arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
-            image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
+            image = Image.fromarray(np.array(arr * 255.0, dtype=np.uint8), "RGB")
 
             # if "train" in transformsfile:
             #     normal_path = os.path.join(path, frame["file_path"] + "_normal.png")
@@ -420,7 +420,7 @@ def readCamerasFromNSVFPoses(path, idx, white_background, extension=".png"):
 
         norm_data = im_data / 255.0
         arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
-        image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
+        image = Image.fromarray(np.array(arr * 255.0, dtype=np.uint8), "RGB")
 
         # given focal in pixel unit
         FovY = focal2fov(focal, image.size[1])
