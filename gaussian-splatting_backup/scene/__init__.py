@@ -45,8 +45,7 @@ class Scene:
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.depths, args.eval)
-        else:
-            elif os.path.exists(os.path.join(self.model_path, "cameras.json")):
+        elif os.path.exists(os.path.join(self.model_path, "cameras.json")):
             print("Found cameras.json in model_path! Loading cameras from cameras.json ...")
             scene_info = readCamerasFromJSONFile(self.model_path)
         else:

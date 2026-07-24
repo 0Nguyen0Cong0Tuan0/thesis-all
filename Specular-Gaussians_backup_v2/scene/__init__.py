@@ -57,8 +57,7 @@ class Scene:
         elif os.path.exists(os.path.join(args.source_path, "bbox.txt")):
             print("Found bbox.txt file, assuming NSVF Blender data set!")
             scene_info = sceneLoadTypeCallbacks["NSVF"](args.source_path, args.white_background, args.eval)
-        else:
-            elif os.path.exists(os.path.join(self.model_path, "cameras.json")):
+        elif os.path.exists(os.path.join(self.model_path, "cameras.json")):
             print("Found cameras.json in model_path! Loading cameras from cameras.json ...")
             scene_info = readCamerasFromJSONFile(self.model_path)
         else:
@@ -144,8 +143,7 @@ class AnchorScene:
         elif os.path.exists(os.path.join(args.source_path, "bbox.txt")):
             print("Found bbox.txt file, assuming NSVF Blender data set!")
             scene_info = sceneLoadTypeCallbacks["NSVF"](args.source_path, args.white_background, args.eval)
-        else:
-            elif os.path.exists(os.path.join(self.model_path, "cameras.json")):
+        elif os.path.exists(os.path.join(self.model_path, "cameras.json")):
             print("Found cameras.json in model_path! Loading cameras from cameras.json ...")
             scene_info = readCamerasFromJSONFile(self.model_path)
         else:
