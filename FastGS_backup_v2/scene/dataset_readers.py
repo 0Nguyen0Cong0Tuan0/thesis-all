@@ -258,3 +258,51 @@ sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
     "Blender" : readNerfSyntheticInfo
 }
+
+def readCamerasFromJSONFile(model_path):
+    cam_infos = []
+    cameras_json_path = os.path.join(model_path, "cameras.json")
+    if not os.path.exists(cameras_json_path):
+        return SceneInfo(point_cloud=None, train_cameras=[], test_cameras=[], nerf_normalization={"radius": 1.0}, ply_path="", is_nerf_synthetic=False)
+
+    with open(cameras_json_path, "r") as f:
+        cam_list = json.load(f)
+
+    for cam in cam_list:
+        idx = cam.get("id", 0)
+        image_name = cam.get("img_name", f"{idx:05d}")
+        width = cam.get("width", 1600)
+        height = cam.get("height", 1000)
+
+        R = np.array(cam["rotation"])
+        if "position" in cam:
+            pos = np.array(cam["position"])
+            T = -np.matmul(R.T, pos)
+        else:
+            T = np.array(cam.get("T", [0.0, 0.0, 0.0]))
+
+        fx = cam.get("fx", 1000.0)
+        fy = cam.get("fy", 1000.0)
+        fovx = cam.get("FovX", focal2fov(fx, width))
+        fovy = cam.get("FovY", focal2fov(fy, height))
+
+        image_path = os.path.join(model_path, f"{image_name}.png")
+
+        cam_infos.append(CameraInfo(
+            uid=idx, R=R, T=T, FovY=fovy, FovX=fovx,
+            image_path=image_path, image_name=image_name,
+            width=width, height=height, depth_path="", depth_params=None, is_test=True
+        ))
+
+    nerf_norm = getNerfppNorm(cam_infos) if len(cam_infos) > 0 else {"radius": 1.0}
+    ply_path = os.path.join(model_path, "input.ply")
+    pcd = fetchPly(ply_path) if os.path.exists(ply_path) else None
+
+    return SceneInfo(
+        point_cloud=pcd,
+        train_cameras=[],
+        test_cameras=cam_infos,
+        nerf_normalization=nerf_norm,
+        ply_path=ply_path,
+        is_nerf_synthetic=False
+    )

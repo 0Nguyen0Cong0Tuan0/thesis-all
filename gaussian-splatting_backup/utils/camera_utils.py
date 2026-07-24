@@ -18,7 +18,12 @@ import cv2
 WARNED = False
 
 def loadCam(args, id, cam_info, resolution_scale, is_nerf_synthetic, is_test_dataset):
-    image = Image.open(cam_info.image_path)
+    try:
+        image = Image.open(cam_info.image_path)
+    except Exception:
+        w = getattr(cam_info, "width", 1600)
+        h = getattr(cam_info, "height", 1000)
+        image = Image.new("RGB", (w, h), (0, 0, 0))
 
     if cam_info.depth_path != "":
         try:
