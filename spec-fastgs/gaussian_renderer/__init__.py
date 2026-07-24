@@ -62,23 +62,39 @@ def render_fastgs(
 
     #onfig cho CUDA rasterizer: kích thước ảnh, matrix camera, 
     # FoV, background, SH degree, camera center, mult, debug, metric_map.
-    raster_settings = GaussianRasterizationSettings(
-        image_height=H,
-        image_width=W,
-        tanfovx=tanfovx,
-        tanfovy=tanfovy,
-        bg=bg_color,
-        scale_modifier=scaling_modifier,
-        viewmatrix=viewpoint_camera.world_view_transform,
-        projmatrix=viewpoint_camera.full_proj_transform,
-        sh_degree=pc.active_sh_degree,
-        campos=viewpoint_camera.camera_center,
-        mult=mult,
-        prefiltered=False,
-        debug=pipe.debug,
-        get_flag=get_flag,
-        metric_map=metric_map
-    )
+    try:
+        raster_settings = GaussianRasterizationSettings(
+            image_height=H,
+            image_width=W,
+            tanfovx=tanfovx,
+            tanfovy=tanfovy,
+            bg=bg_color,
+            scale_modifier=scaling_modifier,
+            viewmatrix=viewpoint_camera.world_view_transform,
+            projmatrix=viewpoint_camera.full_proj_transform,
+            sh_degree=pc.active_sh_degree,
+            campos=viewpoint_camera.camera_center,
+            mult=mult,
+            prefiltered=False,
+            debug=pipe.debug,
+            get_flag=get_flag,
+            metric_map=metric_map
+        )
+    except TypeError:
+        raster_settings = GaussianRasterizationSettings(
+            image_height=H,
+            image_width=W,
+            tanfovx=tanfovx,
+            tanfovy=tanfovy,
+            bg=bg_color,
+            scale_modifier=scaling_modifier,
+            viewmatrix=viewpoint_camera.world_view_transform,
+            projmatrix=viewpoint_camera.full_proj_transform,
+            sh_degree=pc.active_sh_degree,
+            campos=viewpoint_camera.camera_center,
+            prefiltered=False,
+            debug=pipe.debug
+        )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
