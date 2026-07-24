@@ -345,8 +345,8 @@ def readCamerasFromJSONFile(model_path):
 
         cam_infos.append(CameraInfo(
             uid=idx, R=R, T=T, FovY=fovy, FovX=fovx,
-            image_path=image_path, image_name=image_name,
-            width=width, height=height, depth_path="", depth_params=None, is_test=True
+            depth_params=None, image_path=image_path, image_name=image_name,
+            depth_path="", width=width, height=height, is_test=True
         ))
 
     nerf_norm = getNerfppNorm(cam_infos) if len(cam_infos) > 0 else {"radius": 1.0}

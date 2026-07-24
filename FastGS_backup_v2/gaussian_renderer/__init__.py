@@ -106,16 +106,29 @@ def render_fastgs(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.T
         colors_precomp = override_color
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    rendered_image, radii, accum_metric_counts = rasterizer(
-        means3D = means3D,
-        means2D = means2D,
-        dc = dc,
-        shs = shs,
-        colors_precomp = colors_precomp,
-        opacities = opacity,
-        scales = scales,
-        rotations = rotations,
-        cov3D_precomp = cov3D_precomp)
+    try:
+        rendered_image, radii, accum_metric_counts = rasterizer(
+            means3D = means3D,
+            means2D = means2D,
+            dc = dc,
+            shs = shs,
+            colors_precomp = colors_precomp,
+            opacities = opacity,
+            scales = scales,
+            rotations = rotations,
+            cov3D_precomp = cov3D_precomp)
+    except TypeError:
+        rendered_image, radii, accum_metric_counts = rasterizer(
+            means3D = means3D,
+            means2D = means2D,
+            means2D_densify = means2D,
+            dc = dc,
+            shs = shs,
+            colors_precomp = colors_precomp,
+            opacities = opacity,
+            scales = scales,
+            rotations = rotations,
+            cov3D_precomp = cov3D_precomp)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
