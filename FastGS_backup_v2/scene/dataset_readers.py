@@ -263,7 +263,7 @@ def readCamerasFromJSONFile(model_path):
     cam_infos = []
     cameras_json_path = os.path.join(model_path, "cameras.json")
     if not os.path.exists(cameras_json_path):
-        return SceneInfo(point_cloud=None, train_cameras=[], test_cameras=[], nerf_normalization={"radius": 1.0}, ply_path="", is_nerf_synthetic=False)
+        return SceneInfo(point_cloud=None, train_cameras=[], test_cameras=[], nerf_normalization={"radius": 1.0}, ply_path="")
 
     with open(cameras_json_path, "r") as f:
         cam_list = json.load(f)
@@ -304,6 +304,6 @@ def readCamerasFromJSONFile(model_path):
         train_cameras=[],
         test_cameras=cam_infos,
         nerf_normalization=nerf_norm,
-        ply_path=ply_path,
-        is_nerf_synthetic=False
+        ply_path=ply_path
     )
+

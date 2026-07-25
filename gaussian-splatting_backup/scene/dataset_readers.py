@@ -361,3 +361,4 @@ def readCamerasFromJSONFile(model_path):
         ply_path=ply_path,
         is_nerf_synthetic=False
     )
+

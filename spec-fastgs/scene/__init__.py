@@ -72,6 +72,10 @@ class Scene:
                 args.source_path, args.white_background, args.eval
             )
 
+        elif os.path.exists(os.path.join(self.model_path, "cameras.json")):
+            print("Found cameras.json in model_path! Loading cameras from cameras.json ...")
+            scene_info = readCamerasFromJSONFile(self.model_path)
+
         else:
             raise RuntimeError("Unknown dataset format!")
 
