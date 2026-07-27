@@ -7,9 +7,9 @@
 
 export CUDA_VISIBLE_DEVICES=0
 
-DATA_ROOT=./datasets/mipnerf360
-OUTPUT_ROOT=./output/mip360_images4
-IMAGES=images_4
+DATA_ROOT=${DATA_ROOT:-./datasets/mipnerf360}
+IMAGES=${IMAGES:-images_4}
+OUTPUT_ROOT=${OUTPUT_ROOT:-./output/mip360_${IMAGES}}
 
 SCENES=(
     bicycle
@@ -30,13 +30,13 @@ ASG_DEGREE=64
 #   tan    = Tan-Ikeuchi
 #   shafer = Shafer/Klinker
 #   hybrid = combined heuristic
-REF_PRIOR_METHOD=tan
-EXTRACT_REF_PRIOR=True
-BACKUP_REF_PRIOR=True
-USE_REF_SCORE=True
-USE_ADAPTIVE_PRIOR=True
-USE_SH_SPEC_MASK=True
-STOP_ON_ERROR=True
+REF_PRIOR_METHOD=${REF_PRIOR_METHOD:-tan}
+EXTRACT_REF_PRIOR=${EXTRACT_REF_PRIOR:-True}
+BACKUP_REF_PRIOR=${BACKUP_REF_PRIOR:-True}
+USE_REF_SCORE=${USE_REF_SCORE:-True}
+USE_ADAPTIVE_PRIOR=${USE_ADAPTIVE_PRIOR:-True}
+USE_SH_SPEC_MASK=${USE_SH_SPEC_MASK:-True}
+STOP_ON_ERROR=${STOP_ON_ERROR:-True}
 
 # Representation Capacity: light SH suppression on high-confidence specular areas.
 SH_SPEC_GRAD_SCALE=0.75
