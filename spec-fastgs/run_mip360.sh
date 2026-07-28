@@ -82,6 +82,15 @@ for SCENE in "${SCENES[@]}"; do
         continue
     fi
 
+    # Resume capability: skip scene if already trained & results exist
+    if [ "${SKIP_TRAINED:-True}" = "True" ] && { [ -f "${MODEL_PATH}/results_grouped.json" ] || [ -f "${MODEL_PATH}/results.json" ]; }; then
+        echo "========================================================================"
+        echo " Skipping Spec-FastGS Mip-NeRF 360 scene: ${SCENE}"
+        echo " Reason: Already completed (${MODEL_PATH} contains results)"
+        echo "========================================================================"
+        continue
+    fi
+
     echo "========================================================================"
     echo " Starting spec-fastgs Mip-NeRF 360 scene"
     echo "========================================================================"
