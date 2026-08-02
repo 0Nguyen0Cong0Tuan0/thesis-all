@@ -64,3 +64,5 @@ Spec_fastgs_Luận_văn
 result_*
 storage
 ketqua
+# Ignore bosch_download_dataset.ipynb
+notebooks/bosch_download_dataset.ipynb
