@@ -1,0 +1,1098 @@
+\chapter{Công trình nghiên cứu liên quan}
+\label{Chapter2}
+
+\section{Cơ sở lý thuyết (Background)}
+\label{sec:background}
+
+Chương này trình bày các cơ sở lý thuyết cho bài toán tái tạo
+cảnh ba chiều và tổng hợp góc nhìn mới. Trước hết, các phương pháp biểu
+diễn không gian ba chiều được phân loại dựa trên thông tin hình học và
+ngoại quan của cảnh được lưu trữ, bao gồm biểu diễn tường minh, biểu
+diễn ngầm và biểu diễn hỗn hợp. Tiếp theo, chương tập trung trình bày mô
+hình Gaussian ba chiều (3D Gaussian Splatting -- 3DGS), từ quá trình khởi tạo đám mây điểm, cách tham số hóa Gaussian ba chiều, đến quá trình chiếu, kết xuất khả vi và kiểm soát mật độ. Những nội dung này tạo cơ sở cho việc phân tích các công trình liên quan và xây dựng phương pháp Spec-FastGS được trình bày trong chương tiếp theo.
+
+\subsection{Các phương pháp biểu diễn không gian ba chiều}
+\label{subsec:3d-scene-representations}
+
+Biểu diễn không gian ba chiều quyết định cách một hệ thống lưu trữ, truy
+vấn, biến đổi và kết xuất thông tin của cảnh. Một biểu diễn cảnh thường
+cần mô tả hai nhóm thông tin chính: hình học, vị trí và cấu
+trúc bề mặt của vật thể; và ngoại quan, màu sắc, độ mờ, vật
+liệu hoặc sự thay đổi của màu theo hướng quan sát. Các phương pháp biểu diễn cảnh ba chiều có thể được chia thành ba nhóm chính: biểu diễn tường minh, biểu diễn
+ngầm và biểu diễn hỗn hợp.
+
+\subsubsection{Biểu diễn tường minh
+(Đám mây điểm, Lưới đa giác, Voxel)}
+\label{subsubsec:explicit-representations}
+
+Biểu diễn tường minh mô tả cảnh bằng một tập hữu hạn các phần tử hình
+học được lưu trực tiếp trong bộ nhớ. Mỗi phần tử có vị trí xác định
+trong không gian và có thể đi kèm các thuộc tính như màu sắc, pháp
+tuyến, độ mờ hoặc thông tin vật liệu. Do cấu trúc hình học được biểu
+diễn trực tiếp, các phép truy vấn vị trí, biến đổi hình học và kết xuất
+thường có thể được thực hiện mà không cần lấy mẫu dày đặc một trường
+liên tục.
+
+\noindent\textbf{Đám mây điểm.}
+
+Đám mây điểm biểu diễn cảnh bằng một tập các điểm rời rạc trong không
+gian ba chiều:
+
+\begin{equation}
+    \mathcal{P}
+    =
+    \left\{
+        \left(
+            \mathbf{p}_i,
+            \mathbf{a}_i
+        \right)
+    \right\}_{i=1}^{N},
+    \qquad
+    \mathbf{p}_i\in\mathbb{R}^{3},
+    \label{eq:explicit-point-cloud}
+\end{equation}
+
+trong đó $\mathbf{p}_i$ là tọa độ của điểm thứ $i$ và
+$\mathbf{a}_i$ là tập thuộc tính, chẳng hạn màu RGB, pháp
+tuyến hoặc độ tin cậy của phép đo.
+
+Ưu điểm chính của đám mây điểm là cấu trúc đơn giản, không yêu cầu thiết
+lập quan hệ liên kết giữa các điểm và có thể biểu diễn các cảnh có hình
+học phức tạp hoặc nhiều thành phần rời rạc. Số lượng điểm cũng có thể
+được điều chỉnh thích nghi theo mức độ chi tiết của từng vùng. Vì vậy,
+đám mây điểm thường được sử dụng làm kết quả trung gian của quá trình
+tái tạo ba chiều và làm dữ liệu khởi tạo cho các mô hình dựa trên điểm.
+
+Tuy nhiên, một đám mây điểm chỉ cung cấp các mẫu rời rạc của bề mặt mà
+không mô tả trực tiếp tính liên tục hoặc quan hệ lân cận giữa chúng.
+Khi mật độ điểm không đồng đều, biểu diễn có thể xuất hiện khoảng trống,
+nhiễu hoặc các điểm ngoại lai. Để kết xuất một bề mặt đặc, hệ thống
+thường cần thực hiện thêm các bước như ước lượng pháp tuyến, nội suy,
+tái tạo bề mặt hoặc gắn cho mỗi điểm một vùng ảnh hưởng không gian.
+
+\noindent\textbf{Lưới đa giác.}
+
+Lưới đa giác biểu diễn bề mặt vật thể bằng một tập đỉnh và các mặt đa
+giác liên kết giữa những đỉnh này. Trong phần lớn ứng dụng đồ họa máy
+tính, mặt tam giác được sử dụng do ba điểm không thẳng hàng luôn xác
+định một mặt phẳng. Một lưới tam giác có thể được ký hiệu bởi:
+
+\begin{equation}
+    \mathcal{M}
+    =
+    \left(
+        \mathcal{V},
+        \mathcal{E},
+        \mathcal{F}
+    \right),
+    \label{eq:explicit-triangle-mesh}
+\end{equation}
+
+trong đó $\mathcal{V}$ là tập đỉnh,
+$\mathcal{E}$ là tập cạnh và
+$\mathcal{F}$ là tập mặt tam giác. Mỗi đỉnh có thể chứa thêm pháp tuyến,
+tọa độ kết cấu và các thuộc tính vật liệu.
+
+Nhờ mô tả trực tiếp tính liên kết của bề mặt, lưới đa giác phù hợp với
+các phép toán hình học, mô phỏng vật lý và kết xuất. Các bộ xử lý đồ 
+họa hiện đại được tối ưu mạnh cho quá
+trình chiếu và raster hóa tam giác, cho phép lưới đa giác đạt hiệu suất
+kết xuất cao. Ngoại quan chi tiết có thể được lưu trong bản đồ kết cấu,
+trong khi các mô hình vật liệu được sử dụng để tính màu phụ thuộc vào
+hướng nhìn và điều kiện chiếu sáng.
+
+Hạn chế của lưới đa giác nằm ở yêu cầu xây dựng cấu trúc liên kết bề mặt
+hợp lệ. Đối với dữ liệu được tái tạo từ ảnh, việc chuyển một đám mây
+điểm nhiễu thành lưới kín và nhất quán có thể là một bài toán phức tạp.
+Các bề mặt mỏng, vùng che khuất hoặc cấu trúc có nhiều chi tiết nhỏ có
+thể dẫn đến lỗ hổng. Bên cạnh đó, việc thay đổi cấu trúc lưới trong quá trình tối ưu thường khó thực hiện hơn so với việc thêm hoặc loại bỏ các phần tử độc lập.
+
+\noindent\textbf{Lưới voxel.}
+
+Voxel có thể được xem là phần tử tương ứng với điểm ảnh trong không gian
+ba chiều. Không gian cảnh được chia thành một lưới đều gồm các ô thể
+tích, trong đó mỗi voxel lưu trữ trạng thái chiếm chỗ hoặc một vector
+thuộc tính:
+
+\begin{equation}
+    \mathcal{V}_{\mathrm{vox}}
+    :
+    \mathbb{Z}^{3}
+    \rightarrow
+    \mathbb{R}^{D},
+    \label{eq:explicit-voxel-grid}
+\end{equation}
+
+trong đó mỗi chỉ số nguyên ba chiều xác định một ô không gian và
+$D$ là số chiều thuộc tính được lưu tại ô đó. Tùy theo ứng dụng, thuộc
+tính voxel có thể là giá trị nhị phân biểu diễn chiếm chỗ, mật độ, màu
+sắc, khoảng cách có dấu hoặc một vector đặc trưng có thể học được.
+
+Do các voxel được sắp xếp trên một lưới đều, quan hệ lân cận giữa các
+phần tử được xác định rõ ràng. Cấu trúc này thuận tiện cho các phép toán
+tích chập ba chiều, truy vấn thể tích, phát hiện va chạm và kết xuất
+dựa trên lấy mẫu tia. Voxel cũng có khả năng biểu diễn đồng thời bề mặt
+và phần bên trong của vật thể, thay vì chỉ lưu các mẫu nằm trên bề mặt.
+
+Nhược điểm quan trọng của lưới voxel là chi phí bộ nhớ tăng theo lập
+phương của độ phân giải. Với lưới có độ phân giải
+$R\times R\times R$, số ô cần lưu là:
+
+\begin{equation}
+    N_{\mathrm{vox}}
+    =
+    R^{3}.
+    \label{eq:number-of-voxels}
+\end{equation}
+
+Vì vậy, khi tăng gấp đôi độ phân giải theo mỗi chiều, số voxel tăng gấp tám lần. Phần lớn không gian trong một cảnh thực tế thường là rỗng, khiến lưới đặc lưu trữ nhiều phần tử không cần thiết. Các cấu trúc thưa như cây bát phân, lưới băm \cite{niessner2013hashing} hoặc voxel phân cấp có thể giảm chi phí này, nhưng đồng thời làm tăng độ phức tạp của quá trình truy cập và triển khai.
+
+Nhìn chung, các biểu diễn tường minh cung cấp khả năng truy cập hình học trực tiếp và thường có quy trình kết xuất hiệu quả. Đám mây điểm có cấu trúc linh hoạt nhưng thiếu thông tin liên kết bề mặt; lưới đa giác mô tả bề mặt liên tục và phù hợp với raster hóa phần cứng; trong khi voxel có cấu trúc lân cận đều đặn nhưng chịu chi phí bộ nhớ lớn khi tăng độ phân giải.
+        
+        \subsubsection{Biểu diễn ngầm (Trường bức xạ nơ-ron -- NeRF)}
+\label{subsubsec:implicit-nerf-representation}
+
+Khác với các biểu diễn tường minh lưu trực tiếp các phần tử hình học,
+biểu diễn ngầm mô tả cảnh thông qua một hàm liên tục được tham số hóa.
+Thay vì lưu trữ một tập đỉnh, mặt tam giác hoặc voxel tại các vị trí cố
+định, hệ thống học một hàm ánh xạ từ tọa độ không gian sang các thuộc
+tính cần thiết để tái tạo cảnh.
+
+Trường bức xạ nơ-ron
+(Neural Radiance Field -- NeRF) \cite{mildenhall2020nerf}
+là một dạng biểu diễn ngầm được phát triển cho bài toán tổng hợp góc
+nhìn mới. NeRF biểu diễn một cảnh tĩnh bằng một mạng nơ-ron liên tục
+$F_{\boldsymbol{\theta}}$, ánh xạ vị trí ba chiều
+$\mathbf{x}\in\mathbb{R}^{3}$ và hướng quan sát
+$\mathbf{d}\in\mathbb{S}^{2}$ thành mật độ thể tích
+$\sigma$ và màu phát xạ
+$\mathbf{c}\in\mathbb{R}^{3}$:
+
+\begin{equation}
+    F_{\boldsymbol{\theta}}
+    :
+    \left(
+        \mathbf{x},
+        \mathbf{d}
+    \right)
+    \longmapsto
+    \left(
+        \sigma,
+        \mathbf{c}
+    \right),
+    \label{eq:nerf-radiance-field}
+\end{equation}
+
+trong đó $\boldsymbol{\theta}$ là tập tham số có thể học được của mạng.
+Mật độ $\sigma$ mô tả khả năng một tia sáng bị hấp thụ tại vị trí
+$\mathbf{x}$, qua đó cung cấp thông tin về sự hiện diện của bề mặt.
+Màu $\mathbf{c}$ mô tả bức xạ quan sát được tại vị trí đó theo hướng
+$\mathbf{d}$.
+
+Trong kiến trúc NeRF cơ bản, mật độ được giả định chỉ phụ thuộc vào vị
+trí không gian:
+
+\begin{equation}
+    \sigma
+    =
+    \sigma_{\boldsymbol{\theta}}
+    \left(
+        \mathbf{x}
+    \right),
+    \label{eq:nerf-density-function}
+\end{equation}
+
+trong khi màu có thể phụ thuộc đồng thời vào vị trí và hướng quan sát:
+
+\begin{equation}
+    \mathbf{c}
+    =
+    \mathbf{c}_{\boldsymbol{\theta}}
+    \left(
+        \mathbf{x},
+        \mathbf{d}
+    \right).
+    \label{eq:nerf-color-function}
+\end{equation}
+
+Cách phân tách này thể hiện giả định rằng cấu trúc hình học của cảnh
+không thay đổi theo hướng nhìn, trong khi ngoại quan quan sát được có
+thể biến thiên theo vị trí camera. Nhờ đó, NeRF có khả năng biểu diễn
+một số hiệu ứng phụ thuộc góc nhìn như phản xạ gương, độ bóng và sự thay
+đổi màu sắc theo hướng quan sát.
+
+\noindent\textbf{Mã hóa vị trí.}
+
+Mạng perceptron nhiều lớp có xu hướng ưu tiên học các hàm biến thiên
+chậm và gặp khó khăn khi biểu diễn các chi tiết không gian có tần số
+cao. Để tăng khả năng mô hình hóa các cấu trúc nhỏ và đường biên sắc
+nét, NeRF áp dụng phép mã hóa vị trí
+(positional encoding) \cite{tancik2020fourier}
+cho tọa độ không gian và hướng quan sát.
+
+Với một đại lượng vô hướng $p$, phép mã hóa tần số được xác định bởi:
+
+\begin{equation}
+    \gamma_L(p)
+    =
+    \left[
+        \sin\left(2^{0}\pi p\right),
+        \cos\left(2^{0}\pi p\right),
+        \ldots,
+        \sin\left(2^{L-1}\pi p\right),
+        \cos\left(2^{L-1}\pi p\right)
+    \right].
+    \label{eq:nerf-positional-encoding-scalar}
+\end{equation}
+
+Phép mã hóa được áp dụng độc lập cho từng thành phần của vector vị trí:
+
+\begin{equation}
+    \gamma_L(\mathbf{x})
+    =
+    \left[
+        \gamma_L(x),
+        \gamma_L(y),
+        \gamma_L(z)
+    \right].
+    \label{eq:nerf-positional-encoding-position}
+\end{equation}
+
+Các thành phần sin và cos ở nhiều tần số cung cấp cho mạng một hệ cơ sở
+giàu hơn, cho phép biểu diễn cả các biến thiên không gian trơn và các
+chi tiết có tần số cao. Hướng quan sát cũng có thể được mã hóa tương tự,
+thường với số mức tần số thấp hơn so với tọa độ vị trí.
+
+\noindent\textbf{Kết xuất thể tích dọc theo tia quan sát.}
+
+Để tạo màu cho một điểm ảnh, NeRF phát một tia từ tâm camera xuyên qua
+điểm ảnh đó. Với tâm camera $\mathbf{o}$ và hướng tia đơn vị
+$\mathbf{d}$, một điểm trên tia được tham số hóa bởi:
+
+\begin{equation}
+    \mathbf{r}(t)
+    =
+    \mathbf{o}
+    +
+    t\mathbf{d},
+    \qquad
+    t\in[t_n,t_f],
+    \label{eq:nerf-camera-ray}
+\end{equation}
+
+trong đó $t_n$ và $t_f$ lần lượt là cận gần và cận xa của khoảng lấy
+mẫu. Màu của tia được xác định theo phương trình kết xuất thể tích \cite{max1995optical}:
+
+\begin{equation}
+    \mathbf{C}
+    \left(
+        \mathbf{r}
+    \right)
+    =
+    \int_{t_n}^{t_f}
+    T(t)\,
+    \sigma
+    \left(
+        \mathbf{r}(t)
+    \right)
+    \mathbf{c}
+    \left(
+        \mathbf{r}(t),
+        \mathbf{d}
+    \right)
+    \,\mathrm{d}t,
+    \label{eq:nerf-continuous-volume-rendering}
+\end{equation}
+
+trong đó:
+
+\begin{equation}
+    T(t)
+    =
+    \exp
+    \left(
+        -
+        \int_{t_n}^{t}
+        \sigma
+        \left(
+            \mathbf{r}(s)
+        \right)
+        \,\mathrm{d}s
+    \right)
+    \label{eq:nerf-continuous-transmittance}
+\end{equation}
+
+là độ truyền qua tích lũy từ camera đến vị trí
+$\mathbf{r}(t)$. Đại lượng này biểu diễn tỉ lệ ánh sáng còn lại sau khi
+đi qua các vùng có mật độ nằm trước điểm đang xét.
+
+Trong thực tế, tích phân liên tục được xấp xỉ bằng cách lấy mẫu
+$N$ điểm dọc theo tia:
+
+\begin{equation}
+    \mathbf{x}_i
+    =
+    \mathbf{r}(t_i),
+    \qquad
+    i=1,\ldots,N.
+    \label{eq:nerf-ray-samples}
+\end{equation}
+
+Gọi:
+
+\begin{equation}
+    \delta_i
+    =
+    t_{i+1}-t_i
+    \label{eq:nerf-sampling-interval}
+\end{equation}
+
+là khoảng cách giữa hai mẫu liên tiếp. Độ mờ hiệu dụng tại mẫu thứ $i$
+được xác định bởi:
+
+\begin{equation}
+    \alpha_i
+    =
+    1-
+    \exp
+    \left(
+        -\sigma_i\delta_i
+    \right),
+    \label{eq:nerf-sample-alpha}
+\end{equation}
+
+trong đó:
+
+\begin{equation}
+    \sigma_i
+    =
+    \sigma_{\boldsymbol{\theta}}
+    \left(
+        \mathbf{x}_i
+    \right).
+\end{equation}
+
+Độ truyền qua trước mẫu thứ $i$ được tính bởi:
+
+\begin{equation}
+    T_i
+    =
+    \prod_{j=1}^{i-1}
+    \left(
+        1-\alpha_j
+    \right).
+    \label{eq:nerf-discrete-transmittance}
+\end{equation}
+
+Màu dự đoán của tia khi đó được xấp xỉ bằng:
+
+\begin{equation}
+    \widehat{\mathbf{C}}
+    \left(
+        \mathbf{r}
+    \right)
+    =
+    \sum_{i=1}^{N}
+    T_i
+    \alpha_i
+    \mathbf{c}_i,
+    \label{eq:nerf-discrete-volume-rendering}
+\end{equation}
+
+trong đó màu của mẫu thứ $i$ được đánh giá trực tiếp từ trường bức xạ:
+
+\begin{equation}
+    \mathbf{c}_i
+    =
+    \mathbf{c}_{\boldsymbol{\theta}}
+    \left(
+        \mathbf{x}_i,
+        \mathbf{d}
+    \right).
+\end{equation}
+
+Trọng số kết xuất của mẫu thứ $i$ được định nghĩa bởi:
+
+\begin{equation}
+    w_i
+    =
+    T_i\alpha_i,
+    \label{eq:nerf-rendering-weight}
+\end{equation}
+
+Đại lượng này biểu diễn mức đóng góp của mẫu thứ $i$ vào màu cuối cùng của điểm ảnh.
+Một mẫu chỉ tạo đóng góp lớn khi đồng thời có mật độ đủ cao và chưa bị
+các mẫu phía trước che khuất.
+
+\noindent\textbf{Quá trình tối ưu.}
+
+NeRF được huấn luyện từ một tập ảnh của cảnh cùng các tham số camera đã
+được hiệu chuẩn. Tại mỗi vòng lặp, hệ thống lấy mẫu các tia từ ảnh huấn
+luyện, kết xuất màu dự đoán bằng
+Công thức~\ref{eq:nerf-discrete-volume-rendering}
+và so sánh với màu quan sát thực tế. Hàm mất mát quang học cơ bản có thể
+được biểu diễn bởi:
+
+\begin{equation}
+    \mathcal{L}_{\mathrm{NeRF}}
+    =
+    \frac{1}{|\mathcal{R}|}
+    \sum_{\mathbf{r}\in\mathcal{R}}
+    \left\|
+        \widehat{\mathbf{C}}
+        \left(
+            \mathbf{r}
+        \right)
+        -
+        \mathbf{C}^{\mathrm{gt}}
+        \left(
+            \mathbf{r}
+        \right)
+    \right\|_2^2,
+    \label{eq:nerf-photometric-loss}
+\end{equation}
+
+trong đó $\mathcal{R}$ là tập tia được lấy mẫu trong một vòng lặp và
+$\mathbf{C}^{\mathrm{gt}}(\mathbf{r})$ là màu tham chiếu của tia tương
+ứng. Do quá trình đánh giá mạng và kết xuất thể tích đều khả vi, gradient
+của hàm mất mát có thể được truyền ngược để cập nhật các tham số
+$\boldsymbol{\theta}$.
+
+Biểu diễn liên tục giúp NeRF nội suy màu sắc và hình học giữa các góc
+nhìn huấn luyện, qua đó tạo ra ảnh có chất lượng cao tại những vị trí
+camera chưa được quan sát. Mạng nơ-ron cũng có khả năng nén các cấu trúc
+không gian phức tạp vào một tập tham số chung thay vì lưu trữ riêng từng
+phần tử hình học. Ngoài ra, việc đưa hướng quan sát vào hàm màu cung cấp
+khả năng mô hình hóa ngoại quan phụ thuộc góc nhìn tốt hơn so với các
+biểu diễn chỉ lưu màu cố định.
+
+Tuy nhiên, NeRF phải đánh giá mạng nơ-ron tại nhiều vị trí lấy mẫu trên
+mỗi tia và trên một số lượng lớn điểm ảnh. Nếu mỗi tia chứa $N$ mẫu và
+ảnh có kích thước $H\times W$, số lần truy vấn trường bức xạ trong một
+lượt kết xuất có thể đạt xấp xỉ:
+
+\begin{equation}
+    N_{\mathrm{query}}
+    =
+    H
+    W
+    N.
+    \label{eq:nerf-number-of-network-queries}
+\end{equation}
+
+Chi phí lấy mẫu dày đặc và đánh giá mạng lặp lại làm thời gian huấn
+luyện và kết xuất của NeRF cơ bản tương đối lớn. Bên cạnh đó, do hình
+học được mã hóa trong trường mật độ liên tục, việc truy cập, chỉnh sửa
+hoặc thao tác trực tiếp trên cấu trúc cảnh không thuận tiện như đối với
+lưới đa giác hoặc đám mây điểm. Bề mặt thường phải được trích xuất gián
+tiếp từ trường mật độ thông qua một ngưỡng hoặc một thuật toán tái tạo
+bề mặt bổ sung (như Marching Cubes \cite{lorensen1987marching}).
+
+Như vậy, NeRF cung cấp một biểu diễn ngầm liên tục có khả năng tổng hợp góc nhìn mới với chất lượng cao và mô hình hóa ngoại quan phụ thuộc hướng. Tuy nhiên, chi phí kết xuất dựa trên lấy mẫu tia và việc thiếu các phần tử hình học tường minh hạn chế khả năng ứng dụng trong những hệ thống yêu cầu huấn luyện nhanh, kết xuất thời gian thực hoặc chỉnh sửa cảnh trực tiếp. Những hạn chế này thúc đẩy sự phát triển của các biểu diễn hỗn hợp, trong đó cảnh vẫn được mô tả bằng các phần tử hình học tường minh nhưng các thuộc tính ngoại quan được tối ưu liên tục từ dữ liệu đa góc nhìn.
+        
+        \subsubsection{Biểu diễn hỗn hợp (Các hạt Gaussian ba chiều)}
+\label{subsubsec:hybrid-gaussian-representation}
+
+Biểu diễn hỗn hợp hướng đến việc kết hợp khả năng truy cập hình học trực
+tiếp của các biểu diễn tường minh với khả năng mô hình hóa ngoại quan
+liên tục của các biểu diễn ngầm. Thay vì mã hóa toàn bộ cảnh trong một
+mạng nơ-ron hoặc lưu trữ bề mặt dưới dạng các phần tử hình học cố định,
+các phương pháp thuộc nhóm này duy trì một tập phần tử không gian có vị
+trí xác định, đồng thời gắn cho mỗi phần tử những thuộc tính có thể học
+được từ dữ liệu quan sát đa góc nhìn.
+
+
+3D Gaussian Splatting -- 3DGS là một biểu diễn tiêu biểu theo hướng này. Cảnh được mô tả bằng một tập
+các Gaussian ba chiều dị hướng, trong đó mỗi Gaussian có các thuộc tính
+hình học tường minh như vị trí trung tâm, tỉ lệ, hướng xoay và độ mờ.
+Bên cạnh đó, các thuộc tính ngoại quan phụ thuộc hướng nhìn được lưu
+dưới dạng những hệ số có thể tối ưu từ tập ảnh đầu vào. Khác với đám
+mây điểm thông thường, mỗi Gaussian không chỉ đại diện cho một tọa độ
+rời rạc mà tạo ra một vùng ảnh hưởng liên tục trong không gian.
+
+Trong quá trình kết xuất, các Gaussian ba chiều được chiếu xuống mặt
+phẳng ảnh thành những elip hai chiều. Các Gaussian có vùng chiếu giao
+với cùng một điểm ảnh được sắp xếp theo độ sâu và tổng hợp bằng phép pha
+trộn alpha. Toàn bộ quá trình chiếu, đánh giá màu và pha trộn được xây
+dựng theo hướng khả vi, nhờ đó sai số giữa ảnh kết xuất và ảnh tham
+chiếu có thể được truyền ngược để cập nhật trực tiếp các tham số hình
+học và ngoại quan của từng Gaussian.
+
+Cách biểu diễn này tránh được quá trình lấy mẫu dày đặc dọc theo từng
+tia như trong NeRF, đồng thời không yêu cầu xây dựng cấu trúc liên kết
+bề mặt chặt chẽ như lưới đa giác. Tập Gaussian cũng có thể được điều
+chỉnh linh hoạt bằng các thao tác nhân bản, chia tách và cắt tỉa trong
+quá trình tối ưu. Nhờ đó, 3DGS tạo ra một sự cân bằng giữa chất lượng
+tổng hợp góc nhìn mới, khả năng tối ưu trực tiếp và hiệu suất kết xuất,
+làm cơ sở cho mô hình được trình bày chi tiết trong phần tiếp theo.
+
+Bảng~\ref{tab:summary-3d-representations} tổng hợp nguyên lý và các
+công đoạn xử lý chính của những phương pháp biểu diễn không gian ba
+chiều đã trình bày.
+
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.25}
+\setlength{\tabcolsep}{4pt}
+
+\begin{xltabular}
+    {\textwidth}
+    {
+        |>{\raggedright\arraybackslash}p{0.13\textwidth}
+        |>{\raggedright\arraybackslash}X
+        |>{\raggedright\arraybackslash}p{0.16\textwidth}
+        |>{\raggedright\arraybackslash}p{0.17\textwidth}
+        |>{\raggedright\arraybackslash}p{0.20\textwidth}|
+    }
+
+    \hline
+
+    \multirow{2}{=}{\centering\textbf{Phương pháp}}
+    &
+    \multirow{2}{=}{\centering\textbf{Nguyên lý}}
+    &
+    \multicolumn{3}{c|}{\textbf{Công đoạn}}
+    \\ \cline{3-5}
+
+    &
+    &
+    \makecell{\textbf{Chuẩn bị}\\\textbf{dữ liệu}}
+    &
+    \textbf{Huấn luyện}
+    &
+    \makecell{\textbf{Biểu diễn hình}\\\textbf{học ba chiều}}
+    \\ \hline
+
+    \endfirsthead
+
+    \multicolumn{5}{c}
+    {\tablename\ \thetable{} -- tiếp theo}
+    \\ \hline
+
+    \multirow{2}{=}{\centering\textbf{Phương pháp}}
+    &
+    \multirow{2}{=}{\centering\textbf{Nguyên lý}}
+    &
+    \multicolumn{3}{c|}{\textbf{Công đoạn}}
+    \\ \cline{3-5}
+
+    &
+    &
+    \makecell{\textbf{Chuẩn bị}\\\textbf{dữ liệu}}
+    &
+    \textbf{Huấn luyện}
+    &
+    \makecell{\textbf{Biểu diễn hình}\\\textbf{học ba chiều}}
+    \\ \hline
+
+    \endhead
+
+    \hline
+    \multicolumn{5}{r}{\textit{Tiếp tục ở trang sau}}
+    \\
+    \endfoot
+
+    \endlastfoot
+
+    \textbf{Đám mây điểm}
+    &
+    Biểu diễn vật thể bằng một tập hợp các điểm rời rạc trong không
+    gian ba chiều. Mỗi điểm có thể lưu trữ các thuộc tính như màu sắc,
+    pháp tuyến, độ tin cậy hoặc vector đặc trưng.
+    &
+    Dữ liệu được tái tạo từ tập ảnh đa góc nhìn. Các bước tiền xử lý thường bao gồm loại bỏ điểm ngoại lai, lọc nhiễu và chuẩn hóa hệ tọa độ.
+    &
+    Đám mây điểm truyền thống không nhất thiết phải trải qua quá trình
+    huấn luyện. Trong các mô hình có học, vị trí, màu sắc hoặc vector
+    đặc trưng của từng điểm có thể được cập nhật dựa trên hàm mất mát.
+    &
+    Cảnh được biểu diễn trực tiếp bằng các điểm ba chiều. Do không có
+    quan hệ liên kết bề mặt, quá trình kết xuất thường cần nội suy hoặc
+    gán một vùng ảnh hưởng cho mỗi điểm để hạn chế khoảng trống.
+    \\ \hline
+
+    \textbf{Lưới đa giác}
+    &
+    Biểu diễn bề mặt bằng tập các đỉnh, cạnh và mặt đa giác có quan hệ
+    liên kết tường minh. Mặt tam giác là phần tử được sử dụng phổ biến
+    nhất trong các hệ thống đồ họa.
+    &
+    Xây dựng hoặc tái tạo tập đỉnh và cấu trúc liên kết bề mặt. Sau đó,
+    hệ thống ước lượng pháp tuyến, tọa độ kết cấu và các thuộc tính vật
+    liệu cho từng đỉnh hoặc từng mặt.
+    &
+    Vị trí đỉnh, bản đồ kết cấu, pháp
+    tuyến hoặc thuộc tính vật liệu có thể được tối ưu từ sai số giữa
+    ảnh kết xuất và ảnh tham chiếu.
+    &
+    Các mặt tam giác được chiếu lên mặt phẳng ảnh và raster hóa. Màu sắc được xác định dựa trên kết cấu, pháp tuyến, vật liệu, hướng quan sát và điều kiện chiếu sáng.
+    \\ \hline
+
+        \textbf{Lưới voxel}
+    &
+    Phân chia không gian thành một lưới gồm các ô thể tích rời rạc. Mỗi voxel lưu trạng thái chiếm chỗ, mật độ, màu sắc, khoảng cách có dấu hoặc một vector đặc trưng.
+    &
+    Xác định phạm vi cảnh và độ phân giải lưới, sau đó ánh xạ dữ liệu quan sát vào các ô voxel. Các cấu trúc thưa hoặc phân cấp có thể được sử dụng để giảm số lượng ô rỗng cần lưu trữ.
+    &
+    Mật độ, màu sắc hoặc vector đặc trưng tại các voxel có thể được cập nhật bằng phương pháp tối ưu trực tiếp hoặc thông qua mạng nơ-ron tích chập ba chiều.
+    &
+    Hình ảnh được tạo bằng cách lấy mẫu các voxel dọc theo tia quan sát và thực hiện kết xuất thể tích. Ngoài ra, bề mặt có thể được trích xuất từ trường voxel trước khi chuyển sang raster hóa.
+    \\ \hline
+
+    \textbf{Trường bức xạ nơ-ron (NeRF)}
+    &
+    Mã hóa cảnh bằng một hàm nơ-ron liên tục ánh xạ vị trí ba chiều và hướng quan sát thành mật độ thể tích cùng màu sắc phụ thuộc góc nhìn.
+    &
+    Thu thập tập ảnh đa góc nhìn và xác định các tham số nội tại, ngoại tại của camera. Từ mỗi điểm ảnh, hệ thống xây dựng tia quan sát và khoảng lấy mẫu tương ứng trong không gian.
+    &
+    Lấy mẫu nhiều điểm dọc theo mỗi tia, đánh giá mạng nơ-ron tại từng điểm và tích phân mật độ cùng màu sắc. Các tham số mạng được cập nhật từ sai số giữa màu dự đoán và màu tham chiếu.
+    &
+    Cảnh được biểu diễn ngầm trong các tham số của mạng nơ-ron. Ảnh tại góc nhìn mới được tạo bằng cách truy vấn trường bức xạ tại nhiều điểm và thực hiện kết xuất thể tích dọc theo từng tia.
+    \\ \hline
+
+    \textbf{Gaussian ba chiều (3DGS)}
+    &
+    Biểu diễn cảnh bằng tập các Gaussian ba chiều dị hướng. Mỗi Gaussian có các thuộc tính hình học tường minh và những tham số ngoại quan có thể học được từ dữ liệu đa góc nhìn.
+    &
+    Thu thập ảnh đa góc nhìn, hiệu chuẩn camera và xây dựng đám mây điểm thưa bằng phương pháp khôi phục cấu trúc từ chuyển động. Mỗi điểm của đám mây được sử dụng để khởi tạo một Gaussian.
+    &
+    Tối ưu vị trí, kích thước, hướng xoay, độ mờ và các thuộc tính màu thông qua kết xuất khả vi. Cơ chế kiểm soát mật độ thực hiện nhân bản, chia tách hoặc cắt tỉa Gaussian trong quá trình huấn luyện.
+    &
+    Các Gaussian được chiếu thành những elip trên mặt phẳng ảnh, phân nhóm theo từng tile, sắp xếp theo độ sâu và kết hợp bằng phép pha trộn alpha để tạo ra màu cuối cùng tại từng điểm ảnh.
+    \\ \hline
+    \caption{Tổng hợp các phương pháp biểu diễn không gian ba chiều}
+    \label{tab:summary-3d-representations}
+    \\
+\end{xltabular}
+\endgroup
+
+\subsection{Mô hình Gaussian ba chiều (3D Gaussian Splatting -- 3DGS)}
+\label{subsec:3d-gaussian-splatting-model}
+
+Mô hình 3D Gaussian Splatting (3DGS) \cite{kerbl2023gaussian} biểu diễn cảnh ba chiều bằng một tập hợp gồm $N$ hạt Gaussian tường minh dị hướng. Khác với các biểu diễn điểm rời rạc thông thường, mỗi Gaussian 3D định nghĩa một phân bố mật độ và ngoại quan liên tục trong không gian ba chiều, cho phép kết xuất hình ảnh chất lượng cao và tốc độ thời gian thực thông qua thuật toán rasterization vi phân theo tile.
+
+\subsubsection{Tham số hóa và biểu diễn toán học của 3D Gaussian}
+\label{subsubsec:3dgs-mathematical-representation}
+
+Mỗi Gaussian ba chiều thứ $i$ trong cảnh được xác định bởi hàm mật độ xác suất trong không gian $\mathbb{R}^3$:
+
+\begin{equation}
+    G_i(\mathbf{x})
+    =
+    \exp
+    \left(
+        -\frac{1}{2}
+        \left(
+            \mathbf{x} - \boldsymbol{\mu}_i
+        \right)^{T}
+        \boldsymbol{\Sigma}_i^{-1}
+        \left(
+            \mathbf{x} - \boldsymbol{\mu}_i
+        \right)
+    \right),
+    \qquad
+    \mathbf{x} \in \mathbb{R}^3,
+    \label{eq:3dgs-gaussian-formulation}
+\end{equation}
+
+trong đó $\boldsymbol{\mu}_i \in \mathbb{R}^3$ là vị trí trung tâm (tâm Gaussian) và $\boldsymbol{\Sigma}_i \in \mathbb{R}^{3 \times 3}$ là ma trận hiệp phương sai ba chiều xác định hình dạng, kích thước và hướng xoay của Gaussian trong không gian.
+
+Để đảm bảo ma trận hiệp phương sai $\boldsymbol{\Sigma}_i$ luôn xác định dương trong suốt quá trình tối ưu hóa bằng hạ gradient, 3DGS không tối ưu trực tiếp các phần tử của $\boldsymbol{\Sigma}_i$. Thay vào đó, ma trận hiệp phương sai được phân tích thành phép biến đổi tỉ lệ (scaling) và phép xoay (rotation):
+
+\begin{equation}
+    \boldsymbol{\Sigma}_i
+    =
+    \mathbf{R}_i
+    \mathbf{S}_i
+    \mathbf{S}_i^{T}
+    \mathbf{R}_i^{T},
+    \label{eq:3dgs-covariance-factorization}
+\end{equation}
+
+trong đó $\mathbf{S}_i = \operatorname{diag}(\mathbf{s}_i)$ là ma trận tỉ lệ đường chéo được tham số hóa bởi vector tỉ lệ ba chiều $\mathbf{s}_i = (s_x, s_y, s_z) \in \mathbb{R}^3$, và $\mathbf{R}_i \in \mathrm{SO}(3)$ là ma trận xoay được tham số hóa bởi một quaternion đơn vị $\mathbf{q}_i = (q_w, q_x, q_y, q_z) \in \mathbb{R}^4$. 
+
+\subsubsection{Khởi tạo đám mây điểm và hệ số Điều hòa Hình cầu (SH)}
+\label{subsubsec:3dgs-initialization-sh}
+
+Tập Gaussian ba chiều thường được khởi tạo từ một đám mây điểm thưa thớt thu được từ thuật toán Structure-from-Motion (SfM) như COLMAP, hoặc từ một đám mây điểm khởi tạo ngẫu nhiên. Vị trí ban đầu của tâm Gaussian $\boldsymbol{\mu}_i$ được gán trực tiếp bằng tọa độ 3D của điểm tương ứng. Tỉ lệ ban đầu $\mathbf{s}_i$ của từng Gaussian được thiết lập bằng khoảng cách trung bình từ $\boldsymbol{\mu}_i$ đến $k$ điểm lân cận gần nhất ($k=3$), đảm bảo vùng ảnh hưởng của các Gaussian bao phủ liên tục không gian cảnh mà không để lại khoảng trống.
+
+Bên cạnh các thuộc tính hình học (vị trí $\boldsymbol{\mu}_i$, tỉ lệ $\mathbf{s}_i$, hướng xoay $\mathbf{q}_i$ và độ mờ $o_i \in [0,1]$), mỗi 3D Gaussian lưu trữ một tập các hệ số Điều hòa Hình cầu (Spherical Harmonics -- SH) $\mathbf{C}_i = \{ \mathbf{c}_j^m \}$ nhằm biểu diễn sự phụ thuộc của màu sắc vào hướng quan sát $\mathbf{d} \in \mathbb{S}^2$. Hàm biểu diễn màu $\mathbf{c}(\mathbf{d})$ được tính theo công thức tổ hợp tuyến tính các hàm cơ sở SH:
+
+\begin{equation}
+    \mathbf{c}(\mathbf{d})
+    =
+    \sum_{l=0}^{l_{\max}}
+    \sum_{m=-l}^{l}
+    \mathbf{c}_l^m Y_l^m(\mathbf{d}),
+    \label{eq:3dgs-sh-color}
+\end{equation}
+
+trong đó $Y_l^m(\mathbf{d})$ là các hàm cơ sở SH bậc $l$ và chỉ số $m$, còn $\mathbf{c}_l^m \in \mathbb{R}^3$ là các hệ số màu tương ứng. Khác với các mô hình ngầm sử dụng mạng nơ-ron để giải mã màu sắc, 3DGS coi toàn bộ các hệ số SH này là các tham số tường minh có thể học trực tiếp thông qua lan truyền ngược trong thuật toán tối ưu Adam.
+        
+
+        \subsubsection{Quá trình Splatting và Rasterization vi phân}
+        \label{subsubsec:differentiable-splatting-rasterization}
+        
+        Sau khi cảnh được biểu diễn bằng tập các Gaussian ba chiều, quá trình kết xuất thực hiện phép chiếu trực tiếp các Gaussian xuống mặt phẳng ảnh thay vì lấy mẫu nhiều điểm dọc theo từng tia như NeRF. 3D Gaussian Splatting sử dụng một bộ rasterization theo tile để chiếu, sắp xếp và tổng hợp đóng góp của các Gaussian một cách hiệu quả \cite{kerbl2023gaussian}.
+        
+        Xét Gaussian thứ $i$ có vị trí trung tâm $\boldsymbol{\mu}_i\in\mathbb{R}^{3}$ và ma trận hiệp phương sai $\boldsymbol{\Sigma}_i\in\mathbb{R}^{3\times3}$. Với camera $c$, tâm Gaussian sau phép chiếu phối cảnh được xác định bởi:
+        
+        \begin{equation}
+            \boldsymbol{\mu}'_{i,c}
+            =
+            \pi_c
+            \left(
+                \boldsymbol{\mu}_i
+            \right)
+            \in\mathbb{R}^{2},
+            \label{eq:3dgs-projected-mean}
+        \end{equation}
+        
+        trong đó $\pi_c(\cdot)$ là hàm chiếu được xây dựng từ tham số nội tại và ngoại tại của camera. Ma trận hiệp phương sai hai chiều được xấp xỉ thông qua phép tuyến tính hóa cục bộ dựa trên kỹ thuật EWA Splatting \cite{zwicker2001ewa}:
+        
+        \begin{equation}
+            \boldsymbol{\Sigma}'_{i,c}
+            =
+            \mathbf{J}_{i,c}
+            \mathbf{W}^{(3)}_c
+            \boldsymbol{\Sigma}_i
+            \left(
+                \mathbf{W}^{(3)}_c
+            \right)^{T}
+            \mathbf{J}_{i,c}^{T},
+            \label{eq:3dgs-projected-covariance}
+        \end{equation}
+        
+        trong đó $\mathbf{W}^{(3)}_c$ là phép biến đổi từ hệ tọa độ thế giới sang hệ tọa độ camera và $\mathbf{J}_{i,c}$ là Jacobian của phép chiếu. Gaussian ba chiều khi đó được biểu diễn thành một elip hai chiều trên mặt phẳng ảnh:
+        
+        \begin{equation}
+            G^{2D}_{i,c}(\mathbf{p})
+            =
+            \exp
+            \left(
+                -\frac{1}{2}
+                \left(
+                    \mathbf{p}-\boldsymbol{\mu}'_{i,c}
+                \right)^{T}
+                \left(
+                    \boldsymbol{\Sigma}'_{i,c}
+                \right)^{-1}
+                \left(
+                    \mathbf{p}-\boldsymbol{\mu}'_{i,c}
+                \right)
+            \right),
+            \label{eq:3dgs-projected-gaussian}
+        \end{equation}
+        
+        với $\mathbf{p}\in\mathbb{R}^{2}$ là tọa độ điểm ảnh. Quá trình chiếu một Gaussian ba chiều thành vùng ảnh hưởng hai chiều như trên được gọi là \emph{splatting}.
+        
+        Để giảm số phép kiểm tra giữa Gaussian và điểm ảnh, ảnh được chia thành các tile có kích thước cố định. Mỗi Gaussian được gán vào các tile mà vùng elip chiếu của nó giao nhau. Các bản sao Gaussian trong từng tile được sắp xếp theo độ sâu, nhờ đó bộ kết xuất có thể xử lý độc lập từng tile và thực hiện phép tổng hợp màu theo thứ tự từ gần đến xa.
+        
+        Gọi $o_i\in[0,1]$ là độ mờ của Gaussian và $\mathbf{C}_{i,c}\in\mathbb{R}^{3}$ là màu được đánh giá theo hướng quan sát. Hệ số alpha hiệu dụng của Gaussian tại điểm ảnh $\mathbf{p}$ được tính bởi:
+        
+        \begin{equation}
+            \alpha_{i,c}(\mathbf{p})
+            =
+            o_i
+            G^{2D}_{i,c}(\mathbf{p}).
+            \label{eq:3dgs-effective-alpha}
+        \end{equation}
+        
+        Với danh sách các Gaussian bao phủ điểm ảnh được sắp xếp theo độ sâu:
+        
+        \begin{equation}
+            \mathcal{L}_c(\mathbf{p})
+            =
+            \left(
+                i_1,i_2,\ldots,i_M
+            \right),
+        \end{equation}
+        
+        độ truyền qua trước Gaussian thứ $i_m$ được xác định bởi:
+        
+        \begin{equation}
+            T_{m,c}(\mathbf{p})
+            =
+            \prod_{n=1}^{m-1}
+            \left(
+                1-\alpha_{i_n,c}(\mathbf{p})
+            \right),
+            \qquad
+            T_{1,c}(\mathbf{p})=1.
+            \label{eq:3dgs-transmittance}
+        \end{equation}
+        
+        Màu kết xuất tại điểm ảnh được tính bằng phép pha trộn alpha \cite{porter1984compositing} từ trước ra sau:
+        
+        \begin{equation}
+            \widehat{\mathbf{I}}_c(\mathbf{p})
+            =
+            \sum_{m=1}^{M}
+            T_{m,c}(\mathbf{p})
+            \alpha_{i_m,c}(\mathbf{p})
+            \mathbf{C}_{i_m,c}.
+            \label{eq:3dgs-alpha-blending}
+        \end{equation}
+        
+        Trọng số $T_{m,c}(\mathbf{p})\alpha_{i_m,c}(\mathbf{p})$ thể hiện mức đóng góp của từng Gaussian vào màu cuối cùng. Khi độ truyền qua giảm xuống dưới một ngưỡng nhỏ, quá trình tổng hợp có thể kết thúc sớm vì đóng góp của các Gaussian phía sau không còn đáng kể.
+
+        Các phép chiếu, đánh giá Gaussian hai chiều và pha trộn alpha đều phụ thuộc khả vi vào phần lớn các tham số Gaussian. Vì vậy, ảnh kết xuất $\widehat{\mathbf{I}}_c$ có thể được so sánh với ảnh tham chiếu $\mathbf{I}^{\mathrm{gt}}_c$ để tối ưu mô hình bằng lan truyền ngược. Hàm mất mát của 3DGS kết hợp sai số màu theo điểm ảnh và độ tương đồng cấu trúc:
+
+        \begin{equation}
+            \mathcal{L}
+            =
+            \left(
+                1-\lambda_{\mathrm{ssim}}
+            \right)
+            \mathcal{L}_{1}
+            +
+            \lambda_{\mathrm{ssim}}
+            \left(
+                1-
+                \operatorname{SSIM}
+                \left(
+                    \widehat{\mathbf{I}}_c,
+                    \mathbf{I}^{\mathrm{gt}}_c
+                \right)
+            \right).
+            \label{eq:3dgs-rendering-loss}
+        \end{equation}
+
+        Trong đó, $\mathcal{L}_{1}$ đo sai lệch màu trực tiếp tại từng điểm ảnh, còn SSIM bổ sung thông tin về độ sáng, độ tương phản và cấu trúc cục bộ. Mặc dù camera huấn luyện được lấy mẫu ngẫu nhiên tại mỗi vòng lặp, công trình 3DGS sử dụng bộ tối ưu Adam \cite{kingma2014adam} để cập nhật vị trí, tỉ lệ, hướng xoay, độ mờ và các hệ số ngoại quan \cite{kerbl2023gaussian}.
+
+        Bên cạnh việc cập nhật các tham số liên tục, 3DGS sử dụng cơ chế kiểm soát mật độ thích ứng (Adaptive Density Control -- ADC) để thay đổi số lượng Gaussian. Hệ thống tích lũy gradient của vị trí Gaussian trong không gian. Gaussian có gradient lớn hơn ngưỡng $\tau_{\mathrm{grad}}$ được xem là ứng viên mật độ hóa:
+
+        \begin{equation}
+            \left\|
+                \mathbf{g}_i
+            \right\|_2
+            >
+            \tau_{\mathrm{grad}}.
+            \label{eq:3dgs-densification-condition}
+        \end{equation}
+
+        Gaussian có kích thước nhỏ được nhân bản nhằm tăng số phần tử biểu diễn trong vùng tương ứng. Gaussian có kích thước lớn được chia tách thành các Gaussian nhỏ hơn để tăng độ phân giải cục bộ. Ngược lại, các Gaussian có độ mờ thấp hoặc kích thước bất thường được cắt tỉa:
+
+        \begin{equation}
+            o_i
+            <
+            \tau_{\mathrm{opacity}}.
+            \label{eq:3dgs-opacity-pruning}
+        \end{equation}
+
+        Như vậy, quá trình tối ưu của 3DGS diễn ra đồng thời ở hai mức. Adam điều chỉnh các thuộc tính hình học và ngoại quan của từng Gaussian, trong khi ADC thực hiện nhân bản, chia tách và cắt tỉa để điều chỉnh cấu trúc biểu diễn. Cơ chế này cho phép mô hình bắt đầu từ một đám mây điểm thưa và dần tăng mật độ tại các vùng có nhiều chi tiết. Tuy nhiên, việc mật độ hóa chủ yếu dựa trên gradient cục bộ có thể tạo thêm Gaussian tại các vùng có sai số ngoại quan hoặc phản xạ mạnh, ngay cả khi nguyên nhân không hoàn toàn xuất phát từ hình học.
+
+        \section{Các công trình nghiên cứu liên quan}
+    \label{sec:related-work}
+    3DGS đạt được tốc độ kết xuất thời gian thực nhờ hai lựa chọn thiết kế cốt lõi: hàm điều hòa hình cầu bậc thấp để biểu diễn màu phụ thuộc góc nhìn, và cơ chế kiểm soát mật độ thích ứng dựa trên một heuristic gradient đơn giản. Cả hai lựa chọn này đều đơn giản hóa bài toán để đổi lấy tốc độ và cũng để lại hai khoảng trống mà các công trình sau này khai thác theo hai hướng gần như độc lập nhau: một nhóm tiếp tục đào sâu \textbf{trục tốc độ} cải tiến chính cơ chế ADC để huấn luyện nhanh hơn và tiết kiệm tài nguyên hơn mà không hy sinh chất lượng; một nhóm khác mở sang \textbf{trục quang học} thay thế, bổ sung cho SH hoặc xác thực lại vùng phản xạ để mô hình hóa đúng các hiệu ứng phản xạ phụ thuộc góc nhìn mà biểu diễn bậc thấp không nắm bắt được. Mục này khảo sát hai nhóm công trình tiêu biểu theo đúng hai trục trên, làm cơ sở để Mục~\ref{sec:related-work-synthesis} chỉ ra khoảng trống chung mà cả hai trục, khi đứng riêng lẻ, chưa giải quyết được và đó cũng là động lực trực tiếp cho phương pháp đề xuất của khóa luận.
+
+    \subsection{Nhóm phương pháp tối ưu hóa hiệu suất (Trục tốc độ)}
+    \label{subsec:rw-speed}
+
+    Nhóm công trình thuộc trục tốc độ hướng tới việc cắt giảm thời gian huấn luyện và tối ưu hóa tài nguyên phần cứng mà vẫn duy trì chất lượng kết xuất tương đương hoặc tiệm cận 3DGS. Bảng~\ref{tab:rw-speed} tóm tắt nguyên lý cốt lõi, điểm mạnh và hạn chế của ba đại diện tiêu biểu: FastGS, Speedy Splat và Taming 3DGS.
+
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.35}
+\setlength{\tabcolsep}{5pt}
+
+\begin{xltabular}{\textwidth}
+    {
+        |>{\raggedright\arraybackslash}p{0.13\textwidth}
+        |>{\raggedright\arraybackslash}p{0.31\textwidth}
+        |>{\raggedright\arraybackslash}p{0.27\textwidth}
+        |>{\raggedright\arraybackslash}p{0.24\textwidth}|
+    }
+    \hline
+    \textbf{Công trình} & \textbf{Nguyên lý cốt lõi} & \textbf{Điểm mạnh} & \textbf{Hạn chế} \\
+    \hline
+    \endfirsthead
+
+    \multicolumn{4}{c}{\tablename\ \thetable{} -- tiếp theo} \\
+    \hline
+    \textbf\textbf{Material-RefGS} \cite{zhang2025materialrefgs} &
+    Xây dựng cơ chế \textbf{suy luận vật liệu nhất quán đa góc nhìn} trong quá trình tô bóng (deferred shading); kết hợp \textbf{theo dõi biến thiên quang học} chéo góc nhìn để tạo prior độ mạnh phản xạ và kỹ thuật \textbf{ray-tracing 2DGS} mô hình hóa ánh sáng gián tiếp giữa các vật thể. &
+    Bóc tách chính xác các thuộc tính vật liệu vật lý (roughness, metallic, albedo); tái tạo chân thực cả phản xạ trực tiếp lẫn ánh sáng phản xạ gián tiếp bị che khuất. &
+    Yêu cầu tập ảnh huấn luyện có mật độ góc nhìn đủ dày và tư thế camera SfM cực kỳ chính xác để phép theo dõi biến thiên quang học; tại vùng góc nhìn thưa, tín hiệu vật liệu suy luận kém ổn định. \\ \hline
+
+    \textbf{Spec-Gaussian} \cite{yang2024specgaussian} &
+    Thay thế hàm SH bậc thấp bằng trường biểu diễn \textbf{hàm Gauss cầu dị hướng (ASG)} \cite{xu2013asg}: $G(\mathbf{v};\mu,\boldsymbol{\lambda},\mathbf{x},\mathbf{y}) = \mu\exp\left(-\lambda_x(\mathbf{v}\cdot\mathbf{x})^2-\lambda_y(\mathbf{v}\cdot\mathbf{y})^2\right)$, kết xuất qua MLP giải mã nhỏ gọn; nén đặc trưng bằng điểm neo kiểu Scaffold-GS \cite{lu2024scaffold} và huấn luyện thô-đến-tinh. &
+    Biểu diễn sắc nét các vệt sáng phản xạ tần số cao trên Shiny Blender \cite{verbin2022refnerf} và Mip-NeRF 360 \cite{barron2022mipnerf360}; vượt trội 3DGS về các chỉ số PSNR, SSIM và LPIPS mà không cần gia tăng số lượng Gaussian 3D. &
+    Truy vấn MLP giải mã lặp đi lặp lại cho hàng triệu Gaussian tại mỗi điểm ảnh làm chi phí tính toán FLOPS tăng vọt; thời gian huấn luyện kéo dài từ vài chục phút lên nhiều giờ. \\ \hline
+
+    \textbf{GaussianShader} \cite{jiang2024gaussianshader} &
+    Ước lượng pháp tuyến bề mặt bằng \textbf{trục ngắn nhất (minimum axis)} của ma trận hiệp phương sai 3DGS $\boldsymbol{\Sigma}_i=\mathbf{R}_i\mathbf{S}_i\mathbf{S}_i^\top\mathbf{R}_i^\top$ kết hợp vector hiệu chỉnh dư ($\Delta\mathbf{n}_i$); tích hợp hàm tô bóng vật lý (PBR shading) và thuật toán lan truyền pháp tuyến (Normal Propagation). &
+    Pháp tuyến được tính toán từ ma trận hiệp phương sai có sẵn; tích hợp mượt mà mô hình phản xạ vật lý vào rasterization vi phân mà không cần mạng dự đoán pháp tuyến riêng. &
+    Độ chính xác của pháp tuyến trục ngắn nhất phụ thuộc vào độ "dẹt" của Gaussian; ở giai đoạn đầu huấn luyện khi hình học chưa hội tụ hoặc tại vùng hạt có dạng cầu, pháp tuyến suy ra bị nhiễu mạnh. \\
+    \hline
+    \caption{Tóm tắt các công trình cải thiện khả năng tái tạo quang học và bề mặt phản xạ}
+    \label{tab:rw-quality} \\
+\endxltabular}
+\endgroup
+
+\subsubsection{Phân tích chi tiết các công trình cải thiện bề mặt phản xạ}
+
+\paragraph{Spec-Gaussian: Trường biểu diễn Gauss cầu dị hướng}
+\label{para:specgaussian-detail}
+Hàm SH được sử dụng trong 3DGS vốn phù hợp cho các thành phần khuếch tán (diffuse) biến thiên trơn nhưng lại không thể biểu diễn các vệt sáng phản xạ gương (specular highlights) có tần số cao. Spec-Gaussian \cite{yang2024specgaussian} giải quyết triệt để vấn đề này bằng cách thay thế SH bằng trường biểu diễn dựa trên hàm Gauss cầu dị hướng (ASG) \cite{xu2013asg}. Mỗi hạt Gaussian được gắn một vector đặc trưng biểu diễn tham số ASG (gồm hướng tâm, độ nhọn dị hướng theo hai trục vuông góc và cường độ). Để nén dung lượng lưu trữ, Spec-Gaussian học một tập hợp điểm neo (anchors) theo kiến trúc Scaffold-GS \cite{lu2024scaffold}, sau đó truyền các vector đặc trưng này qua một mạng nơ-ron Perceptron đa lớp (MLP) nhỏ để giải mã thành màu sắc phụ thuộc hướng nhìn tại từng thời điểm kết xuất. Bên cạnh đó, chiến lược huấn luyện từ thô đến tinh giúp mô hình ổn định cấu trúc hình học trước khi tối ưu các thuộc tính phản xạ tần số cao. Nhờ khả năng định hướng sắc nét của ASG, Spec-Gaussian đạt chất lượng tái tạo ngoại quan vượt trội trên các tập dữ liệu vật liệu bóng như Shiny Blender \cite{verbin2022refnerf}. Tuy nhiên, điểm yếu lớn nhất của phương pháp nằm ở chi phí tính toán: việc phải đánh giá mạng MLP cho hàng triệu hạt Gaussian tại từng pixel khiến tổng số phép tính FLOPS tăng lên hàng chục lần, đẩy thời gian huấn luyện từ vài phút lên vài giờ đồng hồ và kéo tốc độ kết xuất xuống mức thấp.
+
+\paragraph{GaussianShader: Tô bóng vật lý dựa trên pháp tuyến ngầm định}
+\label{para:gaussianshader-detail}
+GaussianShader \cite{jiang2024gaussianshader} hướng tới việc tích hợp trực tiếp các hàm tô bóng dựa trên lý thuyết vật lý (Physically-Based Rendering -- PBR) vào mô hình 3DGS. Đóng góp cốt lõi của GaussianShader nằm ở cách trích xuất pháp tuyến bề mặt $\mathbf{n}_i$ mà không cần một mạng dự đoán riêng biệt. Phương pháp khai thác thuộc tính hình học của Gaussian ba chiều: khi mô hình hội tụ, các Gaussian đại diện cho bề mặt vật thể thường bị nén dẹt thành các mảnh mặt phẳng cục bộ. Khi đó, trục ngắn nhất (ứng với giá trị riêng nhỏ nhất của ma trận tỷ lệ $\mathbf{S}_i$) trong ma trận hiệp phương sai $\boldsymbol{\Sigma}_i = \mathbf{R}_i \mathbf{S}_i \mathbf{S}_i^\top \mathbf{R}_i^\top$ chính là vector pháp tuyến đơn vị của bề mặt. Để bù đắp sai số nhỏ, GaussianShader học thêm một vector pháp tuyến dư $\Delta \mathbf{n}_i$ cộng vào trước khi chuẩn hóa. Pháp tuyến này sau đó được sử dụng trong công thức tính tia phản xạ $\mathbf{r} = \mathbf{d} - 2(\mathbf{d}\cdot\mathbf{n})\mathbf{n}$ và đưa vào các hàm tô bóng. Ngoài ra, thuật toán Normal Propagation truyền thông tin pháp tuyến từ các hạt ở vùng phản xạ rõ sang các vùng lân cận để hỗ trợ hội tụ. Mặc dù thu được pháp tuyến, GaussianShader gặp khó khăn ở giai đoạn đầu huấn luyện: khi các Gaussian chưa đủ dẹt hoặc có dạng hình cầu, pháp tuyến suy ra từ trục ngắn nhất bị nhiễu nghiêm trọng, ảnh hưởng đến độ ổn định của quá trình tô bóng.
+
+\paragraph{Material-RefGS: Suy luận vật liệu nhất quán và theo dõi biến thiên quang học}
+\label{para:materialrefgs-detail}
+Material-RefGS \cite{zhang2025materialrefgs} tiếp cận bài toán dưới góc độ tách biệt thuộc tính vật liệu và kiểm soát sự nhất quán chéo góc nhìn. Phương pháp nhận định rằng các đại lượng vật liệu như độ nhám, độ kim loại và màu gốc là những thuộc tính nội tại cố định của bề mặt vật thể, phải bất biến bất kể góc nhìn của camera. Do đó, Material-RefGS triển khai cơ chế tô bóng (deferred shading) trên 2D Gaussian, ép buộc các bản đồ vật liệu suy luận được phải đạt sự nhất quán đa góc nhìn (Multi-view Consistent Material Inference). Đồng thời, hệ thống giới thiệu kỹ thuật Theo dõi biến thiên quang học (Photometric Variation Tracking): bằng cách phân tích sự biến đổi cường độ sáng của cùng một vị trí bề mặt qua nhiều camera đã hiệu chuẩn, phương pháp tự động xác định các vùng có đặc tính phản xạ mạnh để lập bản đồ prior cho cường độ phản xạ. Đặc biệt, để xử lý các hiệu ứng quang học phức tạp như phản xạ gián tiếp giữa các vật thể bóng nằm gần nhau, Material-RefGS tích hợp thuật toán truy vết tia (ray-tracing) trên các biểu diễn 2DGS. Nhờ sự kết hợp này, mô hình bóc tách chính xác bản chất vật liệu vật lý và tái tạo chân thực cả phản xạ trực tiếp lẫn gián tiếp. Tuy nhiên, hạn chế của Material-RefGS là sự phụ thuộc chặt chẽ vào mật độ góc nhìn huấn luyện: nếu số lượng camera quan sát một vùng bề mặt quá ít, phép theo dõi biến thiên quang học sẽ mất đi ý nghĩa thống kê, dẫn đến suy luận sai lệch về thuộc tính vật liệu.
+
+\section{So sánh định lượng các công trình liên quan}
+\label{sec:synthesis}
+Để làm rõ mức độ đánh đổi thực sự giữa hai trục tốc độ và quang học, Bảng~\ref{tab:rw-synthesis} tổng hợp trực tiếp các con số định lượng được sáu công trình tự công bố.
+
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.3}
+\setlength{\tabcolsep}{4pt} % Khoảng cách cột tối ưu
+
+\begin{xltabular}{\textwidth}{@{} l >{\raggedright\arraybackslash}p{0.22\textwidth} *{6}{>{\centering\arraybackslash}X} @{}}
+    \caption{Đánh giá hiệu suất định lượng của các phương pháp trên các tập dữ liệu tiêu chuẩn, trích dẫn trực tiếp từ số liệu tự công bố của từng công trình} \label{tab:rw-synthesis} \\
+    \toprule
+    \textbf{Dataset} & \textbf{Method} & \textbf{Time}$\downarrow$ & \textbf{PSNR}$\uparrow$ & \textbf{SSIM}$\uparrow$ & \textbf{LPIPS}$\downarrow$ & \textbf{N}$_{\text{GS}}\downarrow$ & \textbf{FPS}$\uparrow$ \\
+    \midrule
+    \endfirsthead
+
+    \multicolumn{8}{c}{\tablename\ \thetable{} -- tiếp theo} \\
+    \toprule
+    \textbf{Dataset} & \textbf{Method} & \textbf{Time}$\downarrow$ & \textbf{PSNR}$\uparrow$ & \textbf{SSIM}$\uparrow$ & \textbf{LPIPS}$\downarrow$ & \textbf{N}$_{\text{GS}}\downarrow$ & \textbf{FPS}$\uparrow$ \\
+    \midrule
+    \endhead
+
+    \midrule
+    \multicolumn{8}{r}{\textit{Tiếp tục ở trang sau}} \\
+    \endfoot
+
+    \bottomrule
+    \endlastfoot
+
+    % ==================== TRỤC TỐC ĐỘ ====================
+    \multicolumn{8}{l}{\textbf{Nhóm phương pháp tối ưu hiệu suất}} \\
+    \midrule
+    \textit{Mip-NeRF 360} 
+    & FastGS \cite{ren2025fastgs} & 1.93 m & 27.56 & 0.797 & 0.261 & 0.40M & 579 \\
+    & Speedy Splat \cite{hanson2024speedysplat} & 15.7 m & 26.94 & 0.782 & 0.296 & 0.28M & 898 \\
+    & Taming 3DGS \cite{mallick2024taming} & 11.00 m & 27.31 & 0.801 & 0.252 & 0.63M & -- \\
+    
+    \midrule[\heavyrulewidth]
+    
+    % ==================== TRỤC QUANG HỌC ====================
+    \multicolumn{8}{l}{\textbf{Nhóm phương pháp mở rộng năng lực quang học}} \\
+    \midrule
+    \textit{Mip-NeRF 360} 
+    & Spec-Gaussian \cite{yang2024specgaussian} & -- & 28.18 & 0.835 & 0.176 & 3.10M & 33 \\
+    & Material-RefGS \cite{zhang2025materialrefgs} & -- & 27.06 & 0.809 & 0.181 & -- & --\\
+    \cmidrule(r){1-8}
+    
+    \textit{Shiny Blender} 
+    & GaussianShader \cite{jiang2024gaussianshader} & 0.58 h & 31.94 & 0.957 & 0.068 & -- & 97 \\
+     & Material-RefGS \cite{zhang2025materialrefgs} & -- & 35.57 & 0.976 & 0.049 & -- & -- \\
+\end{xltabular}
+\endgroup
+
+\section{Định hướng và khoảng trống nghiên cứu}
+    \label{sec:related-work-synthesis}
+    Sáu công trình khảo sát ở trên phản ánh rõ hai trục phát triển song song của 3DGS:
+    \begin{itemize}
+        \item \textbf{Trục tốc độ} (FastGS, Speedy Splat, Taming 3DGS) tối ưu hóa cơ chế kiểm soát mật độ, ước lượng phủ ô và lịch trình cập nhật tham số để rút ngắn thời gian huấn luyện và giảm dung lượng bộ nhớ.
+        \item \textbf{Trục quang học} (Spec-Gaussian, GaussianShader, Material-RefGS) mở rộng năng lực biểu diễn màu, bổ sung ước lượng hình học (pháp tuyến), và xác thực nhất quán đa góc nhìn để mô phỏng đúng vật lý ánh sáng tại vùng phản xạ.
+    \end{itemize}
+    Điểm chung đáng chú ý là: phần lớn các công trình ưu tiên trục tốc độ đều ngầm giả định bề mặt Lambertian, còn phần lớn các công trình ưu tiên trục quang học lại áp dụng năng lực biểu diễn phức tạp một cách dàn trải, không phân biệt vùng khuếch tán và vùng phản xạ. Đây là khoảng trống chung mà hai trục nghiên cứu trên, khi đứng riêng lẻ, chưa lấp đầy được.ùng góc nhìn thưa, tín hiệu vật liệu suy luận kém ổn định. \\ \hline
+
+    \textbf{Spec-Gaussian} \cite{yang2024specgaussian} &
+    Thay thế hàm SH bậc thấp bằng trường biểu diễn \textbf{hàm Gauss cầu dị hướng (ASG)} \cite{xu2013asg}: $G(\mathbf{v};\mu,\boldsymbol{\lambda},\mathbf{x},\mathbf{y}) = \mu\exp\left(-\lambda_x(\mathbf{v}\cdot\mathbf{x})^2-\lambda_y(\mathbf{v}\cdot\mathbf{y})^2\right)$, kết xuất qua MLP giải mã nhỏ gọn; nén đặc trưng bằng điểm neo kiểu Scaffold-GS \cite{lu2024scaffold} và huấn luyện thô-đến-tinh. &
+    Biểu diễn sắc nét các vệt sáng phản xạ tần số cao trên Shiny Blender \cite{verbin2022refnerf} và Mip-NeRF 360 \cite{barron2022mipnerf360}; vượt trội 3DGS về các chỉ số PSNR, SSIM và LPIPS mà không cần gia tăng số lượng Gaussian 3D. &
+    Truy vấn MLP giải mã lặp đi lặp lại cho hàng triệu Gaussian tại mỗi điểm ảnh làm chi phí tính toán FLOPS tăng vọt; thời gian huấn luyện kéo dài từ vài chục phút lên nhiều giờ. \\ \hline
+
+    \textbf{GaussianShader} \cite{jiang2024gaussianshader} &
+    Ước lượng pháp tuyến bề mặt bằng \textbf{trục ngắn nhất (minimum axis)} của ma trận hiệp phương sai 3DGS $\boldsymbol{\Sigma}_i=\mathbf{R}_i\mathbf{S}_i\mathbf{S}_i^\top\mathbf{R}_i^\top$ kết hợp vector hiệu chỉnh dư ($\Delta\mathbf{n}_i$); tích hợp hàm tô bóng vật lý (PBR shading) và thuật toán lan truyền pháp tuyến (Normal Propagation). &
+    Pháp tuyến được tính toán từ ma trận hiệp phương sai có sẵn; tích hợp mượt mà mô hình phản xạ vật lý vào rasterization vi phân mà không cần mạng dự đoán pháp tuyến riêng. &
+    Độ chính xác của pháp tuyến trục ngắn nhất phụ thuộc vào độ "dẹt" của Gaussian; ở giai đoạn đầu huấn luyện khi hình học chưa hội tụ hoặc tại vùng hạt có dạng cầu, pháp tuyến suy ra bị nhiễu mạnh. \\
+    \hline
+    \caption{Tóm tắt các công trình cải thiện khả năng tái tạo quang học và bề mặt phản xạ}
+    \label{tab:rw-quality} \\
+\end{xltabular}
+\endgroup
+
+\subsubsection{Phân tích chi tiết các công trình cải thiện bề mặt phản xạ}
+
+\paragraph{Spec-Gaussian: Trường biểu diễn Gauss cầu dị hướng}
+\label{para:specgaussian-detail}
+Hàm SH được sử dụng trong 3DGS vốn phù hợp cho các thành phần khuếch tán (diffuse) biến thiên trơn nhưng lại không thể biểu diễn các vệt sáng phản xạ gương (specular highlights) có tần số cao. Spec-Gaussian \cite{yang2024specgaussian} giải quyết triệt để vấn đề này bằng cách thay thế SH bằng trường biểu diễn dựa trên hàm Gauss cầu dị hướng (ASG) \cite{xu2013asg}. Mỗi hạt Gaussian được gắn một vector đặc trưng biểu diễn tham số ASG (gồm hướng tâm, độ nhọn dị hướng theo hai trục vuông góc và cường độ). Để nén dung lượng lưu trữ, Spec-Gaussian học một tập hợp điểm neo (anchors) theo kiến trúc Scaffold-GS \cite{lu2024scaffold}, sau đó truyền các vector đặc trưng này qua một mạng nơ-ron Perceptron đa lớp (MLP) nhỏ để giải mã thành màu sắc phụ thuộc hướng nhìn tại từng thời điểm kết xuất. Bên cạnh đó, chiến lược huấn luyện từ thô đến tinh giúp mô hình ổn định cấu trúc hình học trước khi tối ưu các thuộc tính phản xạ tần số cao. Nhờ khả năng định hướng sắc nét của ASG, Spec-Gaussian đạt chất lượng tái tạo ngoại quan vượt trội trên các tập dữ liệu vật liệu bóng như Shiny Blender \cite{verbin2022refnerf}. Tuy nhiên, điểm yếu lớn nhất của phương pháp nằm ở chi phí tính toán: việc phải đánh giá mạng MLP cho hàng triệu hạt Gaussian tại từng pixel khiến tổng số phép tính FLOPS tăng lên hàng chục lần, đẩy thời gian huấn luyện từ vài phút lên vài giờ đồng hồ và kéo tốc độ kết xuất xuống mức thấp.
+
+\paragraph{GaussianShader: Tô bóng vật lý dựa trên pháp tuyến ngầm định}
+\label{para:gaussianshader-detail}
+GaussianShader \cite{jiang2024gaussianshader} hướng tới việc tích hợp trực tiếp các hàm tô bóng dựa trên lý thuyết vật lý (Physically-Based Rendering -- PBR) vào mô hình 3DGS. Đóng góp cốt lõi của GaussianShader nằm ở cách trích xuất pháp tuyến bề mặt $\mathbf{n}_i$ mà không cần một mạng dự đoán riêng biệt. Phương pháp khai thác thuộc tính hình học của Gaussian ba chiều: khi mô hình hội tụ, các Gaussian đại diện cho bề mặt vật thể thường bị nén dẹt thành các mảnh mặt phẳng cục bộ. Khi đó, trục ngắn nhất (ứng với giá trị riêng nhỏ nhất của ma trận tỷ lệ $\mathbf{S}_i$) trong ma trận hiệp phương sai $\boldsymbol{\Sigma}_i = \mathbf{R}_i \mathbf{S}_i \mathbf{S}_i^\top \mathbf{R}_i^\top$ chính là vector pháp tuyến đơn vị của bề mặt. Để bù đắp sai số nhỏ, GaussianShader học thêm một vector pháp tuyến dư $\Delta \mathbf{n}_i$ cộng vào trước khi chuẩn hóa. Pháp tuyến này sau đó được sử dụng trong công thức tính tia phản xạ $\mathbf{r} = \mathbf{d} - 2(\mathbf{d}\cdot\mathbf{n})\mathbf{n}$ và đưa vào các hàm tô bóng. Ngoài ra, thuật toán Normal Propagation truyền thông tin pháp tuyến từ các hạt ở vùng phản xạ rõ sang các vùng lân cận để hỗ trợ hội tụ. Mặc dù thu được pháp tuyến, GaussianShader gặp khó khăn ở giai đoạn đầu huấn luyện: khi các Gaussian chưa đủ dẹt hoặc có dạng hình cầu, pháp tuyến suy ra từ trục ngắn nhất bị nhiễu nghiêm trọng, ảnh hưởng đến độ ổn định của quá trình tô bóng.
+
+\paragraph{Material-RefGS: Suy luận vật liệu nhất quán và theo dõi biến thiên quang học}
+\label{para:materialrefgs-detail}
+Material-RefGS \cite{zhang2025materialrefgs} tiếp cận bài toán dưới góc độ tách biệt thuộc tính vật liệu và kiểm soát sự nhất quán chéo góc nhìn. Phương pháp nhận định rằng các đại lượng vật liệu như độ nhám, độ kim loại và màu gốc là những thuộc tính nội tại cố định của bề mặt vật thể, phải bất biến bất kể góc nhìn của camera. Do đó, Material-RefGS triển khai cơ chế tô bóng (deferred shading) trên 2D Gaussian, ép buộc các bản đồ vật liệu suy luận được phải đạt sự nhất quán đa góc nhìn (Multi-view Consistent Material Inference). Đồng thời, hệ thống giới thiệu kỹ thuật Theo dõi biến thiên quang học (Photometric Variation Tracking): bằng cách phân tích sự biến đổi cường độ sáng của cùng một vị trí bề mặt qua nhiều camera đã hiệu chuẩn, phương pháp tự động xác định các vùng có đặc tính phản xạ mạnh để lập bản đồ prior cho cường độ phản xạ. Đặc biệt, để xử lý các hiệu ứng quang học phức tạp như phản xạ gián tiếp giữa các vật thể bóng nằm gần nhau, Material-RefGS tích hợp thuật toán truy vết tia (ray-tracing) trên các biểu diễn 2DGS. Nhờ sự kết hợp này, mô hình bóc tách chính xác bản chất vật liệu vật lý và tái tạo chân thực cả phản xạ trực tiếp lẫn gián tiếp. Tuy nhiên, hạn chế của Material-RefGS là sự phụ thuộc chặt chẽ vào mật độ góc nhìn huấn luyện: nếu số lượng camera quan sát một vùng bề mặt quá ít, phép theo dõi biến thiên quang học sẽ mất đi ý nghĩa thống kê, dẫn đến suy luận sai lệch về thuộc tính vật liệu.
+
+\section{So sánh định lượng các công trình liên quan}
+\label{sec:synthesis}
+Để làm rõ mức độ đánh đổi thực sự giữa hai trục tốc độ và quang học, Bảng~\ref{tab:rw-synthesis} tổng hợp trực tiếp các con số định lượng được sáu công trình tự công bố.
+
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.3}
+\setlength{\tabcolsep}{4pt} % Khoảng cách cột tối ưu
+
+\begin{xltabular}{\textwidth}{@{} l >{\raggedright\arraybackslash}p{0.22\textwidth} *{6}{>{\centering\arraybackslash}X} @{}}
+    \caption{Đánh giá hiệu suất định lượng của các phương pháp trên các tập dữ liệu tiêu chuẩn, trích dẫn trực tiếp từ số liệu tự công bố của từng công trình} \label{tab:rw-synthesis} \\
+    \toprule
+    \textbf{Dataset} & \textbf{Method} & \textbf{Time}$\downarrow$ & \textbf{PSNR}$\uparrow$ & \textbf{SSIM}$\uparrow$ & \textbf{LPIPS}$\downarrow$ & \textbf{N}$_{\text{GS}}\downarrow$ & \textbf{FPS}$\uparrow$ \\
+    \midrule
+    \endfirsthead
+
+    \multicolumn{8}{c}{\tablename\ \thetable{} -- tiếp theo} \\
+    \toprule
+    \textbf{Dataset} & \textbf{Method} & \textbf{Time}$\downarrow$ & \textbf{PSNR}$\uparrow$ & \textbf{SSIM}$\uparrow$ & \textbf{LPIPS}$\downarrow$ & \textbf{N}$_{\text{GS}}\downarrow$ & \textbf{FPS}$\uparrow$ \\
+    \midrule
+    \endhead
+
+    \midrule
+    \multicolumn{8}{r}{\textit{Tiếp tục ở trang sau}} \\
+    \endfoot
+
+    \bottomrule
+    \endlastfoot
+
+    % ==================== TRỤC TỐC ĐỘ ====================
+    \multicolumn{8}{l}{\textbf{Nhóm phương pháp tối ưu hiệu suất}} \\
+    \midrule
+    \textit{Mip-NeRF 360} 
+    & FastGS \cite{ren2025fastgs} & 1.93 m & 27.56 & 0.797 & 0.261 & 0.40M & 579 \\
+    & Speedy Splat \cite{hanson2024speedysplat} & 15.7 m & 26.94 & 0.782 & 0.296 & 0.28M & 898 \\
+    & Taming 3DGS \cite{mallick2024taming} & 11.00 m & 27.31 & 0.801 & 0.252 & 0.63M & -- \\
+    
+    \midrule[\heavyrulewidth]
+    
+    % ==================== TRỤC QUANG HỌC ====================
+    \multicolumn{8}{l}{\textbf{Nhóm phương pháp mở rộng năng lực quang học}} \\
+    \midrule
+    \textit{Mip-NeRF 360} 
+    & Spec-Gaussian \cite{yang2024specgaussian} & -- & 28.18 & 0.835 & 0.176 & 3.10M & 33 \\
+    & Material-RefGS \cite{zhang2025materialrefgs} & -- & 27.06 & 0.809 & 0.181 & -- & --\\
+    \cmidrule(r){1-8}
+    
+    \textit{Shiny Blender} 
+    & GaussianShader \cite{jiang2024gaussianshader} & 0.58 h & 31.94 & 0.957 & 0.068 & -- & 97 \\
+     & Material-RefGS \cite{zhang2025materialrefgs} & -- & 35.57 & 0.976 & 0.049 & -- & -- \\
+\end{xltabular}
+\endgroup
+
+\section{Định hướng và khoảng trống nghiên cứu}
+    \label{sec:related-work-synthesis}
+    Sáu công trình khảo sát ở trên phản ánh rõ hai trục phát triển song song của 3DGS:
+    \begin{itemize}
+        \item \textbf{Trục tốc độ} (FastGS, Speedy Splat, Taming 3DGS) tối ưu hóa cơ chế kiểm soát mật độ, ước lượng phủ ô và lịch trình cập nhật tham số để rút ngắn thời gian huấn luyện và giảm dung lượng bộ nhớ.
+        \item \textbf{Trục quang học} (Spec-Gaussian, GaussianShader, MaterialRefGS) mở rộng năng lực biểu diễn màu, bổ sung ước lượng hình học (pháp tuyến), và xác thực nhất quán đa góc nhìn để mô phỏng đúng vật lý ánh sáng tại vùng phản xạ.
+    \end{itemize}
+    Điểm chung đáng chú ý là: phần lớn các công trình ưu tiên trục tốc độ đều ngầm giả định bề mặt Lambertian, còn phần lớn các công trình ưu tiên trục quang học lại áp dụng năng lực biểu diễn phức tạp một cách dàn trải, không phân biệt vùng khuếch tán và vùng phản xạ. Đây là khoảng trống chung mà hai trục nghiên cứu trên, khi đứng riêng lẻ, chưa lấp đầy được.
