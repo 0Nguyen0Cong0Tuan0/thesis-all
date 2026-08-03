@@ -550,7 +550,7 @@ trong đó $\boldsymbol{\mu}_i \in \mathbb{R}^3$ là vị trí trung tâm (tâm 
     \label{eq:3dgs-covariance-factorization}
 \end{equation}
 
-trong đó $\mathbf{S}_i = \operatorname{diag}(\mathbf{s}_i)$ là ma trận tỉ lệ đường chéo được tham số hóa bởi vector tỉ lệ ba chiều $\mathbf{s}_i = (s_x, s_y, s_z) \in \mathbb{R}^3$, và $\mathbf{R}_i \in \mathrm{SO}(3)$ là ma trận xoay được tham số hóa bởi một quaternion đơn vị $\mathbf{q}_i = (q_w, q_x, q_y, q_z) \in \mathbb{R}^4$. 
+trong đó $\mathbf{S}_i = \operatorname{diag}(\mathbf{s}_i)$ là ma trận tỉ lệ đường chéo được tham số hóa bởi vector tỉ lệ ba chiều $\mathbf{s}_i = (s_x, s_y, s_z) \in \mathbb{R}^3$ và $\mathbf{R}_i \in \mathrm{SO}(3)$ là ma trận xoay được tham số hóa bởi một quaternion đơn vị $\mathbf{q}_i = (q_w, q_x, q_y, q_z) \in \mathbb{R}^4$. 
 
 \subsubsection{Khởi tạo đám mây điểm và hệ số điều hòa hình cầu (SH)}
 \label{subsubsec:3dgs-initialization-sh}
@@ -648,7 +648,7 @@ Với danh sách các Gaussian bao phủ điểm ảnh được sắp xếp theo
     \right),
 \end{equation}
 
-độ truyền qua trước Gaussian thứ $i_m$ được xác định bởi:
+việc truyền qua trước một Gaussian thứ $i_m$ được xác định bởi:
 
 \begin{equation}
     T_{m,c}(\mathbf{p})
@@ -725,7 +725,7 @@ Như vậy, quá trình tối ưu của 3DGS diễn ra đồng thời ở hai m�
 \section{Các công trình nghiên cứu liên quan}
 \label{sec:related-work}
 
-3DGS đạt được tốc độ kết xuất thời gian thực nhờ hai lựa chọn thiết kế cốt lõi: hàm điều hòa hình cầu bậc thấp để biểu diễn màu phụ thuộc góc nhìn, và cơ chế kiểm soát mật độ thích ứng dựa trên một heuristic gradient đơn giản. Cả hai lựa chọn này đều đơn giản hóa bài toán để đổi lấy tốc độ và cũng để lại hai khoảng trống mà các công trình sau này khai thác theo hai hướng gần như độc lập nhau: một nhóm tiếp tục đào sâu \textbf{trục tốc độ} cải tiến chính cơ chế ADC để huấn luyện nhanh hơn và tiết kiệm tài nguyên hơn mà không hy sinh chất lượng; một nhóm khác mở sang \textbf{trục quang học} thay thế, bổ sung cho SH hoặc xác thực lại vùng phản xạ để mô hình hóa đúng các hiệu ứng phản xạ phụ thuộc góc nhìn mà biểu diễn bậc thấp không nắm bắt được. Mục này khảo sát hai nhóm công trình tiêu biểu theo đúng hai trục trên, làm cơ sở để Mục~\ref{sec:related-work-synthesis} chỉ ra khoảng trống chung mà cả hai trục, khi đứng riêng lẻ, chưa giải quyết được và đó cũng là động lực trực tiếp cho phương pháp đề xuất của khóa luận.
+3DGS đạt được tốc độ kết xuất thời gian thực nhờ hai lựa chọn thiết kế cốt lõi: hàm điều hòa hình cầu bậc thấp để biểu diễn màu phụ thuộc góc nhìn và cơ chế kiểm soát mật độ thích ứng dựa trên một heuristic gradient đơn giản. Cả hai lựa chọn này đều đơn giản hóa bài toán để đổi lấy tốc độ và cũng để lại hai khoảng trống mà các công trình sau này khai thác theo hai hướng gần như độc lập nhau: một nhóm tiếp tục đào sâu \textbf{trục tốc độ} nhằm cải tiến chính cơ chế ADC để huấn luyện nhanh hơn và tiết kiệm tài nguyên hơn mà không hy sinh chất lượng và một nhóm khác mở sang \textbf{trục quang học} nhằm thay thế, bổ sung cho SH hoặc xác thực lại vùng phản xạ để mô hình hóa đúng các hiệu ứng phản xạ phụ thuộc góc nhìn mà biểu diễn bậc thấp không nắm bắt được. Mục này khảo sát hai nhóm công trình tiêu biểu theo đúng hai trục trên, làm cơ sở để Mục~\ref{sec:related-work-synthesis} chỉ ra khoảng trống chung mà cả hai trục chưa giải quyết được khi đứng riêng lẻ và đó cũng là động lực trực tiếp cho phương pháp đề xuất của khóa luận.
 
 \subsection{Nhóm phương pháp tối ưu hóa hiệu suất (Trục tốc độ)}
 \label{subsec:rw-speed}
@@ -764,19 +764,19 @@ Nhóm công trình thuộc trục tốc độ hướng tới việc cắt giảm
     \endlastfoot
 
     \textbf{FastGS} \cite{ren2025fastgs} &
-    Cải tiến thuật toán \textbf{sắp xếp tile và kiểm soát mật độ thích ứng (ADC)}; lược bỏ các bước kiểm tra trùng lặp không cần thiết và tối ưu lịch trình nhân bản / cắt tỉa Gaussian. &
-    Thời gian huấn luyện cực ngắn (< 2 phút trên Mip-NeRF 360); tốc độ kết xuất vượt trội (> 570 FPS); giữ nguyên chất lượng tổng quan trên các bề mặt khuếch tán. &
-    Ngầm giả định bề mặt khuếch tán (Lambertian); chất lượng sụt giảm trên các vùng phản xạ gương tần số cao hoặc có vệt sáng biến đổi mạnh theo góc nhìn. \\ \hline
+    Loại bỏ heuristic gradient đơn góc nhìn của ADC gốc; đề xuất cơ chế \textbf{mật độ hóa nhất quán đa góc nhìn (VCD)} và \textbf{cắt tỉa nhất quán đa góc nhìn (VCP)}. Đánh giá sai số tái tạo $L_1$ trên $K$ camera huấn luyện ngẫu nhiên để tính điểm tầm quan trọng dựa trên diện tích vùng chiếu 2D giao với các điểm ảnh có sai số lớn chéo góc nhìn (cross-view). &
+    Tốc độ huấn luyện vượt trội (dưới 100 giây trên Tanks \& Temples \cite{knapitsch2017tanks}, nhanh hơn 3.29--15.45 lần so với 3DGS trên Mip-NeRF 360 \cite{barron2022mipnerf360} và Deep Blending \cite{hedman2018deep}); khả năng tổng quát cao sang cảnh động, tái tạo bề mặt và SLAM. &
+    Giả định ngầm về ngoại quan Lambertian: các vệt sáng phản xạ (specular highlights) dịch chuyển theo vị trí camera bị VCD ghi nhận nhầm là sai lệch cấu trúc hình học khiến quá trình densification sinh ra nhiều Gaussian dư thừa tại vùng phản xạ. \\ \hline
 
     \textbf{Speedy Splat} \cite{hanson2024speedysplat} &
-    Tối ưu hóa hạt nhân rasterization trên GPU; kết hợp \textbf{cắt tỉa thành phần thuộc tính} và loại bỏ các Gaussian đóng góp độ truyền qua mờ nhạt. &
-    Tốc độ kết xuất kỷ lục gần 900 FPS; giảm dung lượng bộ nhớ lưu trữ mô hình đáng kể. &
-    Loại bỏ bớt thông tin khiến các chi tiết ngoại quan tần số cao bị mờ nhẹ; khả năng mô hình hóa vệt sáng phản xạ phức tạp bị hạn chế. \\ \hline
+    Tối ưu hóa rasterization thông qua hai thuật toán: \textbf{SnugBox} (tính khung bao AABB ôm sát elip chiếu 2D thay vì bán kính bảo thủ lớn) và \textbf{AccuTile} (xác định chính xác các tile giao với elip). Kết hợp chiến lược cắt tỉa \textbf{Soft/Hard Pruning} dựa trên mức đóng góp điểm ảnh khả kiến (pixel coverage score). &
+    Giảm mạnh số lượng Gaussian dư thừa và chi phí duyệt tile; tăng tốc kết xuất vượt trội và rút ngắn thời gian huấn luyện mà không suy giảm chất lượng ảnh kết xuất. &
+    Thuần túy tối ưu và cắt tỉa hạt và hiệu quả phụ thuộc vào độ chính xác của phép tính khung bao trên các Gaussian có hình dạng rất dẹt hoặc rất lớn. \\ \hline
 
     \textbf{Taming 3DGS} \cite{mallick2024taming} &
-    Ràng buộc ngân sách Gaussian tối đa thông qua \textbf{cơ chế kiểm soát mật độ dựa trên entropy} và đo đạc đóng góp hình học; tự động loại bỏ các hạt thừa tại vùng rỗng. &
-    Kiểm soát chặt chẽ dung lượng bộ nhớ và số hạt 3DGS; huấn luyện ổn định và kết xuất nhanh chóng. &
-    Ràng buộc số lượng hạt cứng làm suy giảm độ chi tiết tại các vùng bề mặt vật liệu phức tạp đòi hỏi nhiều hạt biểu diễn. \\
+    Định nghĩa \textbf{điểm số quan trọng (importance score)} tổng hợp từ gradient vị trí, đóng góp độ mờ và kích thước chiếu; chỉ nhân bản ứng viên có điểm số cao nhất cho đến khi đạt ngân sách cố định $\mathcal{B}$ (ngưỡng chấp nhận decay theo $n_{\text{current}}/\mathcal{B}$); kết hợp \textbf{Sparse Adam} chỉ cập nhật các Gaussian xuất hiện trong batch camera hiện tại. &
+    Kiểm soát chính xác và dự đoán trước được dung lượng bộ nhớ VRAM cũng như số lượng hạt tối đa $\mathcal{B}$; chứng minh tài nguyên giới hạn vẫn có thể duy trì chất lượng tái tạo tiệm cận 3DGS. &
+    Ngân sách $\mathcal{B}$ là hằng số toàn cục áp dụng đồng đều cho mọi vùng trong cảnh; chưa phân biệt được các vùng có độ phức tạp hình học hoặc vật liệu cao (như vùng phản xạ) để ưu tiên cấp phát tài nguyên. \\
     \hline
     \caption{Tóm tắt các công trình cải thiện hiệu suất kết xuất và tối ưu hóa tài nguyên}
     \label{tab:rw-speed} \\
@@ -785,17 +785,17 @@ Nhóm công trình thuộc trục tốc độ hướng tới việc cắt giảm
 
 \subsubsection{Phân tích chi tiết các công trình tối ưu hiệu suất}
 
-\paragraph{FastGS: Tối ưu hóa cơ chế kiểm soát mật độ và sắp xếp Tile}
+\paragraph{FastGS: Kiểm soát mật độ dựa trên sự đồng thuận đa góc nhìn}
 \label{para:fastgs-detail}
-FastGS \cite{ren2025fastgs} tiếp cận bài toán tối ưu hóa 3DGS dựa trên nhận định rằng quá trình kiểm soát mật độ thích ứng (ADC) và sắp xếp tile trong 3DGS nguyên bản chứa nhiều phép tính thừa. Bằng cách thiết lập lịch trình cắt tỉa thông minh và cải tiến thuật toán rasterization, FastGS giảm thời gian huấn luyện từ 20--30 phút xuống dưới 2 phút trên tập dữ liệu Mip-NeRF 360 \cite{barron2022mipnerf360}, đồng thời đạt tốc độ kết xuất vượt trội 579 FPS. Tuy nhiên, do FastGS kế thừa hệ số SH bậc thấp và tập trung cắt giảm các hạt trùng lặp, mô hình gặp khó khăn khi tái tạo các bề mặt phản xạ bóng, nơi các vệt sáng yêu cầu mật độ hạt cao và đại lượng biểu diễn quang học sắc nét.
+Trong 3DGS, cơ chế ADC phụ thuộc vào gradient vị trí trong không gian và tích lũy từ một góc nhìn đơn lẻ tại mỗi bước huấn luyện. Cách làm này dễ bị nhiễu do góc chiếu cục bộ và dẫn đến việc nhân bản dư thừa Gaussian tại những vùng có sai số quang học tạm thời. FastGS \cite{ren2025fastgs} khắc phục hạn chế này bằng cách mở rộng quá trình đánh giá sang miền đa góc nhìn. Cụ thể, thuật toán lấy mẫu một tập hợp $K$ camera huấn luyện ngẫu nhiên, tính toán bản đồ sai số $L_1$ giữa ảnh kết xuất và ảnh thật trên từng góc nhìn, từ đó tổng hợp điểm quan trọng (importance score) cho mỗi Gaussian dựa trên mức độ bao phủ của hình chiếu 2D lên các vùng ảnh có sai số lớn. Cơ chế VCD (View-Consistent Densification) chỉ cho phép tăng mật độ tại những vị trí thể hiện sai số nhất quán chéo góc nhìn, trong khi cơ chế VCP (View-Consistent Pruning) chủ động loại bỏ các hạt có đóng góp không đáng kể trên toàn bộ các góc quan sát. Vì vậy, FastGS rút ngắn thời gian huấn luyện xuống dưới 100 giây cho các cảnh tĩnh. Tuy nhiên, do tiêu chí VCD dựa trên giả định màu sắc bề mặt không thay đổi theo hướng nhìn (Lambertian), các vùng phản xạ gương (specular highlight) thường bị thuật toán nhận diện sai là vùng có lỗi hình học, kích hoạt quá trình mật độ hóa (densification) không cần thiết.
 
-\paragraph{Speedy Splat: Cắt giảm thành phần và kết xuất siêu tốc}
+\paragraph{Speedy Splat: Tối ưu hóa phép phủ ô và cắt tỉa hạt thưa}
 \label{para:speedysplat-detail}
-Speedy Splat \cite{hanson2024speedysplat} tập trung vào việc đẩy tốc độ kết xuất thời gian thực lên ngưỡng kỷ lục. Phương pháp tối ưu lại toàn bộ hạt nhân GPU rasterization và loại bỏ các Gaussian có đóng góp độ truyền qua nhỏ hơn ngưỡng cực nhỏ ($T_i \alpha_i < \epsilon$). Kỹ thuật này giúp Speedy Splat đạt tốc độ kết xuất lên tới 898 FPS trên tập Mip-NeRF 360. Tuy nhiên, việc cắt giảm bớt các thuộc tính ngoại quan khiến cho các vùng phản xạ gương nhạy cảm bị mất chi tiết và dễ xuất hiện hiện tượng mờ nhạt.
+Khác với FastGS tập trung vào tiêu chí densification, Speedy Splat \cite{hanson2024speedysplat} tiếp cận bài toán tốc độ bằng cách giải quyết điểm nghẽn tính toán trong rasterizer. Trong 3DGS, vùng elip 2D của mỗi Gaussian được bao bởi một hình vuông dựa trên bán kính cực đại, khiến nhiều ô (tile) không chứa Gaussian vẫn phải đưa vào danh sách sắp xếp và pha trộn alpha. Speedy Splat giới thiệu thuật toán \textbf{SnugBox} để tính toán khung bao trục song song (AABB) ôm sát elip chiếu phối cảnh, giảm đáng kể diện tích thừa. Tiếp đó, thuật toán \textbf{AccuTile} thực hiện kiểm tra chính xác sự giao nhau giữa elip và các ô bằng cách duyệt theo chiều nhỏ hơn của SnugBox. Bên cạnh tối ưu hình học rasterization, Speedy Splat áp dụng quy trình cắt tỉa hai giai đoạn: Soft Pruning trong quá trình tối ưu và Hard Pruning sau khi kết thúc densification, dựa trên mức đóng góp thực tế của hạt vào các điểm ảnh khả kiến (pixel coverage score). Nhờ loại bỏ các Gaussian dư thừa và giảm tối đa chi phí xử lý ô, Speedy Splat đạt tốc độ kết xuất vượt trội mà không làm suy giảm các chỉ số chất lượng.
 
-\paragraph{Taming 3DGS: Kiểm soát số lượng Gaussian thích ứng}
+\paragraph{Taming 3DGS: Tối ưu hóa có ngân sách và cập nhật gradient thưa}
 \label{para:taming3dgs-detail}
-Taming 3DGS \cite{mallick2024taming} giải quyết vấn đề bùng nổ số lượng Gaussian trong 3DGS nguyên bản bằng cách đưa vào một cơ chế quản lý ngân sách mật độ thích ứng dựa trên entropy. Mô hình đo lường mức độ đóng góp thông tin của từng Gaussian và loại bỏ sớm các hạt rác hoặc hạt dư thừa. Nhờ đó, Taming 3DGS duy trì được số lượng hạt nhỏ gọn (chỉ khoảng 0.63M hạt trên Mip-NeRF 360) mà vẫn giữ được chất lượng tái tạo tốt. Mặc dù vậy, việc giới hạn ngân sách hạt khiến mô hình khó lòng biểu diễn các bề mặt phản xạ phức tạp vốn yêu cầu sự phối hợp của nhiều Gaussian chồng lấp.
+Taming 3DGS \cite{mallick2024taming} kiểm soát chặt chẽ dung lượng bộ nhớ VRAM và số lượng hạt Gaussian trong suốt quá trình huấn luyện. Phương pháp thiết lập một ngân sách toàn cục cố định $\mathcal{B}$ cho toàn bộ cảnh. Tại mỗi chu kỳ kiểm soát mật độ, hệ thống tính toán một điểm số quan trọng (importance score) cho từng Gaussian, kết hợp đồng thời gradient vị trí, đóng góp độ mờ (opacity contribution) và diện tích vùng chiếu 2D. Các Gaussian ứng viên được xếp hạng và chỉ những hạt có điểm số cao nhất mới được chọn để nhân bản, với ngưỡng chấp nhận giảm dần theo tỷ lệ $n_{\text{current}}/\mathcal{B}$. Đồng thời, \textbf{Sparse Adam} của Taming 3DGS cho phép chỉ cập nhật bộ nhớ trạng thái (momentum, variance) cho các Gaussian thực sự nằm trong nón nhìn (frustum) của batch camera hiện tại, thay vì cập nhật toàn bộ tập hạt như Adam thông thường. Nhờ đó, số lượng Gaussian và dung lượng VRAM luôn nằm trong giới hạn dự đoán trước. Dù vậy, việc áp dụng một hằng số ngân sách $\mathcal{B}$ đồng đều trên toàn bộ không gian khiến mô hình chưa thể tự điều chỉnh linh hoạt để dành nhiều tài nguyên hơn cho các vùng cảnh có độ phức tạp cao như bề mặt vật liệu phản xạ hay chi tiết hình học mỏng.
 
 \subsection{Nhóm phương pháp mở rộng năng lực quang học (Trục quang học)}
 \label{subsec:rw-optics}
@@ -927,7 +927,7 @@ Material-RefGS \cite{zhang2025materialrefgs} tiếp cận bài toán dưới gó
 Sáu công trình khảo sát ở trên phản ánh rõ hai trục phát triển song song của 3DGS:
 \begin{itemize}
     \item \textbf{Trục tốc độ} (FastGS, Speedy Splat, Taming 3DGS) tối ưu hóa cơ chế kiểm soát mật độ, ước lượng phủ ô và lịch trình cập nhật tham số để rút ngắn thời gian huấn luyện và giảm dung lượng bộ nhớ.
-    \item \textbf{Trục quang học} (Spec-Gaussian, GaussianShader, Material-RefGS) mở rộng năng lực biểu diễn màu, bổ sung ước lượng hình học (pháp tuyến), và xác thực nhất quán đa góc nhìn để mô phỏng đúng vật lý ánh sáng tại vùng phản xạ.
+    \item \textbf{Trục quang học} (Spec-Gaussian, GaussianShader, Material-RefGS) mở rộng năng lực biểu diễn màu, bổ sung ước lượng hình học (pháp tuyến) và xác thực nhất quán đa góc nhìn để mô phỏng đúng vật lý ánh sáng tại vùng phản xạ.
 \end{itemize}
 
 Điểm chung đáng chú ý là: phần lớn các công trình ưu tiên trục tốc độ đều ngầm giả định bề mặt Lambertian, còn phần lớn các công trình ưu tiên trục quang học lại áp dụng năng lực biểu diễn phức tạp một cách dàn trải, không phân biệt vùng khuếch tán và vùng phản xạ. Đây là khoảng trống chung mà hai trục nghiên cứu trên, khi đứng riêng lẻ, chưa lấp đầy được. 
