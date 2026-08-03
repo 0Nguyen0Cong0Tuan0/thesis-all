@@ -67,7 +67,13 @@ class Scene:
             )
 
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
-            print("Detected Blender dataset")
+            print("Detected Blender dataset (transforms_train.json)")
+            scene_info = sceneLoadTypeCallbacks["Blender"](
+                args.source_path, args.white_background, args.eval
+            )
+
+        elif os.path.exists(os.path.join(args.source_path, "transforms.json")):
+            print("Detected Blender dataset (transforms.json)")
             scene_info = sceneLoadTypeCallbacks["Blender"](
                 args.source_path, args.white_background, args.eval
             )
@@ -86,9 +92,11 @@ class Scene:
         if not self.loaded_iter:
 
             # copy ply
-            with open(scene_info.ply_path, "rb") as src, \
-                 open(os.path.join(self.model_path, "input.ply"), "wb") as dst:
-                dst.write(src.read())
+            dst_ply = os.path.join(self.model_path, "input.ply")
+            if scene_info.ply_path and os.path.exists(scene_info.ply_path) and os.path.abspath(scene_info.ply_path) != os.path.abspath(dst_ply):
+                with open(scene_info.ply_path, "rb") as src, \
+                     open(dst_ply, "wb") as dst:
+                    dst.write(src.read())
 
             # save camera json
             cams = []
