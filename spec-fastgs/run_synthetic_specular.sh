@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # ============================================================
-# SPEC-FASTGS ANISOTROPIC-SYNTHESIS BATCH SCRIPT
+# SPEC-FASTGS SYNTHETIC-SPECULAR BATCH SCRIPT
+# Runs all 8 synthetic specular scenes
 # ============================================================
 
 export CUDA_VISIBLE_DEVICES=0
@@ -80,7 +81,7 @@ for SCENE in "${SCENES[@]}"; do
     fi
 
     echo "========================================================================"
-    echo " Starting spec-fastgs Anisotropic-Synthesis scene"
+    echo " Starting Spec-FastGS Synthetic-Specular scene: ${SCENE}"
     echo "========================================================================"
     echo "Dataset Path : ${SOURCE_PATH}"
     echo "Output Path  : ${MODEL_PATH}"

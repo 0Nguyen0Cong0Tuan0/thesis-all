@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # ============================================================
-# SPEC-FASTGS ANISOTROPIC-SYNTHESIS BATCH SCRIPT
+# SPEC-FASTGS (CONFIG=TRUE) SYNTHETIC-SPECULAR BATCH SCRIPT
+# Runs full proposed Spec-FastGS model (with prior extraction, ref score, adaptive prior, SH spec mask)
 # ============================================================
 
 export CUDA_VISIBLE_DEVICES=0
@@ -23,10 +24,7 @@ SCENES=(
 # Important final knobs
 ASG_DEGREE=64
 
-# Reflection prior method:
-#   tan    = Tan-Ikeuchi
-#   shafer = Shafer/Klinker
-#   hybrid = combined heuristic
+# Config = True settings (full proposed Spec-FastGS model)
 REF_PRIOR_METHOD=tan
 EXTRACT_REF_PRIOR=True
 BACKUP_REF_PRIOR=True
@@ -35,7 +33,6 @@ USE_ADAPTIVE_PRIOR=True
 USE_SH_SPEC_MASK=True
 STOP_ON_ERROR=True
 
-# Representation Capacity: light SH suppression on high-confidence specular areas.
 SH_SPEC_GRAD_SCALE=0.75
 SH_SPEC_MASK_START=8000
 SH_SPEC_MASK_THRESHOLD=0.75
@@ -80,7 +77,7 @@ for SCENE in "${SCENES[@]}"; do
     fi
 
     echo "========================================================================"
-    echo " Starting spec-fastgs Anisotropic-Synthesis scene"
+    echo " Starting Spec-FastGS (config=True) Synthetic-Specular scene: ${SCENE}"
     echo "========================================================================"
     echo "Dataset Path : ${SOURCE_PATH}"
     echo "Output Path  : ${MODEL_PATH}"

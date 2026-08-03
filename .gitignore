@@ -1,4 +1,4 @@
-# Python
+# Python & Environment
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -7,7 +7,7 @@ __pycache__/
 venv/
 env/
 
-# OS / editor junk
+# OS / Editor junk
 .DS_Store
 Thumbs.db
 desktop.ini
@@ -15,54 +15,72 @@ desktop.ini
 .vscode/
 .idea/
 
-# Secrets
+# Secrets & Local credentials
 .env
 *.pem
 *.key
 hf_token.json
 kaggle.json
 
-# Build / cache
-*.log
+# C/C++ & CUDA Build artifacts
 build/
 dist/
+*.so
+*.dylib
+*.dll
+*.exe
+*.o
+*.a
+*.dump
 
-# Training outputs — large & regenerable. Keep small metrics/config (JSON, cfg_args)
-# and analysis artifacts; exclude model checkpoints and render dumps.
-results/output/**/point_cloud/
-results/output/**/test/
-results/output/**/specular/
-results/output/**/input.ply
-# Run-output folders carry version suffixes (spec_fastgs_output_v2.3-..., __v2.4-..._1),
-# so match the prefix, not just the bare name. Also the training "output/" dir.
-spec_fastgs_output*/
-spec_fastgs_teapot_*/
-spec-fastgs/output/
-output/
-pipeline-results/
+# Logs
+*.log
+*.dump
 
-# 3DGS checkpoints / point clouds are always regenerable and often >100MB
-# (GitHub's hard push limit) — never commit them.
+# Heavy 3DGS Checkpoints, point clouds, binary weights (>100MB prevention)
 *.ply
 *.pt
+*.pth
+*.bin
+*.npy
+*.npz
 
-# Analysis notebooks with embedded plot images can exceed GitHub's 100MB push limit
-mipnerf360_images4_experiment_comparison.ipynb
-
-# Local copies of datasets (large; live on Kaggle, not in git)
-Anisotropic-Synthetic-Dataset/
-Synthetic_NSVF/
-*.zip
-# Consolidated local dataset mirror (dataset/mipnerf360, dataset/Anisotropic-..., etc.) —
-# was NOT covered by the rules above (those only match by subfolder NAME, not this root
-# folder), so dataset/mipnerf360/*.JPG real photos were untracked-but-NOT-ignored. Anchor
-# to repo root explicitly.
-/dataset/
-results
-thesis_figures
-Spec_fastgs_Luận_văn
+# Training outputs & Render dumps across all sub-projects
+output/
+outputs/
+**/output/
+**/outputs/
+**/backups/
+**/reflection_prior/
+**/point_cloud/
+spec_fastgs_output*/
+spec_fastgs_teapot_*/
+pipeline-results/
+results/
 result_*
-storage
-ketqua
-# Ignore bosch_download_dataset.ipynb
+image2_result/
+ketqua/
+storage/
+thesis_figures/
+Spec_fastgs_Luận_văn/
+
+# Dataset folders (large local mirrors; live on BOSCH server / Kaggle / HF)
+/dataset/
+dataset/
+datasets/
+data/
+**/dataset/
+**/datasets/
+**/data/
+Anisotropic-Synthetic-Dataset/
+Anisotropic-Synthesis/
+Synthetic_NSVF/
+synthetic_specular/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Heavy Jupyter Notebook outputs / cache
+notebooks/mipnerf360_images4_experiment_comparison.ipynb
 notebooks/bosch_download_dataset.ipynb

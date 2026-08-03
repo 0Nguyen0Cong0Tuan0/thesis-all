@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # ============================================================
-# SPEC-FASTGS ANISOTROPIC-SYNTHESIS BATCH SCRIPT
+# SPEC-FASTGS (CONFIG=FALSE) SYNTHETIC-SPECULAR BATCH SCRIPT
+# Runs baseline Spec-FastGS (without reflection score/adaptive prior/SH spec mask)
 # ============================================================
 
 export CUDA_VISIBLE_DEVICES=0
@@ -23,19 +24,15 @@ SCENES=(
 # Important final knobs
 ASG_DEGREE=64
 
-# Reflection prior method:
-#   tan    = Tan-Ikeuchi
-#   shafer = Shafer/Klinker
-#   hybrid = combined heuristic
+# Config = False settings (no prior extraction, no ref score, no adaptive prior, no SH spec mask)
 REF_PRIOR_METHOD=tan
-EXTRACT_REF_PRIOR=True
-BACKUP_REF_PRIOR=True
-USE_REF_SCORE=True
-USE_ADAPTIVE_PRIOR=True
-USE_SH_SPEC_MASK=True
+EXTRACT_REF_PRIOR=False
+BACKUP_REF_PRIOR=False
+USE_REF_SCORE=False
+USE_ADAPTIVE_PRIOR=False
+USE_SH_SPEC_MASK=False
 STOP_ON_ERROR=True
 
-# Representation Capacity: light SH suppression on high-confidence specular areas.
 SH_SPEC_GRAD_SCALE=0.75
 SH_SPEC_MASK_START=8000
 SH_SPEC_MASK_THRESHOLD=0.75
@@ -80,34 +77,15 @@ for SCENE in "${SCENES[@]}"; do
     fi
 
     echo "========================================================================"
-    echo " Starting spec-fastgs Anisotropic-Synthesis scene"
+    echo " Starting Spec-FastGS (config=False) Synthetic-Specular scene: ${SCENE}"
     echo "========================================================================"
     echo "Dataset Path : ${SOURCE_PATH}"
     echo "Output Path  : ${MODEL_PATH}"
     echo "ASG Degree   : ${ASG_DEGREE}"
-    echo "Prior Method : ${REF_PRIOR_METHOD}"
-    echo "Extract Prior: ${EXTRACT_REF_PRIOR}"
     echo "Use RefScore : ${USE_REF_SCORE}"
     echo "AdaptivePrior: ${USE_ADAPTIVE_PRIOR}"
     echo "SH Spec Mask : ${USE_SH_SPEC_MASK}"
     echo "========================================================================"
-
-    if [ "$USE_REF_SCORE" = "True" ] && [ "$EXTRACT_REF_PRIOR" = "True" ]; then
-        PRIOR_DIR=${SOURCE_PATH}/reflection_prior
-        if [ "$BACKUP_REF_PRIOR" = "True" ] && [ -d "$PRIOR_DIR" ]; then
-            TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-            BACKUP_ROOT=${SOURCE_PATH}/backups
-            BACKUP_DIR=${BACKUP_ROOT}/reflection_prior_${TIMESTAMP}
-            echo "Backing up existing reflection_prior to:"
-            echo "  ${BACKUP_DIR}"
-            mkdir -p "$BACKUP_ROOT"
-            mv "$PRIOR_DIR" "$BACKUP_DIR"
-        fi
-
-        run_or_stop python extract_reflection_prior.py \
-            -s ${SOURCE_PATH} \
-            --ref_prior_method ${REF_PRIOR_METHOD}
-    fi
 
     run_or_stop python train.py \
         -s ${SOURCE_PATH} \
