@@ -552,12 +552,12 @@ trong đó $\boldsymbol{\mu}_i \in \mathbb{R}^3$ là vị trí trung tâm (tâm 
 
 trong đó $\mathbf{S}_i = \operatorname{diag}(\mathbf{s}_i)$ là ma trận tỉ lệ đường chéo được tham số hóa bởi vector tỉ lệ ba chiều $\mathbf{s}_i = (s_x, s_y, s_z) \in \mathbb{R}^3$, và $\mathbf{R}_i \in \mathrm{SO}(3)$ là ma trận xoay được tham số hóa bởi một quaternion đơn vị $\mathbf{q}_i = (q_w, q_x, q_y, q_z) \in \mathbb{R}^4$. 
 
-\subsubsection{Khởi tạo đám mây điểm và hệ số Điều hòa Hình cầu (SH)}
+\subsubsection{Khởi tạo đám mây điểm và hệ số điều hòa hình cầu (SH)}
 \label{subsubsec:3dgs-initialization-sh}
 
-Tập Gaussian ba chiều thường được khởi tạo từ một đám mây điểm thưa thớt thu được từ thuật toán Structure-from-Motion (SfM) như COLMAP, hoặc từ một đám mây điểm khởi tạo ngẫu nhiên. Vị trí ban đầu của tâm Gaussian $\boldsymbol{\mu}_i$ được gán trực tiếp bằng tọa độ 3D của điểm tương ứng. Tỉ lệ ban đầu $\mathbf{s}_i$ của từng Gaussian được thiết lập bằng khoảng cách trung bình từ $\boldsymbol{\mu}_i$ đến $k$ điểm lân cận gần nhất ($k=3$), đảm bảo vùng ảnh hưởng của các Gaussian bao phủ liên tục không gian cảnh mà không để lại khoảng trống.
+Tập Gaussian ba chiều thường được khởi tạo từ một đám mây điểm thưa thớt thu được từ thuật toán Structure-from-Motion (SfM) qua COLMAP, hoặc từ một đám mây điểm khởi tạo ngẫu nhiên. Vị trí ban đầu của tâm Gaussian $\boldsymbol{\mu}_i$ được gán trực tiếp bằng tọa độ 3D của điểm tương ứng. Tỉ lệ ban đầu $\mathbf{s}_i$ của từng Gaussian được thiết lập bằng khoảng cách trung bình từ $\boldsymbol{\mu}_i$ đến $k$ điểm lân cận gần nhất ($k=3$), đảm bảo vùng ảnh hưởng của các Gaussian bao phủ liên tục không gian cảnh mà không để lại khoảng trống.
 
-Bên cạnh các thuộc tính hình học (vị trí $\boldsymbol{\mu}_i$, tỉ lệ $\mathbf{s}_i$, hướng xoay $\mathbf{q}_i$ và độ mờ $o_i \in [0,1]$), mỗi 3D Gaussian lưu trữ một tập các hệ số Điều hòa Hình cầu (Spherical Harmonics -- SH) $\mathbf{C}_i = \{ \mathbf{c}_j^m \}$ nhằm biểu diễn sự phụ thuộc của màu sắc vào hướng quan sát $\mathbf{d} \in \mathbb{S}^2$. Hàm biểu diễn màu $\mathbf{c}(\mathbf{d})$ được tính theo công thức tổ hợp tuyến tính các hàm cơ sở SH:
+Bên cạnh các thuộc tính hình học (vị trí $\boldsymbol{\mu}_i$, tỉ lệ $\mathbf{s}_i$, hướng xoay $\mathbf{q}_i$ và độ mờ $o_i \in [0,1]$), mỗi 3D Gaussian lưu trữ một tập các hệ số điều hòa hình cầu (Spherical Harmonics -- SH) $\mathbf{C}_i = \{ \mathbf{c}_j^m \}$ nhằm biểu diễn sự phụ thuộc của màu sắc vào hướng quan sát $\mathbf{d} \in \mathbb{S}^2$. Hàm biểu diễn màu $\mathbf{c}(\mathbf{d})$ được tính theo công thức tổ hợp tuyến tính các hàm cơ sở SH:
 
 \begin{equation}
     \mathbf{c}(\mathbf{d})
