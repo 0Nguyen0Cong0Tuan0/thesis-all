@@ -1,0 +1,284 @@
+import json
+import os
+
+notebook_path = r"c:\Users\YUT9HC\Desktop\Z\thesis-all\notebooks\colab_prepare_and_upload_dataset_to_kaggle.ipynb"
+
+cells = []
+
+# Cell 1: Title & Description (Markdown)
+cells.append({
+    "cell_type": "markdown",
+    "id": "cell_01_title",
+    "metadata": {},
+    "source": [
+        "# 🚀 Tải, Tiền Xử Lý Dataset MipNerf360 và Upload Lên Kaggle Từ Google Colab\n",
+        "\n",
+        "Vì Kaggle giới hạn dung lượng ổ đĩa làm việc `/kaggle/working` là **20GB**, việc vừa tải file zip dataset (17GB) vừa giải nén nó ra sẽ gây ra lỗi hết bộ nhớ (`No space left on device`).\n",
+        "\n",
+        "**Giải pháp:** Chạy notebook này trên **Google Colab** (ổ đĩa khả dụng hơn **100GB**), sau đó sử dụng **Kaggle API** để đẩy thẳng bộ dataset đã được giải nén và làm phẳng lên tài khoản Kaggle của bạn với tên **MipNerf360-dataset**.\n",
+        "\n",
+        "--- \n",
+        "### 🔑 Cách tạo và lấy Token Kaggle API mới (Sửa lỗi 401 Unauthorized):\n",
+        "1. Truy cập [Kaggle](https://www.kaggle.com/) và đăng nhập vào tài khoản của bạn.\n",
+        "2. Nhấp vào ảnh đại diện ở góc trên cùng bên phải -> Chọn **Settings**.\n",
+        "3. Cuộn xuống phần **API** -> Nhấn nút **Create New Token**.\n",
+        "4. Trình duyệt sẽ tải về một file tên là `kaggle.json` (chứa `username` và `key` của bạn).\n",
+        "5. Mở file `kaggle.json` đó ra và copy các thông số dán vào **Form cấu hình** ở cell bên dưới."
+    ]
+})
+
+# Cell 2: Config variables (Code)
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "id": "cell_02_config",
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "#@title ── Cấu Hình Thông Tin Tài Khoản Kaggle & HuggingFace ── { display-mode: \"form\" }\n",
+        "import os\n",
+        "\n",
+        "#@markdown **HuggingFace settings:**\n",
+        "HF_TOKEN = \"YOUR_HF_TOKEN\" #@param {type:\"string\"}\n",
+        "os.environ[\"HF_HUB_DISABLE_SYMLINKS_WARNING\"] = \"1\"\n",
+        "\n",
+        "#@markdown **Kaggle Settings:**\n",
+        "#@markdown *Hãy thay thế username và key bên dưới bằng thông tin trong file `kaggle.json` mới của bạn*\n",
+        "KAGGLE_USERNAME = \"nctuan\" #@param {type:\"string\"}\n",
+        "KAGGLE_KEY = \"YOUR_KAGGLE_KEY_OR_TOKEN\" #@param {type:\"string\"}\n",
+        "\n",
+        "print(\"✅ Cấu hình hoàn tất!\")"
+    ]
+})
+
+# Cell 3: Setup Kaggle Credentials (Code)
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "id": "cell_03_kaggle_creds",
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# ── Cài Đặt Kaggle API & Thiết Lập Token Truy Cập ───────────────────────────────\n",
+        "import json\n",
+        "import os\n",
+        "from pathlib import Path\n",
+        "\n",
+        "# Dọn dẹp thư viện cũ và cài đặt Kaggle CLI bản mới nhất (để hỗ trợ token mới KGAT_)\n",
+        "!pip uninstall -y -q kaggle kagglesdk kagglehub\n",
+        "!pip install -q kaggle kagglehub --upgrade\n",
+        "\n",
+        "# Cấu hình thư mục .kaggle chứa credentials\n",
+        "home_dir = Path.home()\n",
+        "kaggle_dir = home_dir / '.kaggle'\n",
+        "kaggle_dir.mkdir(parents=True, exist_ok=True)\n",
+        "\n",
+        "# 1. Phương pháp Legacy (kaggle.json)\n",
+        "config_path = kaggle_dir / 'kaggle.json'\n",
+        "with open(config_path, 'w') as f:\n",
+        "    json.dump({\"username\": KAGGLE_USERNAME, \"key\": KAGGLE_KEY}, f)\n",
+        "config_path.chmod(0o600)\n",
+        "\n",
+        "# 2. Phương pháp Modern (access_token)\n",
+        "token_path = kaggle_dir / 'access_token'\n",
+        "with open(token_path, 'w') as f:\n",
+        "    f.write(KAGGLE_KEY)\n",
+        "token_path.chmod(0o600)\n",
+        "\n",
+        "# 3. Thiết lập biến môi trường cho cả 2 phương pháp\n",
+        "os.environ['KAGGLE_USERNAME'] = KAGGLE_USERNAME\n",
+        "os.environ['KAGGLE_KEY'] = KAGGLE_KEY\n",
+        "os.environ['KAGGLE_API_TOKEN'] = KAGGLE_KEY\n",
+        "\n",
+        "print(f\"✅ Đã thiết lập thông tin Kaggle API tại: {kaggle_dir}\")"
+    ]
+})
+
+# Cell 4: Download testing.zip from HuggingFace (Code)
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "id": "cell_04_download_hf",
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# ── Tải Dataset 'testing.zip' Từ HuggingFace Hub Về Colab ───────────────────────\n",
+        "import os\n",
+        "from huggingface_hub import hf_hub_download\n",
+        "\n",
+        "zip_dest = \"/content/testing.zip\"\n",
+        "\n",
+        "if not os.path.exists(zip_dest):\n",
+        "    print(\"⚡ Đang tải testing.zip từ HuggingFace (DiBiay/thesis_dataset) ...\")\n",
+        "    try:\n",
+        "        hf_hub_download(\n",
+        "            repo_id=\"DiBiay/thesis_dataset\",\n",
+        "            filename=\"testing.zip\",\n",
+        "            repo_type=\"dataset\",\n",
+        "            token=HF_TOKEN,\n",
+        "            local_dir=\"/content\",\n",
+        "            local_dir_use_symlinks=False\n",
+        "        )\n",
+        "        print(f\"✅ Tải hoàn tất! Tệp tin được lưu tại: {zip_dest}\")\n",
+        "    except Exception as e:\n",
+        "        print(f\"❌ Lỗi khi tải dataset: {e}\")\n",
+        "else:\n",
+        "    print(f\"✅ Dataset 'testing.zip' đã tồn tại ở: {zip_dest}\")"
+    ]
+})
+
+# Cell 5: Unzip and Flatten (Code)
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "id": "cell_05_unzip_flatten",
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# ── Giải Nén, Làm Phẳng Cấu Trúc & Dọn Dẹp File Zip ─────────────────────────────\n",
+        "import os\n",
+        "import zipfile\n",
+        "import shutil\n",
+        "\n",
+        "zip_dest = \"/content/testing.zip\"\n",
+        "output_dataset_dir = \"/content/MipNerf360-dataset\"\n",
+        "\n",
+        "print(f\"📦 Đang giải nén {zip_dest} vào {output_dataset_dir} ...\")\n",
+        "with zipfile.ZipFile(zip_dest, 'r') as zip_ref:\n",
+        "    zip_ref.extractall(output_dataset_dir)\n",
+        "print(\"✅ Giải nén thành công!\")\n",
+        "\n",
+        "# ── Làm phẳng cấu trúc thư mục (Flatten scene folders) ───────────────────────────\n",
+        "print(\"\\n🔍 Đang chuẩn hóa cấu trúc scene...\")\n",
+        "scenes_moved = 0\n",
+        "scene_paths_to_move = []\n",
+        "\n",
+        "# Quét tìm các thư mục chứa thư mục con 'images_8', 'images_4' hoặc 'images'\n",
+        "for root, dirs, files in os.walk(output_dataset_dir):\n",
+        "    if any(d in [\"images_8\", \"images_4\", \"images\"] for d in dirs):\n",
+        "        scene_paths_to_move.append(root)\n",
+        "\n",
+        "scene_paths_to_move = list(set(scene_paths_to_move))\n",
+        "\n",
+        "for scene_path in scene_paths_to_move:\n",
+        "    scene_name = os.path.basename(scene_path)\n",
+        "    final_scene_dest = os.path.join(output_dataset_dir, scene_name)\n",
+        "    \n",
+        "    if os.path.abspath(scene_path) != os.path.abspath(final_scene_dest):\n",
+        "        print(f\"  -> Di chuyển '{scene_name}' từ {scene_path} về {final_scene_dest}\")\n",
+        "        if os.path.exists(final_scene_dest):\n",
+        "            shutil.rmtree(final_scene_dest)\n",
+        "        shutil.move(scene_path, final_scene_dest)\n",
+        "        scenes_moved += 1\n",
+        "\n",
+        "# Xóa các thư mục cha bị rỗng sau khi chuyển\n",
+        "for root, dirs, files in os.walk(output_dataset_dir, topdown=False):\n",
+        "    for d in dirs:\n",
+        "        dir_to_check = os.path.join(root, d)\n",
+        "        if os.path.exists(dir_to_check) and not os.listdir(dir_to_check):\n",
+        "            os.rmdir(dir_to_check)\n",
+        "\n",
+        "print(f\"✅ Chuẩn hóa cấu trúc hoàn tất. Đã di chuyển {scenes_moved} scenes.\")\n",
+        "\n",
+        "# ── Xóa file zip thô để tiết kiệm bộ nhớ ───────────────────────────────────────\n",
+        "if os.path.exists(zip_dest):\n",
+        "    print(f\"\\n🧹 Đang xóa file zip thô trên Colab: {zip_dest}...\")\n",
+        "    os.remove(zip_dest)\n",
+        "    print(\"✅ Xóa file zip thành công để tối ưu ổ đĩa!\")"
+    ]
+})
+
+# Cell 6: Create dataset-metadata.json and upload using Kaggle API (Code)
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "id": "cell_06_kaggle_upload",
+    "metadata": {},
+    "outputs": [],
+    "source": [
+        "# ── Tạo File Metadata & Upload Bộ Dataset Lên Kaggle ───────────────────────────\n",
+        "import json\n",
+        "import subprocess\n",
+        "import os\n",
+        "\n",
+        "output_dataset_dir = \"/content/MipNerf360-dataset\"\n",
+        "metadata_path = os.path.join(output_dataset_dir, \"dataset-metadata.json\")\n",
+        "\n",
+        "# 1. Viết thông tin mô tả metadata cho Kaggle Dataset\n",
+        "metadata = {\n",
+        "    \"title\": \"MipNerf360-dataset\",\n",
+        "    \"id\": f\"{KAGGLE_USERNAME}/mipnerf360-dataset\",\n",
+        "    \"licenses\": [\n",
+        "        {\n",
+        "            \"name\": \"CC0-1.0\"\n",
+        "        }\n",
+        "    ]\n",
+        "}\n",
+        "\n",
+        "with open(metadata_path, \"w\", encoding=\"utf-8\") as f:\n",
+        "    json.dump(metadata, f, indent=4)\n",
+        "\n",
+        "print(\"✅ Đã tạo file dataset-metadata.json!\")\n",
+        "print(json.dumps(metadata, indent=4))\n",
+        "\n",
+        "# 2. Tiến hành upload bằng Kaggle CLI\n",
+        "print(\"\\n🚀 Đang upload bộ dataset lên Kaggle Datasets (Vui lòng đợi vài phút)...\")\n",
+        "\n",
+        "# Thử khởi tạo dataset mới\n",
+        "result = subprocess.run([\"kaggle\", \"datasets\", \"create\", \"-p\", output_dataset_dir, \"-r\", \"zip\"], capture_output=True, text=True)\n",
+        "\n",
+        "# Nếu dataset đã tồn tại, tiến hành đẩy một version mới thay thế\n",
+        "if \"already exists\" in result.stderr or \"already exists\" in result.stdout:\n",
+        "    print(\"\\n🔄 Bộ dataset đã tồn tại trên tài khoản Kaggle của bạn. Tiến hành tải lên phiên bản mới...\")\n",
+        "    result = subprocess.run([\n",
+        "        \"kaggle\", \"datasets\", \"version\", \n",
+        "        \"-p\", output_dataset_dir, \n",
+        "        \"-m\", \"Được tải lên tự động từ Google Colab\"\n",
+        "    ], capture_output=True, text=True)\n",
+        "\n",
+        "print(\"\\n--- KẾT QUẢ UPLOAD KAGGLE ---\")\n",
+        "print(\"STDOUT:\")\n",
+        "print(result.stdout)\n",
+        "if result.stderr:\n",
+        "    print(\"STDERR:\")\n",
+        "    print(result.stderr)\n",
+        "\n",
+        "if result.returncode == 0:\n",
+        "    print(f\"\\n🎉 Chúc mừng! Bạn đã tải dataset lên Kaggle thành công dưới tên: nctuan/mipnerf360-dataset\")\n",
+        "    print(\"👉 Bây giờ bạn chỉ cần add dataset này vào notebook huấn luyện trên Kaggle để tiếp tục chạy!\")\n",
+        "else:\n",
+        "    print(\"\\n❌ Có lỗi xảy ra trong quá trình upload. Vui lòng kiểm tra log lỗi ở trên.\")"
+    ]
+})
+
+# Notebook Metadata
+notebook_json = {
+    "cells": cells,
+    "metadata": {
+        "kernelspec": {
+            "display_name": "Python 3",
+            "language": "python",
+            "name": "python3"
+        },
+        "language_info": {
+            "codemirror_mode": {
+                "name": "ipython",
+                "version": 3
+            },
+            "file_extension": ".py",
+            "mimetype": "text/x-python",
+            "name": "python",
+            "nbconvert_exporter": "python",
+            "pygments_lexer": "ipython3",
+            "version": "3.10.12"
+        }
+    },
+    "nbformat": 4,
+    "nbformat_minor": 5
+}
+
+os.makedirs(os.path.dirname(notebook_path), exist_ok=True)
+with open(notebook_path, "w", encoding="utf-8") as f:
+    json.dump(notebook_json, f, ensure_ascii=False, indent=1)
+
+print(f"Colab Dataset Upload Notebook successfully written to: {notebook_path}")
