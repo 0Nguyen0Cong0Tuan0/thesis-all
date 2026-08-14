@@ -230,7 +230,7 @@ cells.append({
         "arg_parser = ArgumentParser(description=\"Demo video initial points renderer\")\n",
         "lp = ModelParams(arg_parser, sentinel=True)\n",
         "pp = PipelineParams(arg_parser)\n",
-        "parsed_args = arg_parser.parse_args([\"-s\", source_path, \"-m\", demo_model_path, \"-i\", \"images_8\", \"--eval\"])\n",
+        "parsed_args = arg_parser.parse_args([\"-s\", source_path, \"-m\", demo_model_path, \"-i\", \"images_8\", \"--sh_degree\", \"3\", \"--asg_degree\", \"24\", \"--resolution\", \"-1\", \"--eval\"])\n",
         "dataset = lp.extract(parsed_args)\n",
         "pipe = pp.extract(parsed_args)\n",
         "\n",

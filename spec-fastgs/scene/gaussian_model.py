@@ -53,8 +53,8 @@ class GaussianModel:
     def __init__(self, sh_degree, asg_degree=24, optimizer_type="default"):
         self.active_sh_degree = 0
         self.optimizer_type = optimizer_type
-        self.max_sh_degree = sh_degree  
-        self.asg_degree = asg_degree
+        self.max_sh_degree = sh_degree if sh_degree is not None else 3
+        self.asg_degree = asg_degree if asg_degree is not None else 24
         self._xyz = torch.empty(0)
         self._features_dc = torch.empty(0)
         self._features_rest = torch.empty(0)
