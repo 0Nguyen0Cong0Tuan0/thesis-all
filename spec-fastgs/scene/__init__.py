@@ -33,7 +33,9 @@ class Scene:
         Scene loader (FastGS + Specular support)
         """
 
-        self.model_path = args.model_path
+        self.model_path = args.model_path if getattr(args, "model_path", None) else args.source_path
+        if self.model_path:
+            os.makedirs(self.model_path, exist_ok=True)
         self.loaded_iter = None
         self.gaussians = gaussians
 
