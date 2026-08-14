@@ -515,7 +515,8 @@ def training(dataset, opt, pipe):
 
         # ── Demo Video Snapshot Rendering Hook ─────────────────────────────────────
         demo_snapshot_dir = os.environ.get("DEMO_SNAPSHOT_DIR", "")
-        if demo_snapshot_dir and (iteration % 1000 == 0 or iteration == opt.iterations):
+        demo_interval = int(os.environ.get("DEMO_SNAPSHOT_INTERVAL", "5000"))
+        if demo_snapshot_dir and (iteration % demo_interval == 0 or iteration == opt.iterations):
             fixed_cams_path = os.path.join(os.path.dirname(demo_snapshot_dir), "fixed_cameras.json")
             if os.path.exists(fixed_cams_path):
                 with open(fixed_cams_path, "r", encoding="utf-8") as f:

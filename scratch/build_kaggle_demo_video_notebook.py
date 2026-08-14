@@ -320,7 +320,7 @@ cells.append({
     ]
 })
 
-# Cell 7: Step 3: Train 30k Iterations & Capture 10 Views Every 1k Iterations (Code)
+# Cell 7: Step 3: Train 30k Iterations & Capture 10 Views Every 5,000 Iterations (Code)
 cells.append({
     "cell_type": "code",
     "execution_count": None,
@@ -328,7 +328,7 @@ cells.append({
     "metadata": {},
     "outputs": [],
     "source": [
-        "# ── KHÂU 3: Huấn Luyện 30k Iterations & Snapshots 10 Góc Chụp Mỗi 1.000 Iterations ────\n",
+        "# ── KHÂU 3: Huấn Luyện 30k Iterations & Snapshots 10 Góc Chụp Mỗi 5.000 Iterations ────\n",
         "import os\n",
         "import sys\n",
         "import subprocess\n",
@@ -338,12 +338,13 @@ cells.append({
         "step3_dir = os.path.join(DEMO_OUTPUT_DIR, \"step3_training_snapshots\")\n",
         "os.makedirs(step3_dir, exist_ok=True)\n",
         "\n",
-        "# Thiết lập biến môi trường DEMO_SNAPSHOT_DIR để train.py tự động lưu 10 views mỗi 1k iter\n",
+        "# Thiết lập biến môi trường DEMO_SNAPSHOT_DIR & DEMO_SNAPSHOT_INTERVAL (5000 iter)\n",
         "env = os.environ.copy()\n",
         "env[\"DEMO_SNAPSHOT_DIR\"] = step3_dir\n",
+        "env[\"DEMO_SNAPSHOT_INTERVAL\"] = \"5000\"\n",
         "\n",
         "print(f\"🏋️ Khởi động huấn luyện Spec-fastgs 30.000 iterations trên scene 'counter'...\")\n",
-        "print(f\"Cấu hình: Render & lưu 10 góc ảnh snapshot sau mỗi 1.000 iterations (1k -> 30k)\")\n",
+        "print(f\"Cấu hình: Render & lưu 10 góc ảnh snapshot sau mỗi 5.000 iterations (5k, 10k, 15k, 20k, 25k, 30k)\")\n",
         "\n",
         "cmd = [\n",
         "    sys.executable, \"train.py\",\n",
