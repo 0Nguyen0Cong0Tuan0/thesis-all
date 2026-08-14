@@ -539,7 +539,9 @@ def training(dataset, opt, pipe):
                         np_img = (img.permute(1, 2, 0).cpu().numpy() * 255).astype("uint8")
                         from PIL import Image
                         Image.fromarray(np_img).save(os.path.join(iter_dir, f"view_{i+1:02d}_{cam.image_name}.png"))
-                print(f"📸 Saved {len(selected_cameras)} demo video snapshots for Iteration {iteration} to {iter_dir}")
+                ply_path = os.path.join(iter_dir, f"point_cloud_iter_{iteration:05d}.ply")
+                gaussians.save_ply(ply_path)
+                print(f"📸 Saved {len(selected_cameras)} demo video snapshots & Point Cloud (.ply) for Iteration {iteration} to {iter_dir}")
 
     # ------------------------------------------------------------
     # SAVE METADATA

@@ -278,6 +278,11 @@ cells.append({
         "        Image.fromarray(img_np).save(out_file)\n",
         "        print(f\"  -> Đã lưu Khâu 1 ảnh {i+1}/10: {out_file}\")\n",
         "\n",
+        "# 3. Lưu lại file Mây Điểm Ban Đầu (Point Cloud Iteration 0)\n",
+        "initial_ply_path = os.path.join(step1_dir, \"initial_point_cloud.ply\")\n",
+        "gaussians.save_ply(initial_ply_path)\n",
+        "print(f\"💾 Đã lưu file Mây Điểm Ban Đầu (Point Cloud Iter 0): {initial_ply_path}\")\n",
+        "\n",
         "print(\"✅ Khâu 1 hoàn tất!\")"
     ]
 })
