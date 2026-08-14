@@ -22,7 +22,7 @@ cells.append({
     ]
 })
 
-# Cell 2: True Full-Width Pure Black 3D Interactive Point Cloud Visualizer
+# Cell 2: True Full-Width Pure Black 3D Interactive Point Cloud Visualizer (Fixed)
 cells.append({
     "cell_type": "code",
     "execution_count": None,
@@ -40,7 +40,7 @@ cells.append({
         "def display_interactive_point_cloud_plotly(ply_path, max_points=50000):\n",
         "    \"\"\"\n",
         "    Hiển thị Khung Mây Điểm 3D Tương Tác Full-Width Nền Đen Tuyền (#000000).\n",
-        "    - Tự động Ép Khung Ép Width 100% tràn ngập toàn bộ ô Notebook trong VS Code.\n",
+        "    - Tự động Ép Khung Width 100% tràn ngập toàn bộ ô Notebook trong VS Code.\n",
         "    - Nền Đen Tuyền (#000000) làm nổi bật toàn bộ các điểm mây 3D sắc nét.\n",
         "    - Nút '▶ Tự Động Quay 360°' và '⏸ Tạm Dừng' xoay mây điểm quanh tâm.\n",
         "    \"\"\"\n",
@@ -84,7 +84,7 @@ cells.append({
         "    # Chuẩn hóa màu hex RGB\n",
         "    colors_hex = [f'rgb({int(ri*255)},{int(gi*255)},{int(bi*255)})' for ri, gi, bi in zip(r, g, b)]\n",
         "\n",
-        "    # Ép CSS Full-Width tràn toàn bộ chiều ngang VS Code Notebook Output Cell\n",
+        "    # Ép CSS Full-Width 100% tràn toàn bộ chiều ngang VS Code Notebook Output Cell\n",
         "    display(HTML(\"\"\"\n",
         "    <style>\n",
         "    .cell-output-ipywidget-background, .output_subarea, .js-plotly-plot, .plotly, .plot-container {\n",
@@ -92,7 +92,7 @@ cells.append({
         "        max-width: 100% !important;\n",
         "    }\n",
         "    .js-plotly-plot .plotly .main-svg {\n",
-        "        background: #000000 !important;\n",
+        "        background: transparent !important;\n",
         "    }\n",
         "    </style>\n",
         "    \"\"\"))\n",
@@ -234,4 +234,4 @@ with open(notebook_path, "w", encoding="utf-8") as f:
 
 shutil.copy2(notebook_path, fix_notebook_path)
 
-print(f"True Full-Width Pure Black Plotly 3D Notebook written to:\n- {notebook_path}\n- {fix_notebook_path}")
+print(f"Fixed Pure Black Full-Width Plotly 3D Notebook written to:\n- {notebook_path}\n- {fix_notebook_path}")
