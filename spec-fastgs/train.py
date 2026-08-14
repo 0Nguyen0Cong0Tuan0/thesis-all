@@ -513,6 +513,33 @@ def training(dataset, opt, pipe):
             # ✅ QUAN TRỌNG NHẤT
             specular_mlp.save_weights(scene.model_path, iteration)
 
+        # ── Demo Video Snapshot Rendering Hook ─────────────────────────────────────
+        demo_snapshot_dir = os.environ.get("DEMO_SNAPSHOT_DIR", "")
+        if demo_snapshot_dir and (iteration % 1000 == 0 or iteration == opt.iterations):
+            fixed_cams_path = os.path.join(os.path.dirname(demo_snapshot_dir), "fixed_cameras.json")
+            if os.path.exists(fixed_cams_path):
+                with open(fixed_cams_path, "r", encoding="utf-8") as f:
+                    cam_data = json.load(f)
+                selected_indices = cam_data["selected_indices"]
+                test_cameras = scene.getTestCameras()
+                selected_cameras = [test_cameras[idx] for idx in selected_indices if idx < len(test_cameras)]
+                iter_dir = os.path.join(demo_snapshot_dir, f"iter_{iteration:05d}")
+                os.makedirs(iter_dir, exist_ok=True)
+                with torch.no_grad():
+                    for i, cam in enumerate(selected_cameras):
+                        xyz = gaussians.get_xyz
+                        cam_center = cam.camera_center.cuda() if hasattr(cam.camera_center, 'cuda') else cam.camera_center
+                        viewdir = xyz - cam_center
+                        viewdir = viewdir / (viewdir.norm(dim=1, keepdim=True) + 1e-6)
+                        normal = gaussians.get_normal_axis(viewdir).cuda()
+                        mlp_color = specular_mlp.step(gaussians.get_asg_features.cuda(), viewdir, normal) if iteration > opt.specular_start_iter else None
+                        r_pkg = render_fastgs(cam, gaussians, pipe, background, opt.mult, mlp_color=mlp_color)
+                        img = r_pkg["render"].clamp(0.0, 1.0)
+                        np_img = (img.permute(1, 2, 0).cpu().numpy() * 255).astype("uint8")
+                        from PIL import Image
+                        Image.fromarray(np_img).save(os.path.join(iter_dir, f"view_{i+1:02d}_{cam.image_name}.png"))
+                print(f"📸 Saved {len(selected_cameras)} demo video snapshots for Iteration {iteration} to {iter_dir}")
+
     # ------------------------------------------------------------
     # SAVE METADATA
     # ------------------------------------------------------------
