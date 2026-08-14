@@ -1,23 +1,35 @@
-{
-  "cells": [
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "id": "cell_01_install_deps",
-      "metadata": {},
-      "outputs": [],
-      "source": [
+import os
+import json
+import shutil
+
+notebook_path = os.path.abspath(os.path.join("notebooks", "point_cloud_interactive_viewer.ipynb"))
+fix_notebook_path = os.path.abspath(os.path.join("fix", "point_cloud_interactive_viewer.ipynb"))
+os.makedirs(os.path.dirname(notebook_path), exist_ok=True)
+os.makedirs(os.path.dirname(fix_notebook_path), exist_ok=True)
+
+cells = []
+
+# Cell 1: Install Dependencies
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "id": "cell_01_install_deps",
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# ── Cài Đặt Thư Viện Đọc PLY & Thư Viện Biểu Diễn 3D Trực Quan Plotly ─────────\n",
         "!pip install -q plyfile plotly numpy pandas"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": null,
-      "id": "cell_02_plotly_interactive_pcd",
-      "metadata": {},
-      "outputs": [],
-      "source": [
+    ]
+})
+
+# Cell 2: Plotly 3D Interactive Point Cloud Visualizer (Native VS Code & Colab)
+cells.append({
+    "cell_type": "code",
+    "execution_count": None,
+    "id": "cell_02_plotly_interactive_pcd",
+    "metadata": {},
+    "outputs": [],
+    "source": [
         "# ── KHÂU 1: Hiển Thị Mây Điểm Ban Đầu (Iter 0) Tương Tác 3D Trực Quan ───────────────\n",
         "import os\n",
         "import numpy as np\n",
@@ -173,28 +185,37 @@
         "    display_interactive_point_cloud_plotly(ply_path)\n",
         "else:\n",
         "    print(f\"⚠️ Không tìm thấy file tại {ply_path}. Vui lòng kiểm tra lại thư mục counter_demo_video!\")"
-      ]
-    }
-  ],
-  "metadata": {
-    "kernelspec": {
-      "display_name": "Python 3",
-      "language": "python",
-      "name": "python3"
+    ]
+})
+
+notebook_json = {
+    "cells": cells,
+    "metadata": {
+        "kernelspec": {
+            "display_name": "Python 3",
+            "language": "python",
+            "name": "python3"
+        },
+        "language_info": {
+            "codemirror_mode": {
+                "name": "ipython",
+                "version": 3
+            },
+            "file_extension": ".py",
+            "mimetype": "text/x-python",
+            "name": "python",
+            "nbconvert_exporter": "python",
+            "pygments_lexer": "ipython3",
+            "version": "3.10.12"
+        }
     },
-    "language_info": {
-      "codemirror_mode": {
-        "name": "ipython",
-        "version": 3
-      },
-      "file_extension": ".py",
-      "mimetype": "text/x-python",
-      "name": "python",
-      "nbconvert_exporter": "python",
-      "pygments_lexer": "ipython3",
-      "version": "3.10.12"
-    }
-  },
-  "nbformat": 4,
-  "nbformat_minor": 5
+    "nbformat": 4,
+    "nbformat_minor": 5
 }
+
+with open(notebook_path, "w", encoding="utf-8") as f:
+    json.dump(notebook_json, f, indent=2, ensure_ascii=False)
+
+shutil.copy2(notebook_path, fix_notebook_path)
+
+print(f"Native Plotly 3D Notebook successfully written to:\n- {notebook_path}\n- {fix_notebook_path}")
